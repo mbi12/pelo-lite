@@ -89,6 +89,54 @@ const HUAWEI_P40_APPS = {
     intentUri: 'intent://feed#Intent;scheme=snssdk1233;package=com.zhiliaoapp.musically;end',
     fallbackUrl: 'https://www.tiktok.com'
   },
+  facebook: {
+    name: 'Facebook',
+    icon: '📘',
+    pkg: 'com.facebook.katana',
+    uri: 'fb://facewebmodal/f?href=https://www.facebook.com',
+    intentUri: 'intent://www.facebook.com/#Intent;package=com.facebook.katana;scheme=https;end',
+    fallbackUrl: 'https://m.facebook.com'
+  },
+  messenger: {
+    name: 'Messenger',
+    icon: '💭',
+    pkg: 'com.facebook.orca',
+    uri: 'fb-messenger://threads',
+    intentUri: 'intent://threads/#Intent;package=com.facebook.orca;scheme=fb-messenger;end',
+    fallbackUrl: 'https://www.messenger.com'
+  },
+  snapchat: {
+    name: 'Snapchat',
+    icon: '👻',
+    pkg: 'com.snapchat.android',
+    uri: 'snapchat://',
+    intentUri: 'intent://#Intent;package=com.snapchat.android;scheme=snapchat;end',
+    fallbackUrl: 'https://web.snapchat.com'
+  },
+  twitter: {
+    name: 'X (Twitter)',
+    icon: '𝕏',
+    pkg: 'com.twitter.android',
+    uri: 'twitter://timeline',
+    intentUri: 'intent://timeline#Intent;package=com.twitter.android;scheme=twitter;end',
+    fallbackUrl: 'https://x.com'
+  },
+  gallery: {
+    name: 'Huawei Gallery',
+    icon: '🖼️',
+    pkg: 'com.huawei.photos',
+    uri: 'intent:#Intent;package=com.huawei.photos;end',
+    intentUri: 'intent:#Intent;package=com.huawei.photos;end',
+    fallbackUrl: null
+  },
+  calculator: {
+    name: 'Calculator',
+    icon: '🧮',
+    pkg: 'com.huawei.calculator',
+    uri: 'intent:#Intent;package=com.huawei.calculator;end',
+    intentUri: 'intent:#Intent;package=com.huawei.calculator;end',
+    fallbackUrl: null
+  },
   dialer: {
     name: 'Phone Dialer',
     icon: '📞',
@@ -700,7 +748,10 @@ function parseSegmentBuiltIn(segment, context) {
       ['appgallery', 'appgallery'], ['app gallery', 'appgallery'], ['health', 'huawei_health'],
       ['file', 'files_app'], ['spotify', 'spotify'], ['music', 'spotify'], ['youtube', 'youtube'],
       ['telegram', 'telegram'], ['instagram', 'instagram'], ['insta', 'instagram'],
-      ['tiktok', 'tiktok'], ['phone', 'dialer'], ['dialer', 'dialer'],
+      ['tiktok', 'tiktok'], ['facebook', 'facebook'], ['fb', 'facebook'],
+      ['messenger', 'messenger'], ['snapchat', 'snapchat'], ['snap', 'snapchat'],
+      ['twitter', 'twitter'], ['x', 'twitter'], ['gallery', 'gallery'], ['photo', 'gallery'],
+      ['calc', 'calculator'], ['phone', 'dialer'], ['dialer', 'dialer'],
       ['message', 'messages'], ['sms', 'messages'], ['mail', 'email'],
       ['setting', 'settings'], ['optimizer', 'optimizer']
     ];
@@ -737,7 +788,7 @@ function parseSegmentBuiltIn(segment, context) {
     return { intents, replies };
   }
 
-  if (/^(hi|hey|hello|yo|sup|what can you do)\b/i.test(low)) {
+  if (/^(hi|hie|hey|hello|yo|sup|what can you do)\b/i.test(low)) {
     replies.push(
       `Hey ${context.device.ownerName}! I have full control ready for your **Huawei P40**:\n` +
       `• **Files:** *"Delete all .apk files"*, *"Organize my Downloads"*, *"Restore ..."*\n` +

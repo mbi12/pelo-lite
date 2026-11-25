@@ -1,11 +1,7 @@
-const CACHE_NAME = 'pelo-p40-v2';
-const SHELL_ASSETS = ['/', '/index.html', '/css/styles.css', '/js/orb.js', '/js/hardware.js', '/js/app.js', '/icon.svg'];
+const CACHE_NAME = 'pelo-p40-v4';
 
-self.addEventListener('install', (event) => {
+self.addEventListener('install', () => {
   self.skipWaiting();
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL_ASSETS)).catch(() => {})
-  );
 });
 
 self.addEventListener('activate', (event) => {
@@ -19,8 +15,8 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
-  if (url.pathname.startsWith('/api')) return;
+  if (url.pathname.startsWith('/api') || url.pathname === '/agent.sh') return;
   event.respondWith(
-    fetch(event.request).catch(() => caches.match(event.request))
+    fetch(event.request, { cache: 'no-store' }).catch(() => caches.match(event.request))
   );
 });
