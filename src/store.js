@@ -216,7 +216,7 @@ export const store = {
     return stripSensitiveUser(data);
   },
 
-  async registerUser({ name, email, password, role = 'student', grade = 'Grade 11', linked_student_id = null }) {
+  async registerUser({ name, email, password, role = 'student', grade = 'Grade 11', linked_student_id = null, headline = '', specialties = [] }) {
     const cleanEmail = (email || '').trim().toLowerCase();
     const newUser = {
       id: uid(role === 'tutor' ? 'tut' : role === 'parent' ? 'par' : 'stu'),
@@ -225,6 +225,10 @@ export const store = {
       password_hash: hashPassword(password || 'itutor123'),
       role,
       grade: grade || (role === 'tutor' ? 'Academic Tutor' : role === 'parent' ? 'Parent' : 'Grade 11'),
+      headline: headline || (role === 'tutor' ? `${grade || 'Subject'} Mentor · i-tutor` : ''),
+      specialties: Array.isArray(specialties) && specialties.length ? specialties : role === 'tutor' ? [grade || 'Academic Tutoring'] : [],
+      campus_mode: 'Online & Main Studio',
+      rating: 4.95,
       bio: `Member of i-tutor — Confidence in learning.`,
       linked_student_id: role === 'parent' ? linked_student_id || 'stu-thabo' : null,
       streak_days: 1,
@@ -813,7 +817,7 @@ export const store = {
     return data;
   },
 
-  async sendMessage({ student_id, channel = 'tutor_parent', sender_id, sender_name, sender_role, body }) {
+  async sendMessage({ student_id, channel = 'tutor_parent', sender_id, sender_name, sender_role, recipient_id = null, recipient_name = null, body }) {
     const msg = {
       id: uid('msg'),
       student_id,
@@ -821,6 +825,8 @@ export const store = {
       sender_id,
       sender_name,
       sender_role,
+      recipient_id,
+      recipient_name,
       body: body.trim(),
       created_at: new Date().toISOString()
     };

@@ -55,9 +55,61 @@ export function createSeedData() {
       password_hash: defaultPass,
       role: 'tutor',
       grade: 'Lead Academic Tutor',
+      headline: 'Senior Mathematics & Physical Sciences Mentor · Grades 10–12',
+      specialties: ['Mathematics', 'Physical Sciences', 'Quadratics & Trig', 'Mechanics & Circuits'],
+      campus_mode: 'Online & Main Studio',
+      rating: 4.98,
       bio: 'Senior Mathematics & Physical Sciences Specialist at i-tutor. Turning complex exam concepts into calm, repeatable steps.',
       linked_student_id: null,
       streak_days: 30,
+      confidence_mood: 'confident'
+    },
+    {
+      id: 'tut-sipho',
+      name: 'Mr. Sipho Ndlovu',
+      email: 'sipho@itutor.academy',
+      password_hash: defaultPass,
+      role: 'tutor',
+      grade: 'Accounting & Commerce Mentor',
+      headline: 'Accounting & Financial Literacy Specialist · Grades 10–12',
+      specialties: ['Accounting', 'Year-End Adjustments', 'Balance Sheets', 'Financial Ratios'],
+      campus_mode: 'Online & Main Studio',
+      rating: 4.94,
+      bio: 'Chartered Accounting educator turning General Ledgers, Year-End Adjustments, and Statements into clear logical steps.',
+      linked_student_id: null,
+      streak_days: 22,
+      confidence_mood: 'confident'
+    },
+    {
+      id: 'tut-claire',
+      name: 'Mrs. Claire Jacobs',
+      email: 'claire@itutor.academy',
+      password_hash: defaultPass,
+      role: 'tutor',
+      grade: 'English & Essay Mastery Mentor',
+      headline: 'English Home/FAL & Literature Essay Specialist · Grades 8–12',
+      specialties: ['English & Exam Mastery', 'PEEL Literature Essays', 'Comprehension & Tone', 'Grammar Editing'],
+      campus_mode: 'Live Online Studio',
+      rating: 4.96,
+      bio: 'Literature, comprehension, and exam essay coach helping learners write distinction-grade PEEL arguments with confidence.',
+      linked_student_id: null,
+      streak_days: 19,
+      confidence_mood: 'confident'
+    },
+    {
+      id: 'sub-tutor-life',
+      name: 'Dr. Kabelo Moyo',
+      email: 'kabelo@itutor.academy',
+      password_hash: defaultPass,
+      role: 'tutor',
+      grade: 'Life Sciences & Biology Mentor',
+      headline: 'Life Sciences & Exam Diagrams Specialist · Grades 10–12',
+      specialties: ['Life Sciences', 'Genetics & DNA', 'Human Systems', 'Past Paper Drills'],
+      campus_mode: 'Online & Main Studio',
+      rating: 4.92,
+      bio: 'Genetics, Meiosis, Human Nervous/Endocrine Systems, and Scientific Investigation exam coach.',
+      linked_student_id: null,
+      streak_days: 15,
       confidence_mood: 'confident'
     },
     {
@@ -133,6 +185,20 @@ export function createSeedData() {
         { id: 'top-eng-2', name: 'PEEL Literature Essay Structure', summary: 'Crafting sharp thesis statements and evidence-backed body paragraphs.' },
         { id: 'top-eng-3', name: 'Summary & Synthesis Writing', summary: 'Extracting 7 core points accurately in own words within strict word limits.' },
         { id: 'top-eng-4', name: 'Language, Active/Passive & Editing', summary: 'Concord, reported speech, punctuation nuances, and common exam traps.' }
+      ]
+    },
+    {
+      id: 'sub-life',
+      name: 'Life Sciences',
+      code: 'LIFE-11',
+      grade_level: 'Grades 10–12',
+      tutor_name: 'Dr. Kabelo Moyo',
+      description: 'Genetics & Inheritance, Meiosis, Human Endocrine & Nervous Systems, and Scientific Investigation skills.',
+      icon: 'leaf',
+      topics: [
+        { id: 'top-life-1', name: 'Meiosis & DNA Replication', summary: 'Chromosome behaviour, crossing over, genetic variation, and karyotypes.' },
+        { id: 'top-life-2', name: 'Genetics & Punnett Squares', summary: 'Monohybrid, sex-linked, and blood-group inheritance crosses.' },
+        { id: 'top-life-3', name: 'Human Nervous & Endocrine Systems', summary: 'Reflex arcs, synapses, negative feedback homeostasis, and hormones.' }
       ]
     }
   ];

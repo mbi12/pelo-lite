@@ -316,16 +316,18 @@ apiRouter.post('/announcements', async (req, res) => {
 
 apiRouter.post('/messages', async (req, res) => {
   try {
-    const { student_id, channel, sender_id, sender_name, sender_role, body } = req.body || {};
+    const { student_id, channel, sender_id, sender_name, sender_role, recipient_id, recipient_name, body } = req.body || {};
     if (!student_id || !sender_id || !body) {
       return res.status(400).json({ error: 'Message content is required.' });
     }
     const message = await store.sendMessage({
       student_id,
-      channel: channel || 'tutor_parent',
+      channel: channel || 'direct',
       sender_id,
       sender_name: sender_name || 'Member',
       sender_role: sender_role || 'student',
+      recipient_id: recipient_id || null,
+      recipient_name: recipient_name || null,
       body
     });
     res.status(201).json({ message });

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'itutor-v1';
+const CACHE_NAME = 'itutor-v2';
 const STATIC_ASSETS = ['/', '/index.html', '/css/styles.css', '/js/app.js', '/js/logo.js', '/icon.svg'];
 
 self.addEventListener('install', (event) => {
