@@ -1,11 +1,11 @@
 {
   "name": "i-tutor — Confidence in learning",
   "short_name": "i-tutor",
-  "description": "Student, Tutor & Parent academic platform for building confidence in learning.",
+  "description": "i-tutor standalone offline-first learning application.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#F6F1E7",
-  "theme_color": "#F6F1E7",
+  "background_color": "#EFE7DC",
+  "theme_color": "#EFE7DC",
   "icons": [
     {
       "src": "/icon.svg",
