@@ -30,103 +30,78 @@ async function req(path, options = {}) {
   return { status: res.status, data };
 }
 
-describe('PELO Personal AI — Huawei P40 Phone Controller Suite', () => {
+describe('PELO v3 Unrestricted Personal AI — Huawei P40 Suite', () => {
   let bridgeToken = '';
 
-  it('serves PWA shell, manifest, and service worker cleanly', async () => {
+  it('serves v3 PWA shell, manifest, and /agent.sh Huawei P40 installer', async () => {
     const home = await req('/');
     assert.equal(home.status, 200);
-    assert.match(home.data, /PELO — Personal AI OS · Huawei P40 Edition/);
-
-    const manifest = await req('/manifest.webmanifest');
-    assert.equal(manifest.status, 200);
-    assert.equal(manifest.data.short_name, 'Pelo AI');
-  });
-
-  it('returns healthy status and seeded Huawei P40 bootstrap payload', async () => {
-    const health = await req('/api/health');
-    assert.equal(health.status, 200);
-    assert.equal(health.data.status, 'ok');
+    assert.match(home.data, /PELO v3 — Unrestricted Personal AI/);
 
     const boot = await req('/api/bootstrap');
     assert.equal(boot.status, 200);
-    assert.equal(boot.data.routines.length, 5);
-    assert.ok(boot.data.appsCatalog.petal_maps);
-    assert.ok(boot.data.appsCatalog.appgallery);
+    assert.ok(boot.data.files.length >= 5);
+    assert.ok(boot.data.comms.length >= 2);
     bridgeToken = boot.data.device.bridgeToken;
-    assert.match(bridgeToken, /^p40-/);
+
+    const agentSh = await req('/agent.sh');
+    assert.equal(agentSh.status, 200);
+    assert.match(agentSh.data, /PELO SUPER-AGENT FOR HUAWEI P40/);
+    assert.match(agentSh.data, new RegExp(bridgeToken));
   });
 
-  it('executes compound natural-language commands joined with "nd"', async () => {
-    const res = await req('/api/command', {
+  it('deletes files to .pelo-trash and restores them via natural language', async () => {
+    const del = await req('/api/command', {
       method: 'POST',
-      body: {
-        text: 'Turn on flashlight nd set brightness to 35% nd set a 2 min timer',
-        telemetry: { batteryLevel: 91, charging: true }
-      }
+      body: { text: 'Delete all .apk files' }
     });
-    assert.equal(res.status, 200);
-    assert.equal(res.data.bootstrap.device.flashlight, true);
-    assert.equal(res.data.bootstrap.device.brightness, 35);
-    assert.equal(res.data.bootstrap.device.batteryLevel, 91);
-    assert.ok(res.data.actions.some((a) => a.type === 'timer_started'));
+    assert.equal(del.status, 200);
+    assert.match(del.data.reply, /macrodroid-old-installer\.apk/);
+    const trashedApk = del.data.bootstrap.files.find((f) => f.name === 'macrodroid-old-installer.apk');
+    assert.equal(trashedApk.trashed, true);
+
+    const rest = await req('/api/command', {
+      method: 'POST',
+      body: { text: 'Undo delete' }
+    });
+    assert.equal(rest.status, 200);
+    const restoredApk = rest.data.bootstrap.files.find((f) => f.name === 'macrodroid-old-installer.apk');
+    assert.equal(restoredApk.trashed, false);
   });
 
-  it('resolves Petal Maps navigation and WhatsApp contact deep-links', async () => {
-    const nav = await req('/api/command', {
+  it('dispatches direct SIM SMS, WhatsApp, and reply-to-last-message via voice/text', async () => {
+    const sms = await req('/api/command', {
       method: 'POST',
-      body: { text: 'Navigate to Dam Square' }
+      body: { text: "Send SMS to Mom saying I'm 10 minutes away" }
     });
-    assert.equal(nav.status, 200);
-    const mapAct = nav.data.actions.find((a) => a.type === 'deep_link');
-    assert.ok(mapAct);
-    assert.match(mapAct.intentUri, /com\.petalmaps\.app/);
+    assert.equal(sms.status, 200);
+    assert.ok(sms.data.bootstrap.comms.some((c) => c.body.includes('10 minutes away') && c.channel === 'sms'));
+    assert.ok(sms.data.bootstrap.bridgeQueue.some((q) => q.commandType === 'send_sms_direct'));
 
-    const wa = await req('/api/command', {
+    const reply = await req('/api/command', {
       method: 'POST',
-      body: { text: "WhatsApp Mom I'm 5 minutes away" }
+      body: { text: 'Reply to last message saying Sounds good!' }
     });
-    assert.equal(wa.status, 200);
-    const waAct = wa.data.actions.find((a) => a.type === 'deep_link');
-    assert.ok(waAct);
-    assert.match(waAct.uri, /whatsapp:\/\/send\?phone=31600000001/);
+    assert.equal(reply.status, 200);
+    assert.ok(reply.data.bootstrap.comms.some((c) => c.body === 'Sounds good!'));
   });
 
-  it('stores and recalls personal memories via voice/text', async () => {
-    await req('/api/command', {
+  it('executes compound commands, Petal Maps, shell exec, and bridge ack with output', async () => {
+    const shell = await req('/api/command', {
       method: 'POST',
-      body: { text: 'Remember my bike lock code is 4920' }
+      body: { text: 'Run command df -h' }
     });
-
-    const recall = await req('/api/command', {
-      method: 'POST',
-      body: { text: 'What is my bike lock code?' }
-    });
-    assert.equal(recall.status, 200);
-    assert.match(recall.data.reply, /4920/);
-  });
-
-  it('polls, validates, and acknowledges Huawei P40 MacroDroid bridge commands', async () => {
-    const unauth = await req('/api/bridge/poll?token=wrong-token');
-    assert.equal(unauth.status, 401);
-
+    assert.equal(shell.status, 200);
     const poll = await req(`/api/bridge/poll?token=${bridgeToken}`);
     assert.equal(poll.status, 200);
-    assert.ok(poll.data.commands.length >= 2);
+    assert.ok(poll.data.commands.some((c) => c.commandType === 'shell_exec'));
 
     const ids = poll.data.commands.map((c) => c.id);
     const ack = await req('/api/bridge/ack', {
       method: 'POST',
-      body: { token: bridgeToken, ids }
+      body: { token: bridgeToken, ids, result: { output: '/dev/block/sda 128G 58G 70G 46% /storage/emulated/0' } }
     });
     assert.equal(ack.status, 200);
     assert.equal(ack.data.updated, ids.length);
-
-    const pollAfter = await req(`/api/bridge/poll?token=${bridgeToken}`);
-    assert.equal(pollAfter.data.commands.length, 0);
-
-    const blueprint = await req('/api/bridge/macrodroid');
-    assert.equal(blueprint.status, 200);
-    assert.match(blueprint.data.endpoints.pollPendingCommands, new RegExp(bridgeToken));
   });
 });

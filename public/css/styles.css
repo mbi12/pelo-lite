@@ -739,11 +739,59 @@ input:focus, select:focus {
 /* ========================================================================== */
 .bottom-dock {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  padding: 6px 8px calc(8px + env(safe-area-inset-bottom, 0px));
+  grid-template-columns: repeat(6, 1fr);
+  padding: 6px 6px calc(8px + env(safe-area-inset-bottom, 0px));
   background: rgba(8, 11, 24, 0.94);
   border-top: 1px solid var(--border-subtle);
   backdrop-filter: blur(18px);
+}
+
+.seg-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  padding: 4px;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid var(--border-subtle);
+}
+
+.seg-btn {
+  padding: 8px 10px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.seg-btn.active {
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.24), rgba(99, 102, 241, 0.28));
+  color: var(--text-main);
+  border: 1px solid var(--border-glow);
+}
+
+.subpane {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.storage-bar {
+  width: 100%;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(5, 7, 15, 0.85);
+  overflow: hidden;
+  margin-top: 6px;
+}
+
+.storage-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--cyan), var(--emerald));
+  border-radius: 999px;
 }
 
 .nav-tab {

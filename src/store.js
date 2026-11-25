@@ -75,14 +75,39 @@ const DEFAULT_ROUTINES = [
   }
 ];
 
+const STARTER_FILES = [
+  { path: '/storage/emulated/0/Download/macrodroid-old-installer.apk', name: 'macrodroid-old-installer.apk', folder: 'Download', size_bytes: 48234496, mime_kind: 'apk' },
+  { path: '/storage/emulated/0/Download/petal-maps-offline-cache.tmp', name: 'petal-maps-offline-cache.tmp', folder: 'Download', size_bytes: 194510848, mime_kind: 'temp' },
+  { path: '/storage/emulated/0/Download/boarding-pass-amsterdam.pdf', name: 'boarding-pass-amsterdam.pdf', folder: 'Download', size_bytes: 842110, mime_kind: 'pdf' },
+  { path: '/storage/emulated/0/Download/invoice-november.pdf', name: 'invoice-november.pdf', folder: 'Download', size_bytes: 412800, mime_kind: 'pdf' },
+  { path: '/storage/emulated/0/DCIM/Screenshots/Screenshot_20261124_EMUI.jpg', name: 'Screenshot_20261124_EMUI.jpg', folder: 'Screenshots', size_bytes: 2841200, mime_kind: 'image' },
+  { path: '/storage/emulated/0/DCIM/Screenshots/Screenshot_20261120_duplicate.jpg', name: 'Screenshot_20261120_duplicate.jpg', folder: 'Screenshots', size_bytes: 2519040, mime_kind: 'image' },
+  { path: '/storage/emulated/0/Documents/wifi-backup-codes.txt', name: 'wifi-backup-codes.txt', folder: 'Documents', size_bytes: 2048, mime_kind: 'text' }
+];
+
+const STARTER_COMMS = [
+  { channel: 'sms', direction: 'inbound', contact_name: 'Mom', address: '+31600000001', body: 'Let me know when you are heading back!', status: 'received' },
+  { channel: 'whatsapp', direction: 'inbound', contact_name: 'Alex', address: '+31600000002', body: 'Yo are we still meeting at 7?', status: 'received' }
+];
+
 const WELCOME_MSG =
-  "Hey! I'm **Pelo**, your personal AI controller built for your **Huawei P40**. " +
-  "Try telling me things like:\n" +
-  "• *\"Turn on flashlight nd set a 3 min timer\"*\n" +
-  "• *\"Navigate to Dam Square on Petal Maps\"*\n" +
-  "• *\"Run Heading Out routine\"*\n" +
-  "• *\"Remember my gate number is B14\"*\n" +
-  "• *\"WhatsApp Mom I'm on my way home\"*";
+  "Hey! I'm **Pelo**, your unrestricted personal AI OS for your **Huawei P40**.\n" +
+  "I can control **files, messages, calls, apps, hardware & shell commands**:\n" +
+  "• *\"Delete all .apk files in Downloads\"* or *\"Delete Screenshot_20261120_duplicate.jpg\"*\n" +
+  "• *\"Send SMS to Mom saying I'm on my way home\"*\n" +
+  "• *\"WhatsApp Alex yeah see u at 7\"* or *\"Reply to last message saying Be right there\"*\n" +
+  "• *\"Organize my Downloads folder\"* or *\"Turn on flashlight nd set a 3m timer\"*";
+
+function guessMimeKind(name) {
+  const ext = (String(name).split('.').pop() || '').toLowerCase();
+  if (['apk', 'xapk'].includes(ext)) return 'apk';
+  if (['tmp', 'log', 'bak', 'cache'].includes(ext)) return 'temp';
+  if (['pdf', 'doc', 'docx', 'txt', 'md'].includes(ext)) return 'pdf';
+  if (['jpg', 'jpeg', 'png', 'webp', 'gif', 'heic'].includes(ext)) return 'image';
+  if (['mp4', 'mkv', 'mov', 'mp3', 'wav', 'm4a'].includes(ext)) return 'media';
+  if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) return 'archive';
+  return 'file';
+}
 
 function mapDeviceRow(r) {
   if (!r) return null;
@@ -105,6 +130,11 @@ function mapDeviceRow(r) {
     networkType: r.network_type,
     voiceReply: Boolean(r.voice_reply),
     autoExecute: Boolean(r.auto_execute),
+    godMode: r.god_mode === undefined ? true : Boolean(r.god_mode),
+    confirmDestructive: Boolean(r.confirm_destructive),
+    storageTotalGb: Number(r.storage_total_gb ?? 128),
+    storageUsedGb: Number(r.storage_used_gb ?? 58.4),
+    clipboardText: r.clipboard_text || '',
     bridgeToken: r.bridge_token,
     lastBridgePing: lastPing,
     bridgeOnline,
@@ -189,10 +219,59 @@ function mapBridgeRow(r) {
     commandType: r.command_type,
     label: r.label,
     payload: typeof r.payload_json === 'string' ? JSON.parse(r.payload_json || '{}') : (r.payload_json || {}),
+    result: typeof r.result_json === 'string' ? JSON.parse(r.result_json || '{}') : (r.result_json || {}),
     status: r.status,
     createdAt: r.created_at,
     executedAt: r.executed_at || null
   };
+}
+
+function mapFileRow(r) {
+  return {
+    id: Number(r.id),
+    path: r.path,
+    name: r.name,
+    folder: r.folder || 'Download',
+    sizeBytes: Number(r.size_bytes || 0),
+    mimeKind: r.mime_kind || guessMimeKind(r.name),
+    trashed: Boolean(r.trashed),
+    originalPath: r.original_path || null,
+    source: r.source || 'p40-storage',
+    updatedAt: r.updated_at
+  };
+}
+
+function mapCommRow(r) {
+  return {
+    id: Number(r.id),
+    channel: r.channel || 'sms',
+    direction: r.direction || 'outbound',
+    contactName: r.contact_name || '',
+    address: r.address || '',
+    body: r.body,
+    status: r.status || 'sent',
+    createdAt: r.created_at
+  };
+}
+
+function matchFileQuery(file, { id, query, extension, folder, includeTrashed = false }) {
+  if (!includeTrashed && file.trashed) return false;
+  if (id && Number(file.id) === Number(id)) return true;
+  if (extension) {
+    const cleanExt = extension.replace(/^\./, '').toLowerCase();
+    if (cleanExt === 'junk') {
+      return file.mimeKind === 'apk' || file.mimeKind === 'temp' || /\.(apk|tmp|log|bak|cache)$/i.test(file.name);
+    }
+    return file.name.toLowerCase().endsWith(`.${cleanExt}`);
+  }
+  if (folder && !query) {
+    return file.folder.toLowerCase().includes(folder.toLowerCase());
+  }
+  if (query) {
+    const q = query.toLowerCase();
+    return file.name.toLowerCase().includes(q) || file.path.toLowerCase().includes(q);
+  }
+  return false;
 }
 
 // ============================================================================
@@ -231,27 +310,14 @@ class SupabaseStore {
     const rows = await this.req('pelo_device_state?id=eq.1&select=*');
     if (!rows || rows.length === 0) {
       const token = `p40-${crypto.randomBytes(4).toString('hex')}`;
-      await this.req('pelo_device_state', {
-        method: 'POST',
-        body: { id: 1, bridge_token: token }
-      });
-
-      await this.req('pelo_messages', {
-        method: 'POST',
-        body: { role: 'assistant', content: WELCOME_MSG, actions_json: [], source: 'system' }
-      });
-
+      await this.req('pelo_device_state', { method: 'POST', body: { id: 1, bridge_token: token } });
+      await this.req('pelo_messages', { method: 'POST', body: { role: 'assistant', content: WELCOME_MSG, actions_json: [], source: 'system' } });
       await this.req('pelo_routines', {
         method: 'POST',
         body: DEFAULT_ROUTINES.map((rt) => ({
-          name: rt.name,
-          trigger_phrase: rt.triggerPhrase,
-          icon: rt.icon,
-          description: rt.description,
-          steps_json: rt.steps
+          name: rt.name, trigger_phrase: rt.triggerPhrase, icon: rt.icon, description: rt.description, steps_json: rt.steps
         }))
       });
-
       await this.req('pelo_contacts', {
         method: 'POST',
         body: [
@@ -259,28 +325,38 @@ class SupabaseStore {
           { name: 'Alex', relationship: 'Best Friend', phone: '+31600000002', whatsapp: '+31600000002', favorite: true }
         ]
       });
-
       await this.req('pelo_alarms', {
         method: 'POST',
         body: [{ label: 'Morning Wake Up', time_hhmm: '07:30', days: 'Weekdays', enabled: false, kind: 'alarm' }]
       });
-
       await this.req('pelo_tasks', {
         method: 'POST',
-        body: [{ title: 'Tap P40 Bridge tab to pair MacroDroid for deep system toggles', due_text: 'Optional upgrade', priority: 'high' }]
+        body: [{ title: 'Run 1-line Huawei P40 Super-Agent in Termux for full storage & background SIM SMS control', due_text: 'P40 Bridge tab', priority: 'high' }]
       });
-
       await this.req('pelo_memories', {
         method: 'POST',
         body: [{ category: 'device', fact: 'Primary phone is a Huawei P40 running EMUI / HMS (prefers Petal Maps & AppGallery).' }]
       });
     }
+
+    // Seed starter file index & starter comms if empty (e.g. upgraded from v1 schema)
+    const [existingFiles, existingComms] = await Promise.all([
+      this.req('pelo_files_index?select=id&limit=1'),
+      this.req('pelo_comms_log?select=id&limit=1')
+    ]);
+    if (!existingFiles || existingFiles.length === 0) {
+      await this.req('pelo_files_index', { method: 'POST', body: STARTER_FILES });
+    }
+    if (!existingComms || existingComms.length === 0) {
+      await this.req('pelo_comms_log', { method: 'POST', body: STARTER_COMMS });
+    }
+
     this.seeded = true;
   }
 
   async getBootstrap() {
     await this.ensureSeeded();
-    const [devRows, msgs, contacts, tasks, alarms, memories, routines, queue] = await Promise.all([
+    const [devRows, msgs, contacts, tasks, alarms, memories, routines, queue, files, comms] = await Promise.all([
       this.req('pelo_device_state?id=eq.1&select=*'),
       this.req('pelo_messages?select=*&order=id.desc&limit=40'),
       this.req('pelo_contacts?select=*&order=id.asc'),
@@ -288,7 +364,9 @@ class SupabaseStore {
       this.req('pelo_alarms?select=*&order=id.desc'),
       this.req('pelo_memories?select=*&order=id.desc'),
       this.req('pelo_routines?select=*&order=id.asc'),
-      this.req('pelo_bridge_queue?select=*&order=id.desc&limit=25')
+      this.req('pelo_bridge_queue?select=*&order=id.desc&limit=25'),
+      this.req('pelo_files_index?select=*&order=trashed.asc,size_bytes.desc&limit=80'),
+      this.req('pelo_comms_log?select=*&order=id.desc&limit=30')
     ]);
 
     return {
@@ -300,7 +378,9 @@ class SupabaseStore {
       alarms: (alarms || []).map(mapAlarmRow),
       memories: (memories || []).map(mapMemoryRow),
       routines: (routines || []).map(mapRoutineRow),
-      bridgeQueue: (queue || []).map(mapBridgeRow)
+      bridgeQueue: (queue || []).map(mapBridgeRow),
+      files: (files || []).map(mapFileRow),
+      comms: (comms || []).map(mapCommRow)
     };
   }
 
@@ -330,6 +410,11 @@ class SupabaseStore {
       networkType: 'network_type',
       voiceReply: 'voice_reply',
       autoExecute: 'auto_execute',
+      godMode: 'god_mode',
+      confirmDestructive: 'confirm_destructive',
+      storageTotalGb: 'storage_total_gb',
+      storageUsedGb: 'storage_used_gb',
+      clipboardText: 'clipboard_text',
       lastBridgePing: 'last_bridge_ping'
     };
     for (const [k, col] of Object.entries(map)) {
@@ -381,7 +466,6 @@ class SupabaseStore {
     const dbPatch = {};
     if (patch.completed !== undefined) dbPatch.completed = Boolean(patch.completed);
     if (patch.title !== undefined) dbPatch.title = String(patch.title);
-    if (patch.dueText !== undefined) dbPatch.due_text = String(patch.dueText);
     const rows = await this.req(`pelo_tasks?id=eq.${Number(id)}`, { method: 'PATCH', body: dbPatch });
     return rows?.[0] ? mapTaskRow(rows[0]) : null;
   }
@@ -403,8 +487,6 @@ class SupabaseStore {
   async updateAlarm(id, patch) {
     const dbPatch = {};
     if (patch.enabled !== undefined) dbPatch.enabled = Boolean(patch.enabled);
-    if (patch.label !== undefined) dbPatch.label = String(patch.label);
-    if (patch.timeHhmm !== undefined) dbPatch.time_hhmm = String(patch.timeHhmm);
     const rows = await this.req(`pelo_alarms?id=eq.${Number(id)}`, { method: 'PATCH', body: dbPatch });
     return rows?.[0] ? mapAlarmRow(rows[0]) : null;
   }
@@ -416,10 +498,7 @@ class SupabaseStore {
 
   async addMemory({ category = 'personal', fact }) {
     await this.ensureSeeded();
-    const rows = await this.req('pelo_memories', {
-      method: 'POST',
-      body: { category, fact }
-    });
+    const rows = await this.req('pelo_memories', { method: 'POST', body: { category, fact } });
     return mapMemoryRow(rows[0]);
   }
 
@@ -441,10 +520,7 @@ class SupabaseStore {
     const rows = await this.req(`pelo_routines?id=eq.${Number(id)}&select=*`);
     if (!rows?.[0]) return null;
     const nextCount = Number(rows[0].run_count || 0) + 1;
-    const updated = await this.req(`pelo_routines?id=eq.${Number(id)}`, {
-      method: 'PATCH',
-      body: { run_count: nextCount }
-    });
+    const updated = await this.req(`pelo_routines?id=eq.${Number(id)}`, { method: 'PATCH', body: { run_count: nextCount } });
     return mapRoutineRow(updated[0]);
   }
 
@@ -453,6 +529,141 @@ class SupabaseStore {
     return { deleted: true, id: Number(id) };
   }
 
+  // FILE MANAGEMENT (Huawei P40 Storage Index + Trash + Create + Organize)
+  async listFiles() {
+    await this.ensureSeeded();
+    const rows = await this.req('pelo_files_index?select=*&order=trashed.asc,size_bytes.desc&limit=80');
+    return (rows || []).map(mapFileRow);
+  }
+
+  async createFileEntry({ name, folder = 'Documents', sizeBytes = 512, path: customPath }) {
+    await this.ensureSeeded();
+    const fpath = customPath || `/storage/emulated/0/${folder}/${name}`;
+    const rows = await this.req('pelo_files_index?on_conflict=path', {
+      method: 'POST',
+      prefer: 'resolution=merge-duplicates,return=representation',
+      body: {
+        path: fpath,
+        name,
+        folder,
+        size_bytes: sizeBytes,
+        mime_kind: guessMimeKind(name),
+        trashed: false
+      }
+    });
+    return mapFileRow(rows[0]);
+  }
+
+  async deleteFiles({ id, query, extension, folder, permanent = false }) {
+    const all = await this.listFiles();
+    const targets = all.filter((f) => matchFileQuery(f, { id, query, extension, folder, includeTrashed: permanent }));
+    if (!targets.length) return { count: 0, freedBytes: 0, affected: [] };
+
+    const ids = targets.map((t) => t.id).join(',');
+    const freedBytes = targets.reduce((sum, t) => sum + t.sizeBytes, 0);
+
+    if (permanent) {
+      await this.req(`pelo_files_index?id=in.(${ids})`, { method: 'DELETE', prefer: 'return=minimal' });
+    } else {
+      for (const t of targets) {
+        await this.req(`pelo_files_index?id=eq.${t.id}`, {
+          method: 'PATCH',
+          prefer: 'return=minimal',
+          body: {
+            trashed: true,
+            original_path: t.path,
+            folder: '.pelo-trash',
+            updated_at: new Date().toISOString()
+          }
+        });
+      }
+    }
+    return { count: targets.length, freedBytes, affected: targets };
+  }
+
+  async restoreFiles({ id, query } = {}) {
+    const all = await this.listFiles();
+    const trashed = all.filter((f) => f.trashed && (!id && !query ? true : (id ? f.id === Number(id) : f.name.toLowerCase().includes(query.toLowerCase()))));
+    for (const t of trashed) {
+      const origFolder = t.originalPath ? path.basename(path.dirname(t.originalPath)) : 'Download';
+      await this.req(`pelo_files_index?id=eq.${t.id}`, {
+        method: 'PATCH',
+        prefer: 'return=minimal',
+        body: { trashed: false, folder: origFolder, updated_at: new Date().toISOString() }
+      });
+    }
+    return { count: trashed.length, restored: trashed };
+  }
+
+  async emptyTrash() {
+    const all = await this.listFiles();
+    const trashed = all.filter((f) => f.trashed);
+    if (trashed.length) {
+      await this.req('pelo_files_index?trashed=eq.true', { method: 'DELETE', prefer: 'return=minimal' });
+    }
+    return { count: trashed.length };
+  }
+
+  async organizeDownloads() {
+    const all = await this.listFiles();
+    const dl = all.filter((f) => !f.trashed && f.folder === 'Download');
+    const bucketMap = { pdf: 'Download/Documents', image: 'Download/Images', apk: 'Download/APKs', archive: 'Download/Archives', temp: 'Download/Temp' };
+    for (const f of dl) {
+      const targetFolder = bucketMap[f.mimeKind] || 'Download/Other';
+      await this.req(`pelo_files_index?id=eq.${f.id}`, {
+        method: 'PATCH',
+        prefer: 'return=minimal',
+        body: { folder: targetFolder, updated_at: new Date().toISOString() }
+      });
+    }
+    return { movedCount: dl.length };
+  }
+
+  async syncAgentFiles(files = []) {
+    if (!Array.isArray(files) || !files.length) return;
+    await this.req('pelo_files_index?trashed=eq.false', { method: 'DELETE', prefer: 'return=minimal' });
+    const rows = files.slice(0, 80).map((f) => ({
+      path: f.path,
+      name: f.name,
+      folder: f.folder || 'Download',
+      size_bytes: Number(f.sizeBytes || 0),
+      mime_kind: guessMimeKind(f.name),
+      trashed: false,
+      source: 'p40-live-agent'
+    }));
+    await this.req('pelo_files_index?on_conflict=path', {
+      method: 'POST',
+      prefer: 'resolution=merge-duplicates,return=minimal',
+      body: rows
+    });
+  }
+
+  // COMMS LOG (SMS / WhatsApp / Telegram / Email)
+  async logComm({ channel = 'sms', direction = 'outbound', contactName = '', address = '', body, status = 'sent_direct' }) {
+    await this.ensureSeeded();
+    const rows = await this.req('pelo_comms_log', {
+      method: 'POST',
+      body: { channel, direction, contact_name: contactName, address, body, status }
+    });
+    return mapCommRow(rows[0]);
+  }
+
+  async syncInboxSms(smsArray = []) {
+    if (!Array.isArray(smsArray) || !smsArray.length) return;
+    for (const item of smsArray.slice(0, 8)) {
+      if (!item.body) continue;
+      await this.logComm({
+        channel: 'sms',
+        direction: item.type === 'sent' ? 'outbound' : 'inbound',
+        contactName: item.sender || item.number || 'SMS',
+        address: item.number || '',
+        body: String(item.body).slice(0, 500),
+        status: 'synced_p40'
+      });
+    }
+  }
+
+  // BRIDGE QUEUE
   async enqueueBridgeCommand({ commandType, label, payload = {} }) {
     await this.ensureSeeded();
     const rows = await this.req('pelo_bridge_queue', {
@@ -464,24 +675,18 @@ class SupabaseStore {
 
   async pollBridgeCommands(token) {
     const dev = await this.getDeviceState();
-    if (token && token !== dev.bridgeToken) {
-      return { authorized: false };
-    }
+    if (token && token !== dev.bridgeToken) return { authorized: false };
     await this.updateDeviceState({ lastBridgePing: new Date().toISOString() });
     const rows = await this.req('pelo_bridge_queue?status=eq.pending&select=*&order=id.asc&limit=15');
-    return {
-      authorized: true,
-      commands: (rows || []).map(mapBridgeRow)
-    };
+    return { authorized: true, commands: (rows || []).map(mapBridgeRow) };
   }
 
-  async ackBridgeCommands(ids = [], status = 'executed') {
-    if (!ids.length) return { updated: 0 };
+  async ackBridgeCommands(ids = [], status = 'executed', result = {}) {
     const cleanIds = ids.map((x) => Number(x)).filter(Boolean);
     if (!cleanIds.length) return { updated: 0 };
     await this.req(`pelo_bridge_queue?id=in.(${cleanIds.join(',')})`, {
       method: 'PATCH',
-      body: { status, executed_at: new Date().toISOString() },
+      body: { status, result_json: result || {}, executed_at: new Date().toISOString() },
       prefer: 'return=minimal'
     });
     return { updated: cleanIds.length };
@@ -502,15 +707,8 @@ class LocalSqliteStore {
       this.initSchema();
     } else {
       this.mem = {
-        device: null,
-        messages: [],
-        contacts: [],
-        tasks: [],
-        alarms: [],
-        memories: [],
-        routines: [],
-        queue: [],
-        seq: 1
+        device: null, messages: [], contacts: [], tasks: [], alarms: [],
+        memories: [], routines: [], queue: [], files: [], comms: [], seq: 1
       };
     }
     this.seedSync();
@@ -536,6 +734,11 @@ class LocalSqliteStore {
         network_type TEXT NOT NULL DEFAULT '4G/Wi-Fi',
         voice_reply INTEGER NOT NULL DEFAULT 1,
         auto_execute INTEGER NOT NULL DEFAULT 1,
+        god_mode INTEGER NOT NULL DEFAULT 1,
+        confirm_destructive INTEGER NOT NULL DEFAULT 0,
+        storage_total_gb REAL NOT NULL DEFAULT 128,
+        storage_used_gb REAL NOT NULL DEFAULT 58.4,
+        clipboard_text TEXT NOT NULL DEFAULT '',
         bridge_token TEXT NOT NULL,
         last_bridge_ping TEXT,
         updated_at TEXT NOT NULL
@@ -598,11 +801,47 @@ class LocalSqliteStore {
         command_type TEXT NOT NULL,
         label TEXT NOT NULL,
         payload_json TEXT NOT NULL DEFAULT '{}',
+        result_json TEXT NOT NULL DEFAULT '{}',
         status TEXT NOT NULL DEFAULT 'pending',
         created_at TEXT NOT NULL,
         executed_at TEXT
       );
+      CREATE TABLE IF NOT EXISTS pelo_files_index (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        path TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        folder TEXT NOT NULL DEFAULT 'Download',
+        size_bytes INTEGER NOT NULL DEFAULT 0,
+        mime_kind TEXT NOT NULL DEFAULT 'file',
+        trashed INTEGER NOT NULL DEFAULT 0,
+        original_path TEXT,
+        source TEXT NOT NULL DEFAULT 'p40-storage',
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS pelo_comms_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        channel TEXT NOT NULL DEFAULT 'sms',
+        direction TEXT NOT NULL DEFAULT 'outbound',
+        contact_name TEXT NOT NULL DEFAULT '',
+        address TEXT NOT NULL DEFAULT '',
+        body TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'queued_agent',
+        created_at TEXT NOT NULL
+      );
     `);
+
+    // Ensure columns exist if upgrading an older local SQLite DB
+    const safeAlter = [
+      'ALTER TABLE pelo_device_state ADD COLUMN god_mode INTEGER NOT NULL DEFAULT 1',
+      'ALTER TABLE pelo_device_state ADD COLUMN confirm_destructive INTEGER NOT NULL DEFAULT 0',
+      'ALTER TABLE pelo_device_state ADD COLUMN storage_total_gb REAL NOT NULL DEFAULT 128',
+      'ALTER TABLE pelo_device_state ADD COLUMN storage_used_gb REAL NOT NULL DEFAULT 58.4',
+      "ALTER TABLE pelo_device_state ADD COLUMN clipboard_text TEXT NOT NULL DEFAULT ''",
+      "ALTER TABLE pelo_bridge_queue ADD COLUMN result_json TEXT NOT NULL DEFAULT '{}'"
+    ];
+    for (const sql of safeAlter) {
+      try { this.db.exec(sql); } catch { /* column already exists */ }
+    }
   }
 
   seedSync() {
@@ -615,7 +854,9 @@ class LocalSqliteStore {
         id: 1, owner_name: 'Boss', assistant_name: 'Pelo', device_model: 'Huawei P40 (EMUI / HMS)',
         wifi: 1, bluetooth: 1, dnd: 0, flashlight: 0, power_saver: 0, wake_lock: 0,
         brightness: 75, volume: 65, battery_level: 88, charging: 0, network_type: '4G/Wi-Fi',
-        voice_reply: 1, auto_execute: 1, bridge_token: token, last_bridge_ping: null, updated_at: now
+        voice_reply: 1, auto_execute: 1, god_mode: 1, confirm_destructive: 0,
+        storage_total_gb: 128, storage_used_gb: 58.4, clipboard_text: '',
+        bridge_token: token, last_bridge_ping: null, updated_at: now
       };
       this.mem.messages.push({ id: this.mem.seq++, role: 'assistant', content: WELCOME_MSG, actions_json: '[]', source: 'system', created_at: now });
       for (const rt of DEFAULT_ROUTINES) {
@@ -628,49 +869,45 @@ class LocalSqliteStore {
         { id: this.mem.seq++, name: 'Mom', relationship: 'Family', phone: '+31600000001', whatsapp: '+31600000001', email: '', favorite: 1, created_at: now },
         { id: this.mem.seq++, name: 'Alex', relationship: 'Best Friend', phone: '+31600000002', whatsapp: '+31600000002', email: '', favorite: 1, created_at: now }
       );
+      for (const f of STARTER_FILES) {
+        this.mem.files.push({ id: this.mem.seq++, ...f, trashed: 0, original_path: null, source: 'p40-storage', updated_at: now });
+      }
+      for (const c of STARTER_COMMS) {
+        this.mem.comms.push({ id: this.mem.seq++, ...c, created_at: now });
+      }
       return;
     }
 
     const row = this.db.prepare('SELECT id FROM pelo_device_state WHERE id = 1').get();
-    if (row) return;
+    if (!row) {
+      this.db.prepare('INSERT INTO pelo_device_state (id, bridge_token, updated_at) VALUES (1, ?, ?)').run(token, now);
+      this.db.prepare('INSERT INTO pelo_messages (role, content, actions_json, source, created_at) VALUES (?, ?, ?, ?, ?)').run('assistant', WELCOME_MSG, '[]', 'system', now);
 
-    this.db.prepare(`
-      INSERT INTO pelo_device_state (id, bridge_token, updated_at) VALUES (1, ?, ?)
-    `).run(token, now);
+      const insRoutine = this.db.prepare('INSERT INTO pelo_routines (name, trigger_phrase, icon, description, steps_json, created_at) VALUES (?, ?, ?, ?, ?, ?)');
+      for (const rt of DEFAULT_ROUTINES) {
+        insRoutine.run(rt.name, rt.triggerPhrase, rt.icon, rt.description, JSON.stringify(rt.steps), now);
+      }
 
-    this.db.prepare(`
-      INSERT INTO pelo_messages (role, content, actions_json, source, created_at) VALUES (?, ?, ?, ?, ?)
-    `).run('assistant', WELCOME_MSG, '[]', 'system', now);
+      const insContact = this.db.prepare('INSERT INTO pelo_contacts (name, relationship, phone, whatsapp, email, favorite, created_at) VALUES (?, ?, ?, ?, ?, 1, ?)');
+      insContact.run('Mom', 'Family', '+31600000001', '+31600000001', '', now);
+      insContact.run('Alex', 'Best Friend', '+31600000002', '+31600000002', '', now);
 
-    const insRoutine = this.db.prepare(`
-      INSERT INTO pelo_routines (name, trigger_phrase, icon, description, steps_json, created_at)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `);
-    for (const rt of DEFAULT_ROUTINES) {
-      insRoutine.run(rt.name, rt.triggerPhrase, rt.icon, rt.description, JSON.stringify(rt.steps), now);
+      this.db.prepare("INSERT INTO pelo_alarms (label, time_hhmm, days, enabled, kind, created_at) VALUES ('Morning Wake Up', '07:30', 'Weekdays', 0, 'alarm', ?)").run(now);
+      this.db.prepare("INSERT INTO pelo_tasks (title, due_text, priority, created_at) VALUES ('Run 1-line Huawei P40 Super-Agent in Termux for full storage & background SIM SMS control', 'P40 Bridge tab', 'high', ?)").run(now);
+      this.db.prepare("INSERT INTO pelo_memories (category, fact, created_at) VALUES ('device', 'Primary phone is a Huawei P40 running EMUI / HMS (prefers Petal Maps & AppGallery).', ?)").run(now);
     }
 
-    const insContact = this.db.prepare(`
-      INSERT INTO pelo_contacts (name, relationship, phone, whatsapp, email, favorite, created_at)
-      VALUES (?, ?, ?, ?, ?, 1, ?)
-    `);
-    insContact.run('Mom', 'Family', '+31600000001', '+31600000001', '', now);
-    insContact.run('Alex', 'Best Friend', '+31600000002', '+31600000002', '', now);
+    const fCount = this.db.prepare('SELECT COUNT(*) as c FROM pelo_files_index').get().c;
+    if (fCount === 0) {
+      const insF = this.db.prepare('INSERT INTO pelo_files_index (path, name, folder, size_bytes, mime_kind, trashed, updated_at) VALUES (?, ?, ?, ?, ?, 0, ?)');
+      for (const f of STARTER_FILES) insF.run(f.path, f.name, f.folder, f.size_bytes, f.mime_kind, now);
+    }
 
-    this.db.prepare(`
-      INSERT INTO pelo_alarms (label, time_hhmm, days, enabled, kind, created_at)
-      VALUES ('Morning Wake Up', '07:30', 'Weekdays', 0, 'alarm', ?)
-    `).run(now);
-
-    this.db.prepare(`
-      INSERT INTO pelo_tasks (title, due_text, priority, created_at)
-      VALUES ('Open P40 Bridge tab to download MacroDroid profile for deep OS control', 'Optional upgrade', 'high', ?)
-    `).run(now);
-
-    this.db.prepare(`
-      INSERT INTO pelo_memories (category, fact, created_at)
-      VALUES ('device', 'Primary phone is a Huawei P40 running EMUI / HMS (prefers Petal Maps & AppGallery).', ?)
-    `).run(now);
+    const cCount = this.db.prepare('SELECT COUNT(*) as c FROM pelo_comms_log').get().c;
+    if (cCount === 0) {
+      const insC = this.db.prepare('INSERT INTO pelo_comms_log (channel, direction, contact_name, address, body, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)');
+      for (const c of STARTER_COMMS) insC.run(c.channel, c.direction, c.contact_name, c.address, c.body, c.status, now);
+    }
   }
 
   async getBootstrap() {
@@ -684,29 +921,24 @@ class LocalSqliteStore {
         alarms: this.mem.alarms.map(mapAlarmRow),
         memories: this.mem.memories.map(mapMemoryRow),
         routines: this.mem.routines.map(mapRoutineRow),
-        bridgeQueue: this.mem.queue.slice(-25).reverse().map(mapBridgeRow)
+        bridgeQueue: this.mem.queue.slice(-25).reverse().map(mapBridgeRow),
+        files: this.mem.files.map(mapFileRow),
+        comms: this.mem.comms.slice(-30).reverse().map(mapCommRow)
       };
     }
 
-    const dev = this.db.prepare('SELECT * FROM pelo_device_state WHERE id = 1').get();
-    const msgs = this.db.prepare('SELECT * FROM pelo_messages ORDER BY id DESC LIMIT 40').all().reverse();
-    const contacts = this.db.prepare('SELECT * FROM pelo_contacts ORDER BY id ASC').all();
-    const tasks = this.db.prepare('SELECT * FROM pelo_tasks ORDER BY completed ASC, id DESC').all();
-    const alarms = this.db.prepare('SELECT * FROM pelo_alarms ORDER BY id DESC').all();
-    const memories = this.db.prepare('SELECT * FROM pelo_memories ORDER BY id DESC').all();
-    const routines = this.db.prepare('SELECT * FROM pelo_routines ORDER BY id ASC').all();
-    const queue = this.db.prepare('SELECT * FROM pelo_bridge_queue ORDER BY id DESC LIMIT 25').all();
-
     return {
       storageMode: this.mode,
-      device: mapDeviceRow(dev),
-      messages: msgs.map(mapMessageRow),
-      contacts: contacts.map(mapContactRow),
-      tasks: tasks.map(mapTaskRow),
-      alarms: alarms.map(mapAlarmRow),
-      memories: memories.map(mapMemoryRow),
-      routines: routines.map(mapRoutineRow),
-      bridgeQueue: queue.map(mapBridgeRow)
+      device: mapDeviceRow(this.db.prepare('SELECT * FROM pelo_device_state WHERE id = 1').get()),
+      messages: this.db.prepare('SELECT * FROM pelo_messages ORDER BY id DESC LIMIT 40').all().reverse().map(mapMessageRow),
+      contacts: this.db.prepare('SELECT * FROM pelo_contacts ORDER BY id ASC').all().map(mapContactRow),
+      tasks: this.db.prepare('SELECT * FROM pelo_tasks ORDER BY completed ASC, id DESC').all().map(mapTaskRow),
+      alarms: this.db.prepare('SELECT * FROM pelo_alarms ORDER BY id DESC').all().map(mapAlarmRow),
+      memories: this.db.prepare('SELECT * FROM pelo_memories ORDER BY id DESC').all().map(mapMemoryRow),
+      routines: this.db.prepare('SELECT * FROM pelo_routines ORDER BY id ASC').all().map(mapRoutineRow),
+      bridgeQueue: this.db.prepare('SELECT * FROM pelo_bridge_queue ORDER BY id DESC LIMIT 25').all().map(mapBridgeRow),
+      files: this.db.prepare('SELECT * FROM pelo_files_index ORDER BY trashed ASC, size_bytes DESC LIMIT 80').all().map(mapFileRow),
+      comms: this.db.prepare('SELECT * FROM pelo_comms_log ORDER BY id DESC LIMIT 30').all().map(mapCommRow)
     };
   }
 
@@ -734,6 +966,11 @@ class LocalSqliteStore {
       networkType: ['network_type', String],
       voiceReply: ['voice_reply', (v) => (v ? 1 : 0)],
       autoExecute: ['auto_execute', (v) => (v ? 1 : 0)],
+      godMode: ['god_mode', (v) => (v ? 1 : 0)],
+      confirmDestructive: ['confirm_destructive', (v) => (v ? 1 : 0)],
+      storageTotalGb: ['storage_total_gb', Number],
+      storageUsedGb: ['storage_used_gb', Number],
+      clipboardText: ['clipboard_text', String],
       lastBridgePing: ['last_bridge_ping', String]
     };
 
@@ -764,9 +1001,7 @@ class LocalSqliteStore {
       this.mem.messages.push(row);
       return mapMessageRow(row);
     }
-    const res = this.db.prepare(`
-      INSERT INTO pelo_messages (role, content, actions_json, source, created_at) VALUES (?, ?, ?, ?, ?)
-    `).run(role, content, JSON.stringify(actions), source, now);
+    const res = this.db.prepare('INSERT INTO pelo_messages (role, content, actions_json, source, created_at) VALUES (?, ?, ?, ?, ?)').run(role, content, JSON.stringify(actions), source, now);
     return mapMessageRow(this.db.prepare('SELECT * FROM pelo_messages WHERE id = ?').get(Number(res.lastInsertRowid)));
   }
 
@@ -786,10 +1021,7 @@ class LocalSqliteStore {
       this.mem.contacts.push(row);
       return mapContactRow(row);
     }
-    const res = this.db.prepare(`
-      INSERT INTO pelo_contacts (name, relationship, phone, whatsapp, email, favorite, created_at)
-      VALUES (?, ?, ?, ?, ?, 1, ?)
-    `).run(name, relationship, phone, whatsapp || phone, email, now);
+    const res = this.db.prepare('INSERT INTO pelo_contacts (name, relationship, phone, whatsapp, email, favorite, created_at) VALUES (?, ?, ?, ?, ?, 1, ?)').run(name, relationship, phone, whatsapp || phone, email, now);
     return mapContactRow(this.db.prepare('SELECT * FROM pelo_contacts WHERE id = ?').get(Number(res.lastInsertRowid)));
   }
 
@@ -809,9 +1041,7 @@ class LocalSqliteStore {
       this.mem.tasks.unshift(row);
       return mapTaskRow(row);
     }
-    const res = this.db.prepare(`
-      INSERT INTO pelo_tasks (title, due_text, completed, priority, created_at) VALUES (?, ?, 0, ?, ?)
-    `).run(title, dueText, priority, now);
+    const res = this.db.prepare('INSERT INTO pelo_tasks (title, due_text, completed, priority, created_at) VALUES (?, ?, 0, ?, ?)').run(title, dueText, priority, now);
     return mapTaskRow(this.db.prepare('SELECT * FROM pelo_tasks WHERE id = ?').get(Number(res.lastInsertRowid)));
   }
 
@@ -820,14 +1050,12 @@ class LocalSqliteStore {
       const row = this.mem.tasks.find((x) => x.id === Number(id));
       if (!row) return null;
       if (patch.completed !== undefined) row.completed = patch.completed ? 1 : 0;
-      if (patch.title !== undefined) row.title = String(patch.title);
       return mapTaskRow(row);
     }
     const existing = this.db.prepare('SELECT * FROM pelo_tasks WHERE id = ?').get(Number(id));
     if (!existing) return null;
     const completed = patch.completed !== undefined ? (patch.completed ? 1 : 0) : existing.completed;
-    const title = patch.title !== undefined ? String(patch.title) : existing.title;
-    this.db.prepare('UPDATE pelo_tasks SET completed = ?, title = ? WHERE id = ?').run(completed, title, Number(id));
+    this.db.prepare('UPDATE pelo_tasks SET completed = ? WHERE id = ?').run(completed, Number(id));
     return mapTaskRow(this.db.prepare('SELECT * FROM pelo_tasks WHERE id = ?').get(Number(id)));
   }
 
@@ -847,10 +1075,7 @@ class LocalSqliteStore {
       this.mem.alarms.unshift(row);
       return mapAlarmRow(row);
     }
-    const res = this.db.prepare(`
-      INSERT INTO pelo_alarms (label, time_hhmm, days, enabled, kind, duration_sec, target_epoch_ms, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(label, timeHhmm, days, enabled ? 1 : 0, kind, durationSec, targetEpochMs, now);
+    const res = this.db.prepare('INSERT INTO pelo_alarms (label, time_hhmm, days, enabled, kind, duration_sec, target_epoch_ms, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(label, timeHhmm, days, enabled ? 1 : 0, kind, durationSec, targetEpochMs, now);
     return mapAlarmRow(this.db.prepare('SELECT * FROM pelo_alarms WHERE id = ?').get(Number(res.lastInsertRowid)));
   }
 
@@ -884,9 +1109,7 @@ class LocalSqliteStore {
       this.mem.memories.unshift(row);
       return mapMemoryRow(row);
     }
-    const res = this.db.prepare(`
-      INSERT INTO pelo_memories (category, fact, created_at) VALUES (?, ?, ?)
-    `).run(category, fact, now);
+    const res = this.db.prepare('INSERT INTO pelo_memories (category, fact, created_at) VALUES (?, ?, ?)').run(category, fact, now);
     return mapMemoryRow(this.db.prepare('SELECT * FROM pelo_memories WHERE id = ?').get(Number(res.lastInsertRowid)));
   }
 
@@ -906,10 +1129,7 @@ class LocalSqliteStore {
       this.mem.routines.push(row);
       return mapRoutineRow(row);
     }
-    const res = this.db.prepare(`
-      INSERT INTO pelo_routines (name, trigger_phrase, icon, description, steps_json, created_at)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(name, triggerPhrase.toLowerCase(), icon, description, JSON.stringify(steps), now);
+    const res = this.db.prepare('INSERT INTO pelo_routines (name, trigger_phrase, icon, description, steps_json, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(name, triggerPhrase.toLowerCase(), icon, description, JSON.stringify(steps), now);
     return mapRoutineRow(this.db.prepare('SELECT * FROM pelo_routines WHERE id = ?').get(Number(res.lastInsertRowid)));
   }
 
@@ -934,40 +1154,198 @@ class LocalSqliteStore {
     return { deleted: true, id: Number(id) };
   }
 
+  // FILE MANAGEMENT
+  async listFiles() {
+    if (!this.db) return this.mem.files.map(mapFileRow);
+    return this.db.prepare('SELECT * FROM pelo_files_index ORDER BY trashed ASC, size_bytes DESC LIMIT 80').all().map(mapFileRow);
+  }
+
+  async createFileEntry({ name, folder = 'Documents', sizeBytes = 512, path: customPath }) {
+    const now = new Date().toISOString();
+    const fpath = customPath || `/storage/emulated/0/${folder}/${name}`;
+    if (!this.db) {
+      const row = { id: this.mem.seq++, path: fpath, name, folder, size_bytes: sizeBytes, mime_kind: guessMimeKind(name), trashed: 0, original_path: null, source: 'p40-storage', updated_at: now };
+      this.mem.files.unshift(row);
+      return mapFileRow(row);
+    }
+    this.db.prepare(`
+      INSERT INTO pelo_files_index (path, name, folder, size_bytes, mime_kind, trashed, updated_at)
+      VALUES (?, ?, ?, ?, ?, 0, ?)
+      ON CONFLICT(path) DO UPDATE SET size_bytes = excluded.size_bytes, trashed = 0, updated_at = excluded.updated_at
+    `).run(fpath, name, folder, sizeBytes, guessMimeKind(name), now);
+    return mapFileRow(this.db.prepare('SELECT * FROM pelo_files_index WHERE path = ?').get(fpath));
+  }
+
+  async deleteFiles({ id, query, extension, folder, permanent = false }) {
+    const all = await this.listFiles();
+    const targets = all.filter((f) => matchFileQuery(f, { id, query, extension, folder, includeTrashed: permanent }));
+    if (!targets.length) return { count: 0, freedBytes: 0, affected: [] };
+
+    const freedBytes = targets.reduce((sum, t) => sum + t.sizeBytes, 0);
+    const now = new Date().toISOString();
+
+    if (!this.db) {
+      const targetIds = targets.map((t) => t.id);
+      if (permanent) {
+        this.mem.files = this.mem.files.filter((f) => !targetIds.includes(f.id));
+      } else {
+        for (const f of this.mem.files) {
+          if (targetIds.includes(f.id)) {
+            f.trashed = 1;
+            f.original_path = f.path;
+            f.folder = '.pelo-trash';
+            f.updated_at = now;
+          }
+        }
+      }
+      return { count: targets.length, freedBytes, affected: targets };
+    }
+
+    if (permanent) {
+      const stmt = this.db.prepare('DELETE FROM pelo_files_index WHERE id = ?');
+      for (const t of targets) stmt.run(t.id);
+    } else {
+      const stmt = this.db.prepare("UPDATE pelo_files_index SET trashed = 1, original_path = path, folder = '.pelo-trash', updated_at = ? WHERE id = ?");
+      for (const t of targets) stmt.run(now, t.id);
+    }
+    return { count: targets.length, freedBytes, affected: targets };
+  }
+
+  async restoreFiles({ id, query } = {}) {
+    const all = await this.listFiles();
+    const trashed = all.filter((f) => f.trashed && (!id && !query ? true : (id ? f.id === Number(id) : f.name.toLowerCase().includes(query.toLowerCase()))));
+    const now = new Date().toISOString();
+
+    if (!this.db) {
+      const ids = trashed.map((t) => t.id);
+      for (const f of this.mem.files) {
+        if (ids.includes(f.id)) {
+          f.trashed = 0;
+          f.folder = f.original_path ? path.basename(path.dirname(f.original_path)) : 'Download';
+          f.updated_at = now;
+        }
+      }
+      return { count: trashed.length, restored: trashed };
+    }
+
+    const stmt = this.db.prepare('UPDATE pelo_files_index SET trashed = 0, folder = ?, updated_at = ? WHERE id = ?');
+    for (const t of trashed) {
+      const origFolder = t.originalPath ? path.basename(path.dirname(t.originalPath)) : 'Download';
+      stmt.run(origFolder, now, t.id);
+    }
+    return { count: trashed.length, restored: trashed };
+  }
+
+  async emptyTrash() {
+    const all = await this.listFiles();
+    const trashed = all.filter((f) => f.trashed);
+    if (!this.db) {
+      this.mem.files = this.mem.files.filter((f) => !f.trashed);
+      return { count: trashed.length };
+    }
+    this.db.prepare('DELETE FROM pelo_files_index WHERE trashed = 1').run();
+    return { count: trashed.length };
+  }
+
+  async organizeDownloads() {
+    const all = await this.listFiles();
+    const dl = all.filter((f) => !f.trashed && f.folder === 'Download');
+    const bucketMap = { pdf: 'Download/Documents', image: 'Download/Images', apk: 'Download/APKs', archive: 'Download/Archives', temp: 'Download/Temp' };
+    const now = new Date().toISOString();
+
+    if (!this.db) {
+      for (const f of this.mem.files) {
+        if (!f.trashed && f.folder === 'Download') {
+          f.folder = bucketMap[f.mime_kind] || 'Download/Other';
+          f.updated_at = now;
+        }
+      }
+      return { movedCount: dl.length };
+    }
+
+    const stmt = this.db.prepare('UPDATE pelo_files_index SET folder = ?, updated_at = ? WHERE id = ?');
+    for (const f of dl) {
+      stmt.run(bucketMap[f.mimeKind] || 'Download/Other', now, f.id);
+    }
+    return { movedCount: dl.length };
+  }
+
+  async syncAgentFiles(files = []) {
+    if (!Array.isArray(files) || !files.length) return;
+    const now = new Date().toISOString();
+    if (!this.db) {
+      this.mem.files = this.mem.files.filter((f) => f.trashed);
+      for (const f of files.slice(0, 80)) {
+        this.mem.files.push({
+          id: this.mem.seq++, path: f.path, name: f.name, folder: f.folder || 'Download',
+          size_bytes: Number(f.sizeBytes || 0), mime_kind: guessMimeKind(f.name), trashed: 0,
+          original_path: null, source: 'p40-live-agent', updated_at: now
+        });
+      }
+      return;
+    }
+    this.db.prepare('DELETE FROM pelo_files_index WHERE trashed = 0').run();
+    const ins = this.db.prepare(`
+      INSERT INTO pelo_files_index (path, name, folder, size_bytes, mime_kind, trashed, source, updated_at)
+      VALUES (?, ?, ?, ?, ?, 0, 'p40-live-agent', ?)
+      ON CONFLICT(path) DO UPDATE SET size_bytes = excluded.size_bytes, trashed = 0, updated_at = excluded.updated_at
+    `);
+    for (const f of files.slice(0, 80)) {
+      ins.run(f.path, f.name, f.folder || 'Download', Number(f.sizeBytes || 0), guessMimeKind(f.name), now);
+    }
+  }
+
+  // COMMS LOG
+  async logComm({ channel = 'sms', direction = 'outbound', contactName = '', address = '', body, status = 'sent_direct' }) {
+    const now = new Date().toISOString();
+    if (!this.db) {
+      const row = { id: this.mem.seq++, channel, direction, contact_name: contactName, address, body, status, created_at: now };
+      this.mem.comms.push(row);
+      return mapCommRow(row);
+    }
+    const res = this.db.prepare('INSERT INTO pelo_comms_log (channel, direction, contact_name, address, body, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(channel, direction, contactName, address, body, status, now);
+    return mapCommRow(this.db.prepare('SELECT * FROM pelo_comms_log WHERE id = ?').get(Number(res.lastInsertRowid)));
+  }
+
+  async syncInboxSms(smsArray = []) {
+    if (!Array.isArray(smsArray) || !smsArray.length) return;
+    for (const item of smsArray.slice(0, 8)) {
+      if (!item.body) continue;
+      await this.logComm({
+        channel: 'sms',
+        direction: item.type === 'sent' ? 'outbound' : 'inbound',
+        contactName: item.sender || item.number || 'SMS',
+        address: item.number || '',
+        body: String(item.body).slice(0, 500),
+        status: 'synced_p40'
+      });
+    }
+  }
+
+  // BRIDGE QUEUE
   async enqueueBridgeCommand({ commandType, label, payload = {} }) {
     const now = new Date().toISOString();
     if (!this.db) {
-      const row = { id: this.mem.seq++, command_type: commandType, label, payload_json: JSON.stringify(payload), status: 'pending', created_at: now, executed_at: null };
+      const row = { id: this.mem.seq++, command_type: commandType, label, payload_json: JSON.stringify(payload), result_json: '{}', status: 'pending', created_at: now, executed_at: null };
       this.mem.queue.push(row);
       return mapBridgeRow(row);
     }
-    const res = this.db.prepare(`
-      INSERT INTO pelo_bridge_queue (command_type, label, payload_json, status, created_at)
-      VALUES (?, ?, ?, 'pending', ?)
-    `).run(commandType, label, JSON.stringify(payload), now);
+    const res = this.db.prepare("INSERT INTO pelo_bridge_queue (command_type, label, payload_json, result_json, status, created_at) VALUES (?, ?, ?, '{}', 'pending', ?)").run(commandType, label, JSON.stringify(payload), now);
     return mapBridgeRow(this.db.prepare('SELECT * FROM pelo_bridge_queue WHERE id = ?').get(Number(res.lastInsertRowid)));
   }
 
   async pollBridgeCommands(token) {
     const dev = await this.getDeviceState();
-    if (token && token !== dev.bridgeToken) {
-      return { authorized: false };
-    }
+    if (token && token !== dev.bridgeToken) return { authorized: false };
     await this.updateDeviceState({ lastBridgePing: new Date().toISOString() });
     if (!this.db) {
-      return {
-        authorized: true,
-        commands: this.mem.queue.filter((x) => x.status === 'pending').slice(0, 15).map(mapBridgeRow)
-      };
+      return { authorized: true, commands: this.mem.queue.filter((x) => x.status === 'pending').slice(0, 15).map(mapBridgeRow) };
     }
     const rows = this.db.prepare("SELECT * FROM pelo_bridge_queue WHERE status = 'pending' ORDER BY id ASC LIMIT 15").all();
-    return {
-      authorized: true,
-      commands: rows.map(mapBridgeRow)
-    };
+    return { authorized: true, commands: rows.map(mapBridgeRow) };
   }
 
-  async ackBridgeCommands(ids = [], status = 'executed') {
+  async ackBridgeCommands(ids = [], status = 'executed', result = {}) {
     const cleanIds = ids.map((x) => Number(x)).filter(Boolean);
     if (!cleanIds.length) return { updated: 0 };
     const now = new Date().toISOString();
@@ -975,13 +1353,14 @@ class LocalSqliteStore {
       for (const item of this.mem.queue) {
         if (cleanIds.includes(item.id)) {
           item.status = status;
+          item.result_json = JSON.stringify(result || {});
           item.executed_at = now;
         }
       }
       return { updated: cleanIds.length };
     }
     const placeholders = cleanIds.map(() => '?').join(',');
-    this.db.prepare(`UPDATE pelo_bridge_queue SET status = ?, executed_at = ? WHERE id IN (${placeholders})`).run(status, now, ...cleanIds);
+    this.db.prepare(`UPDATE pelo_bridge_queue SET status = ?, result_json = ?, executed_at = ? WHERE id IN (${placeholders})`).run(status, JSON.stringify(result || {}), now, ...cleanIds);
     return { updated: cleanIds.length };
   }
 }

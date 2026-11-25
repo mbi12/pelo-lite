@@ -1,4 +1,4 @@
-// Pelo Hybrid Neural Phone Brain — Built for Huawei P40 (EMUI / HarmonyOS / HMS)
+// Pelo Unrestricted Personal AI Brain — Built for Huawei P40 (Files, Messages, Calls, Apps, Hardware & Shell)
 
 const HUAWEI_P40_APPS = {
   whatsapp: {
@@ -39,6 +39,14 @@ const HUAWEI_P40_APPS = {
     pkg: 'com.huawei.camera',
     uri: 'pelo://camera',
     intentUri: 'intent:#Intent;action=android.media.action.STILL_IMAGE_CAMERA;end',
+    fallbackUrl: null
+  },
+  files_app: {
+    name: 'Huawei Files',
+    icon: '📂',
+    pkg: 'com.huawei.hidisk',
+    uri: 'intent:#Intent;package=com.huawei.hidisk;end',
+    intentUri: 'intent:#Intent;package=com.huawei.hidisk;end',
     fallbackUrl: null
   },
   spotify: {
@@ -123,17 +131,25 @@ const HUAWEI_P40_APPS = {
   }
 };
 
+function formatBytes(bytes) {
+  const b = Number(bytes || 0);
+  if (b >= 1073741824) return `${(b / 1073741824).toFixed(2)} GB`;
+  if (b >= 1048576) return `${(b / 1048576).toFixed(1)} MB`;
+  if (b >= 1024) return `${(b / 1024).toFixed(1)} KB`;
+  return `${b} B`;
+}
+
 /**
- * Split multi-intent user commands ("turn on torch nd set a 5m timer and dim screen to 30%")
- * without splitting inside message/note payloads ("text Mom I'm safe and heading home").
+ * Split multi-intent commands ("delete all .apk files nd text Mom I'm outside")
+ * while keeping message bodies intact when a segment starts with a dictation verb.
  */
 function splitCompoundSegments(raw) {
   const trimmed = String(raw || '').trim();
   if (!trimmed) return [];
   const lower = trimmed.toLowerCase();
 
-  // Do not split if the utterance is a message/memory dictation
-  if (/^(remember|save note|note:|note that|text |sms |whatsapp |message |email |say )/i.test(lower)) {
+  // Keep pure single-dictation commands intact so "and" inside message text isn't chopped
+  if (/^(remember|save note|note:|text |sms |whatsapp |message |send (?:a )?(?:message|sms|text|whatsapp)|reply |create file |shell |exec |run command )/i.test(lower)) {
     return [trimmed];
   }
 
@@ -154,7 +170,6 @@ function findContact(contacts, queryName) {
 }
 
 function parseTimeHhmm(str) {
-  // Matches "7:30 am", "06:45", "8pm", "19:20"
   const m = str.match(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i);
   if (!m) return null;
   let hour = parseInt(m[1], 10);
@@ -182,7 +197,6 @@ function parseDurationSeconds(str) {
 }
 
 function safeMathEval(expr) {
-  // Clean common English math words
   const cleaned = expr
     .toLowerCase()
     .replace(/what(?:'s| is)\s+/g, '')
@@ -195,7 +209,6 @@ function safeMathEval(expr) {
 
   if (!cleaned || !/\d/.test(cleaned) || !/[+\-*/%]/.test(cleaned)) return null;
   try {
-    // Restricted arithmetic evaluation
     const val = Function(`"use strict"; return (${cleaned});`)();
     if (typeof val === 'number' && Number.isFinite(val)) {
       return Math.round(val * 10000) / 10000;
@@ -207,7 +220,7 @@ function safeMathEval(expr) {
 }
 
 /**
- * Optional Cloud LLM Upgrade (Groq / OpenAI / Gemini) if user configures an API key
+ * Optional Cloud LLM Upgrade (Groq / OpenAI / Gemini) with Unrestricted Tool Schema
  */
 async function tryCloudLlm({ text, context, llmConfig }) {
   if (!llmConfig || !llmConfig.apiKey) return null;
@@ -215,31 +228,39 @@ async function tryCloudLlm({ text, context, llmConfig }) {
   const apiKey = String(llmConfig.apiKey).trim();
   if (!apiKey) return null;
 
-  const systemPrompt = `You are Pelo, a concise, capable personal AI controller for the user's Huawei P40 (EMUI / HMS, prefers Petal Maps & AppGallery).
-Current phone state: ${JSON.stringify(context.device)}
-Saved contacts: ${JSON.stringify(context.contacts.map((c) => ({ name: c.name, phone: c.phone })))}
+  const systemPrompt = `You are Pelo, an unrestricted personal AI phone controller for the user's Huawei P40 (EMUI / HMS).
+Phone state: ${JSON.stringify(context.device)}
+Contacts: ${JSON.stringify(context.contacts.map((c) => ({ name: c.name, phone: c.phone })))}
+Files on P40: ${JSON.stringify((context.files || []).slice(0, 25).map((f) => ({ id: f.id, name: f.name, folder: f.folder, trashed: f.trashed })))}
+Recent messages: ${JSON.stringify((context.comms || []).slice(0, 6))}
 Memories: ${JSON.stringify(context.memories.map((m) => m.fact))}
-Routines: ${JSON.stringify(context.routines.map((r) => ({ id: r.id, name: r.name, trigger: r.triggerPhrase })))}
 
-Respond ONLY with valid JSON matching:
+Respond ONLY with valid JSON:
 {
-  "reply": "natural, brief spoken response",
+  "reply": "natural, concise spoken reply",
   "intents": [
-    // Zero or more structured actions:
+    // Supported action objects:
+    // {"kind": "file_delete", "query": "filename", "extension": "apk", "folder": "Screenshots", "permanent": false}
+    // {"kind": "file_restore", "query": "filename"}
+    // {"kind": "file_empty_trash"}
+    // {"kind": "file_organize"}
+    // {"kind": "file_create", "name": "note.txt", "content": "file text"}
+    // {"kind": "sms", "name": "Mom", "phone": "+31...", "message": "text"}
+    // {"kind": "whatsapp", "name": "Alex", "phone": "+31...", "message": "text"}
+    // {"kind": "read_messages"}
+    // {"kind": "call", "name": "Mom", "phone": "+31..."}
     // {"kind": "setting", "setting": "flashlight"|"wifi"|"bluetooth"|"dnd"|"powerSaver"|"wakeLock", "value": true|false}
     // {"kind": "slider", "setting": "brightness"|"volume", "value": 0-100}
-    // {"kind": "vibrate", "pattern": "pulse"|"sos"}
-    // {"kind": "open_app", "app": "whatsapp"|"petal_maps"|"appgallery"|"camera"|"spotify"|"youtube"|"telegram"|"instagram"|"tiktok"|"settings"|"optimizer"}
-    // {"kind": "navigate", "destination": "place name"}
-    // {"kind": "call", "name": "contact", "phone": "+..."}
-    // {"kind": "whatsapp", "name": "contact", "phone": "+...", "message": "text"}
-    // {"kind": "sms", "name": "contact", "phone": "+...", "message": "text"}
+    // {"kind": "open_app", "app": "whatsapp"|"petal_maps"|"appgallery"|"files_app"|"camera"|"spotify"|"youtube"|"telegram"|"settings"}
+    // {"kind": "navigate", "destination": "place"}
     // {"kind": "alarm", "timeHhmm": "07:30", "label": "Wake up"}
     // {"kind": "timer", "seconds": 300, "label": "Timer"}
-    // {"kind": "task", "title": "task text"}
-    // {"kind": "memory", "fact": "fact to remember"}
-    // {"kind": "weather", "location": "city or current"}
-    // {"kind": "system_bridge", "command": "lock_screen"|"screenshot"|"read_notifications"}
+    // {"kind": "task", "title": "reminder"}
+    // {"kind": "memory", "fact": "fact"}
+    // {"kind": "clipboard", "text": "text to copy"}
+    // {"kind": "find_my_phone"}
+    // {"kind": "shell_exec", "command": "ls -la Download"}
+    // {"kind": "weather"}
   ]
 }`;
 
@@ -256,10 +277,7 @@ Respond ONLY with valid JSON matching:
 
     const res = await fetch(endpoint, {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json'
-      },
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model,
         temperature: 0.2,
@@ -281,7 +299,7 @@ Respond ONLY with valid JSON matching:
 }
 
 /**
- * Parse a single natural-language segment into structured Pelo intents
+ * Parse natural-language segment into unrestricted Huawei P40 intents
  */
 function parseSegmentBuiltIn(segment, context) {
   const s = segment.trim();
@@ -289,7 +307,207 @@ function parseSegmentBuiltIn(segment, context) {
   const intents = [];
   const replies = [];
 
-  // 1. Check saved Routine match first ("good morning", "going out", "driving mode", "goodnight", etc.)
+  // --------------------------------------------------------------------------
+  // A. FILE MANAGEMENT: DELETE, CLEAN JUNK, RESTORE, EMPTY TRASH, ORGANIZE, CREATE, LIST
+  // --------------------------------------------------------------------------
+
+  // A1. Empty Trash ("empty trash", "clear trash bin")
+  if (/\b(empty (?:the )?trash|clear (?:the )?trash|purge trash)\b/i.test(low)) {
+    intents.push({ kind: 'file_empty_trash' });
+    replies.push('Permanently emptying your Huawei P40 `.pelo-trash` bin.');
+    return { intents, replies };
+  }
+
+  // A2. Restore / Undo Deleted Files ("restore ...", "undo delete", "recover ...")
+  const restoreMatch = s.match(/^(?:restore|undelete|recover|undo delete(?:\s+of)?)\s*(.*)$/i);
+  if (restoreMatch) {
+    const query = (restoreMatch[1] || '').replace(/^file\s+/i, '').trim();
+    intents.push({ kind: 'file_restore', query });
+    replies.push(query ? `Restoring **"${query}"** from `.concat('`.pelo-trash` back to its folder.') : 'Restoring your trashed files back to their original folders.');
+    return { intents, replies };
+  }
+
+  // A3. Organize Downloads ("organize my downloads", "sort downloads folder")
+  if (/\b(organize|sort|tidy)\b.*\b(download|files|folder|storage)\b/i.test(low)) {
+    intents.push({ kind: 'file_organize' });
+    replies.push('Organizing your Huawei P40 **Download** folder into clean `Documents/`, `Images/`, `APKs/`, and `Archives/` subfolders.');
+    return { intents, replies };
+  }
+
+  // A4. Create a File ("create file notes.txt saying hello world")
+  const createFileMatch = s.match(/^(?:create|make|write)\s+(?:a\s+)?file\s+(?:named\s+|called\s+)?([^\s]+)(?:\s+(?:with|saying|containing|:)\s+(.+))?$/i);
+  if (createFileMatch) {
+    const name = createFileMatch[1].replace(/["'`]/g, '').trim();
+    const content = (createFileMatch[2] || '').trim();
+    intents.push({ kind: 'file_create', name, content });
+    replies.push(`Created **${name}** in \`/storage/emulated/0/Documents/\` on your Huawei P40.`);
+    return { intents, replies };
+  }
+
+  // A5. Delete / Remove / Clean Files ("delete old.apk", "delete all .apk files", "clean junk files", "delete screenshots")
+  const isFileDelete =
+    /\b(delete|remove|erase|wipe|shred|clean)\b/i.test(low) &&
+    (/\b(file|files|folder|apk|apks|tmp|temp|junk|cache|screenshot|screenshots|download|downloads|pdf|photo|image|duplicate)\b/i.test(low) ||
+      /\.[a-z0-9]{2,4}\b/i.test(low));
+
+  if (isFileDelete) {
+    const permanent = /\b(permanent|permanently|shred|forever)\b/i.test(low);
+    const extMatch = low.match(/\.([a-z0-9]{2,4})\b/) || low.match(/\ball\s+(apk|pdf|tmp|jpg|png|zip)s?\b/);
+
+    if (/\b(junk|temp|cache)\b/i.test(low) && !extMatch) {
+      intents.push({ kind: 'file_delete', extension: 'junk', permanent });
+      replies.push('Cleaning APK installers & temporary cache files from your Huawei P40.');
+      return { intents, replies };
+    }
+
+    if (extMatch) {
+      const ext = extMatch[1];
+      // Check if user named a specific file like "delete invoice-november.pdf" vs "delete all .pdf files"
+      const specificFileMatch = s.match(/(?:delete|remove|erase|shred)\s+(?:the\s+)?(?:file\s+)?["'`]?([a-z0-9_.\-]+\.[a-z0-9]{2,4})["'`]?/i);
+      if (specificFileMatch && !/\ball\b/i.test(low)) {
+        const fname = specificFileMatch[1];
+        intents.push({ kind: 'file_delete', query: fname, permanent });
+        replies.push(`${permanent ? 'Permanently deleting' : 'Moving'} **${fname}** ${permanent ? 'from Huawei P40 storage' : 'to `.pelo-trash` (undoable)'}.`);
+        return { intents, replies };
+      }
+
+      intents.push({ kind: 'file_delete', extension: ext, permanent });
+      replies.push(`${permanent ? 'Permanently deleting' : 'Deleting'} all **.${ext}** files on your Huawei P40.`);
+      return { intents, replies };
+    }
+
+    if (/\bscreenshots?\b/i.test(low) && /\b(all|clear|clean)\b/i.test(low)) {
+      intents.push({ kind: 'file_delete', folder: 'Screenshots', permanent });
+      replies.push('Deleting screenshots from `/storage/emulated/0/DCIM/Screenshots`.');
+      return { intents, replies };
+    }
+
+    // Extract target query phrase after delete/remove
+    const targetMatch = s.match(/(?:permanently\s+)?(?:delete|remove|erase|shred)\s+(?:the\s+)?(?:file\s+)?(.+)$/i);
+    const cleanQuery = (targetMatch ? targetMatch[1] : s)
+      .replace(/\s+(?:in|from)\s+(?:my\s+)?(?:downloads?|phone|storage|screenshots?)$/i, '')
+      .replace(/["'`]/g, '')
+      .trim();
+
+    intents.push({ kind: 'file_delete', query: cleanQuery, permanent });
+    replies.push(`${permanent ? 'Permanently deleting' : 'Deleting'} files matching **"${cleanQuery}"** on your Huawei P40.`);
+    return { intents, replies };
+  }
+
+  // A6. List / Show Files ("show my files", "what files are in downloads")
+  if (/\b(show (?:my )?files|list files|my downloads|what files|storage space|free space)\b/i.test(low)) {
+    const activeFiles = (context.files || []).filter((f) => !f.trashed);
+    const top = activeFiles.slice(0, 6);
+    replies.push(
+      `📂 **Huawei P40 Storage** (${context.device.storageUsedGb} GB / ${context.device.storageTotalGb} GB used · ${activeFiles.length} indexed files):\n` +
+      (top.length
+        ? top.map((f) => `• **${f.name}** (${formatBytes(f.sizeBytes)} · \`${f.folder}\`)`).join('\n')
+        : '• Folder is clean!')
+    );
+    intents.push({ kind: 'open_files_tab' });
+    return { intents, replies };
+  }
+
+  // --------------------------------------------------------------------------
+  // B. UNRESTRICTED MESSAGING: DIRECT SMS, WHATSAPP, TELEGRAM, REPLY, READ INBOX
+  // --------------------------------------------------------------------------
+
+  // B1. Reply to Last Message ("reply saying On my way!", "reply to last message Yes see u at 7")
+  const replyLastMatch = s.match(/^reply(?:\s+to\s+(?:the\s+)?last\s+(?:message|text|sms|whatsapp))?(?:\s+(?:saying|with|that|:))?\s+(.+)$/i);
+  if (replyLastMatch) {
+    const body = replyLastMatch[1].trim();
+    const lastInbound = (context.comms || []).find((c) => c.direction === 'inbound') || (context.comms || [])[0];
+    if (lastInbound) {
+      const kind = lastInbound.channel === 'whatsapp' ? 'whatsapp' : 'sms';
+      intents.push({
+        kind,
+        name: lastInbound.contactName || 'Sender',
+        phone: lastInbound.address,
+        message: body
+      });
+      replies.push(`Replying via **${kind.toUpperCase()}** to **${lastInbound.contactName || lastInbound.address}**: *"${body}"*.`);
+      return { intents, replies };
+    }
+  }
+
+  // B2. Read Recent Messages / Texts ("read my messages", "check my texts", "last sms")
+  if (/\b(read (?:my )?(?:messages|texts|sms)|check (?:my )?(?:messages|texts|inbox)|latest (?:messages|texts|sms)|last (?:message|text|sms))\b/i.test(low)) {
+    intents.push({ kind: 'read_messages' });
+    const recent = (context.comms || []).slice(0, 4);
+    replies.push(
+      recent.length
+        ? `💬 **Latest Huawei P40 Messages:**\n` +
+          recent.map((c) => `• **[${c.channel.toUpperCase()}] ${c.contactName || c.address}**: "${c.body}"`).join('\n')
+        : 'No messages synced yet — polling your Huawei P40 inbox now.'
+    );
+    return { intents, replies };
+  }
+
+  // B3. WhatsApp Messaging ("whatsapp Mom I'm outside", "send whatsapp to Alex saying yo")
+  const waMatch = s.match(/^(?:send\s+(?:a\s+)?)?whatsapp(?:\s+message)?(?:\s+to)?\s+([a-z0-9+]+)(?:\s+(?:saying|that|:))?\s+(.+)$/i);
+  if (waMatch) {
+    const target = waMatch[1].trim();
+    const message = waMatch[2].trim();
+    const contact = findContact(context.contacts, target);
+    const phone = contact ? (contact.whatsapp || contact.phone) : (target.startsWith('+') || /^\d{7,}$/.test(target) ? target : '');
+    intents.push({ kind: 'whatsapp', name: contact ? contact.name : target, phone, message });
+    replies.push(`Sending **WhatsApp** to **${contact ? contact.name : target}**: *"${message}"*.`);
+    return { intents, replies };
+  }
+
+  // B4. Direct SMS / Generic "Send message to X ..." ("send message to Mom I'm outside", "text Alex yo", "message +316... hello")
+  const smsMatch = s.match(/^(?:send\s+(?:a\s+)?)?(?:text|sms|message)(?:\s+to)?\s+([a-z0-9+]+)(?:\s+(?:saying|that|:))?\s+(.+)$/i);
+  if (smsMatch) {
+    const target = smsMatch[1].trim();
+    const message = smsMatch[2].trim();
+    const contact = findContact(context.contacts, target);
+    const phone = contact ? contact.phone : (target.startsWith('+') || /^\d{7,}$/.test(target) ? target : '');
+    intents.push({ kind: 'sms', name: contact ? contact.name : target, phone, message });
+    replies.push(`Dispatched **SMS** to **${contact ? contact.name : target}**${phone ? ` (${phone})` : ''}: *"${message}"*.`);
+    return { intents, replies };
+  }
+
+  // B5. Telegram ("telegram Alex check this")
+  const tgMatch = s.match(/^(?:send\s+(?:a\s+)?)?telegram(?:\s+to)?\s+([a-z0-9_@+]+)\s+(?:saying\s+)?(.+)$/i);
+  if (tgMatch) {
+    intents.push({ kind: 'telegram', name: tgMatch[1], message: tgMatch[2] });
+    replies.push(`Dispatched **Telegram** message to **${tgMatch[1]}**: *"${tgMatch[2]}"*.`);
+    return { intents, replies };
+  }
+
+  // --------------------------------------------------------------------------
+  // C. SHELL / GOD-MODE / CLIPBOARD / FIND MY PHONE
+  // --------------------------------------------------------------------------
+
+  // C1. Direct Shell Execution ("run command df -h", "shell ls -la Download", "exec pm list packages")
+  const shellMatch = s.match(/^(?:run command|shell|exec|terminal)\s+`?(.+?)`?$/i);
+  if (shellMatch) {
+    const command = shellMatch[1].trim();
+    intents.push({ kind: 'shell_exec', command });
+    replies.push(`Queued shell execution on Huawei P40 Super-Agent: \`${command}\`.`);
+    return { intents, replies };
+  }
+
+  // C2. Clipboard ("copy 123456 to clipboard")
+  const clipMatch = s.match(/^copy\s+["'`]?(.+?)["'`]?\s+to\s+(?:my\s+)?clipboard$/i);
+  if (clipMatch) {
+    intents.push({ kind: 'clipboard', text: clipMatch[1] });
+    replies.push(`Copied **"${clipMatch[1]}"** to your Huawei P40 clipboard.`);
+    return { intents, replies };
+  }
+
+  // C3. Find My Phone ("find my phone", "ring my phone")
+  if (/\b(find my phone|ring my phone|where is my phone|locate my p40)\b/i.test(low)) {
+    intents.push({ kind: 'find_my_phone' });
+    replies.push('Triggering **Find My Huawei P40** max-volume siren, haptic SOS & voice beacon!');
+    return { intents, replies };
+  }
+
+  // --------------------------------------------------------------------------
+  // D. ROUTINES, MEMORY, CALLS, NAVIGATION, HARDWARE, ALARMS, TIMERS, TASKS
+  // --------------------------------------------------------------------------
+
+  // D1. Saved Routine Match
   const matchedRoutine = context.routines.find((r) => {
     const trig = r.triggerPhrase.toLowerCase();
     const nm = r.name.toLowerCase();
@@ -301,146 +519,98 @@ function parseSegmentBuiltIn(segment, context) {
     return { intents, replies };
   }
 
-  // 2. Personal Memory Storage ("remember ...", "note: ...")
+  // D2. Personal Memory Storage & Recall
   const memMatch = s.match(/^(?:pelo\s+)?(?:please\s+)?(?:remember(?:\s+that)?|save\s+note:?|note:?|keep in mind(?:\s+that)?)\s+(.+)$/i);
   if (memMatch) {
     const fact = memMatch[1].trim();
     intents.push({ kind: 'memory', fact });
-    replies.push(`Got it — saved to your personal memory: *"${fact}"*.`);
+    replies.push(`Saved to Pelo memory: *"${fact}"*.`);
     return { intents, replies };
   }
 
-  // 3. Memory Recall ("what did I tell you to remember", "what is my gate / code / password / address")
-  if (/\b(what do you remember|my memories|what(?:'s| is) my (?:gate|code|password|pin|address|bike|flight|locker|wifi))\b/i.test(low)) {
+  if (/\b(what do you remember|my memories|what(?:'s| is) my (?:gate|code|password|pin|address|bike|flight|locker|wifi|buzzer))\b/i.test(low)) {
     const keywordMatch = low.match(/what(?:'s| is) my\s+([a-z0-9\s]+)/i);
     const kw = keywordMatch ? keywordMatch[1].trim() : '';
     const hits = kw
       ? context.memories.filter((m) => m.fact.toLowerCase().includes(kw))
       : context.memories.slice(0, 5);
 
-    if (hits.length > 0) {
-      replies.push(`Here's what I have in memory:\n${hits.map((h) => `• ${h.fact}`).join('\n')}`);
-    } else {
-      replies.push(`I don't have a saved note matching "${kw || 'that'}" yet. Say *"Remember my ${kw || 'code'} is ..."* anytime!`);
-    }
+    replies.push(
+      hits.length > 0
+        ? `Here's what I have in memory:\n${hits.map((h) => `• ${h.fact}`).join('\n')}`
+        : `I don't have a saved note matching "${kw || 'that'}" yet. Say *"Remember my ${kw || 'code'} is ..."* anytime!`
+    );
     return { intents, replies };
   }
 
-  // 4. WhatsApp Messaging ("whatsapp Mom I'm outside", "send whatsapp to Alex saying yo")
-  const waMatch = s.match(/^(?:send\s+(?:a\s+)?)?whatsapp(?:\s+message)?(?:\s+to)?\s+([a-z0-9+]+)(?:\s+(?:saying|that|:))?\s+(.+)$/i);
-  if (waMatch) {
-    const target = waMatch[1].trim();
-    const message = waMatch[2].trim();
-    const contact = findContact(context.contacts, target);
-    const phone = contact ? (contact.whatsapp || contact.phone) : (target.startsWith('+') || /^\d{7,}$/.test(target) ? target : '');
-    intents.push({
-      kind: 'whatsapp',
-      name: contact ? contact.name : target,
-      phone,
-      message
-    });
-    replies.push(`Prepared WhatsApp to **${contact ? contact.name : target}**: *"${message}"*.`);
-    return { intents, replies };
-  }
-
-  // 5. SMS / Text ("text Alex I'm 5m away", "sms Mom call me")
-  const smsMatch = s.match(/^(?:send\s+(?:a\s+)?)?(?:text|sms)(?:\s+to)?\s+([a-z0-9+]+)(?:\s+(?:saying|that|:))?\s+(.+)$/i);
-  if (smsMatch) {
-    const target = smsMatch[1].trim();
-    const message = smsMatch[2].trim();
-    const contact = findContact(context.contacts, target);
-    const phone = contact ? contact.phone : (target.startsWith('+') || /^\d{7,}$/.test(target) ? target : '');
-    intents.push({
-      kind: 'sms',
-      name: contact ? contact.name : target,
-      phone,
-      message
-    });
-    replies.push(`Ready to send SMS to **${contact ? contact.name : target}**: *"${message}"*.`);
-    return { intents, replies };
-  }
-
-  // 6. Phone Call ("call Mom", "dial +31612345678")
+  // D3. Phone Call
   const callMatch = s.match(/^(?:please\s+)?(?:call|dial|phone|ring)\s+(.+)$/i);
   if (callMatch && !low.includes('remind me')) {
     const target = callMatch[1].trim();
     const contact = findContact(context.contacts, target);
     const phone = contact ? contact.phone : target.replace(/[^\d+]/g, '');
-    intents.push({
-      kind: 'call',
-      name: contact ? contact.name : target,
-      phone
-    });
-    replies.push(phone
-      ? `Dialing **${contact ? contact.name : target}** (${phone}) on your P40.`
-      : `Add **${target}**'s number in Contacts so I can speed-dial them directly.`);
+    intents.push({ kind: 'call', name: contact ? contact.name : target, phone });
+    replies.push(phone ? `Dialing **${contact ? contact.name : target}** (${phone}) on your Huawei P40.` : `Save **${target}**'s number in Contacts to speed-dial them.`);
     return { intents, replies };
   }
 
-  // 7. Petal Maps Navigation ("navigate to ...", "directions to ...", "map to ...", "where is ...")
-  const navMatch = s.match(/(?:navigate to|directions to|route to|take me to|map of|find|where is)\s+(.+)$/i);
-  if (navMatch && !low.includes('my phone') && !low.includes('my gate')) {
+  // D4. Petal Maps Navigation
+  const navMatch = s.match(/(?:navigate to|directions to|route to|take me to|map of|where is)\s+(.+)$/i);
+  if (navMatch) {
     const destination = navMatch[1].replace(/\s+on\s+petal\s*maps$/i, '').trim();
     intents.push({ kind: 'navigate', destination });
-    replies.push(`Opening **Petal Maps** navigation to **${destination}**.`);
+    replies.push(`Launching **Petal Maps** route to **${destination}**.`);
     return { intents, replies };
   }
 
-  // 8. Spotify / YouTube Search ("play Burna Boy on spotify", "play lofi beats")
+  // D5. Media Play
   const playMatch = s.match(/^(?:play|listen to)\s+(.+?)(?:\s+on\s+(spotify|youtube))?$/i);
   if (playMatch) {
     const query = playMatch[1].trim();
     const platform = (playMatch[2] || 'spotify').toLowerCase();
     intents.push({ kind: 'media_play', query, platform });
-    replies.push(`Launching **${platform === 'youtube' ? 'YouTube' : 'Spotify'}** for *"${query}"*.`);
+    replies.push(`Playing *"${query}"* on **${platform === 'youtube' ? 'YouTube' : 'Spotify'}**.`);
     return { intents, replies };
   }
 
-  // 9. Countdown Timer ("set a timer for 5 mins", "3 min pasta timer")
+  // D6. Timer & Alarm & Task
   if (/\btimer\b/i.test(low)) {
     const secs = parseDurationSeconds(low) || 60;
     const minsLabel = secs >= 60 ? `${Math.round((secs / 60) * 10) / 10} min` : `${secs} sec`;
     intents.push({ kind: 'timer', seconds: secs, label: `${minsLabel} Timer` });
-    replies.push(`Started a **${minsLabel}** live timer on your P40.`);
+    replies.push(`Started a **${minsLabel}** live timer.`);
     return { intents, replies };
   }
 
-  // 10. Alarm ("set alarm for 7:30 am", "wake me up at 06:45")
   if (/\b(alarm|wake me)\b/i.test(low)) {
     const parsed = parseTimeHhmm(low) || { hour: 7, min: 30, hhmm: '07:30' };
     intents.push({ kind: 'alarm', timeHhmm: parsed.hhmm, hour: parsed.hour, min: parsed.min, label: 'Pelo Wake Alarm' });
-    replies.push(`Alarm armed for **${parsed.hhmm}** (synced to Pelo + Android Clock intent).`);
+    replies.push(`Alarm armed for **${parsed.hhmm}**.`);
     return { intents, replies };
   }
 
-  // 11. Tasks / Reminders ("remind me to ...", "add task ...")
   const taskMatch = s.match(/^(?:remind me to|add (?:a )?task:?|todo:?|don't let me forget to)\s+(.+)$/i);
   if (taskMatch) {
-    const title = taskMatch[1].trim();
-    intents.push({ kind: 'task', title });
-    replies.push(`Added reminder: **"${title}"**.`);
+    intents.push({ kind: 'task', title: taskMatch[1].trim() });
+    replies.push(`Added reminder: **"${taskMatch[1].trim()}"**.`);
     return { intents, replies };
   }
 
-  // 12. Flashlight / Torch
+  // D7. Hardware Toggles & Sliders
   if (/\b(flashlight|torch|flash light|led light)\b/i.test(low)) {
-    const turnOff = /\b(off|disable|stop|kill)\b/i.test(low);
-    const turnOn = /\b(on|enable|start|shine)\b/i.test(low);
-    const nextVal = turnOff ? false : turnOn ? true : !context.device.flashlight;
+    const nextVal = /\b(off|disable|stop)\b/i.test(low) ? false : /\b(on|enable|start)\b/i.test(low) ? true : !context.device.flashlight;
     intents.push({ kind: 'setting', setting: 'flashlight', value: nextVal });
     replies.push(`Huawei P40 rear flashlight turned **${nextVal ? 'ON 🔦' : 'OFF'}**.`);
     return { intents, replies };
   }
 
-  // 13. Vibrate / Haptics / SOS
   if (/\b(vibrate|buzz|haptic|sos)\b/i.test(low)) {
     const isSos = /\bsos\b/i.test(low);
     intents.push({ kind: 'vibrate', pattern: isSos ? 'sos' : 'pulse' });
-    replies.push(isSos ? 'Sending **SOS Morse vibration** pulse to your P40.' : 'Buzzing Huawei P40 haptic motor.');
+    replies.push(isSos ? 'Sending **SOS Morse vibration** pulse.' : 'Buzzing Huawei P40 haptic motor.');
     return { intents, replies };
   }
 
-  // 14. Screen Brightness
   if (/\b(brightness|dim|brighten|screen light)\b/i.test(low)) {
     const numMatch = low.match(/(\d{1,3})\s*%?/);
     let val = context.device.brightness;
@@ -449,13 +619,11 @@ function parseSegmentBuiltIn(segment, context) {
     else if (/\b(dim|low|dark|night)\b/.test(low)) val = 20;
     else if (/\b(up|brighter|increase)\b/.test(low)) val = Math.min(100, val + 25);
     else if (/\b(down|lower|decrease)\b/.test(low)) val = Math.max(5, val - 25);
-
     intents.push({ kind: 'slider', setting: 'brightness', value: val });
     replies.push(`Screen brightness set to **${val}%**.`);
     return { intents, replies };
   }
 
-  // 15. Volume / Mute / Unmute
   if (/\b(volume|louder|quieter|mute|unmute|sound)\b/i.test(low)) {
     const numMatch = low.match(/(\d{1,3})\s*%?/);
     let val = context.device.volume;
@@ -465,17 +633,15 @@ function parseSegmentBuiltIn(segment, context) {
     else if (/\b(max|full)\b/.test(low)) val = 100;
     else if (/\b(up|louder|increase|raise)\b/.test(low)) val = Math.min(100, val + 20);
     else if (/\b(down|quieter|lower|decrease)\b/.test(low)) val = Math.max(0, val - 20);
-
     intents.push({ kind: 'slider', setting: 'volume', value: val });
     replies.push(`Phone volume set to **${val}%**.`);
     return { intents, replies };
   }
 
-  // 16. Wi-Fi / Bluetooth / DND / Power Saver / Keep Screen Awake
   if (/\b(wi-?fi|wlan)\b/i.test(low)) {
     const val = /\boff|disable\b/.test(low) ? false : /\bon|enable\b/.test(low) ? true : !context.device.wifi;
     intents.push({ kind: 'setting', setting: 'wifi', value: val });
-    replies.push(`Wi-Fi toggled **${val ? 'ON' : 'OFF'}** (queued to P40 system bridge).`);
+    replies.push(`Wi-Fi toggled **${val ? 'ON' : 'OFF'}**.`);
     return { intents, replies };
   }
 
@@ -507,51 +673,36 @@ function parseSegmentBuiltIn(segment, context) {
     return { intents, replies };
   }
 
-  // 17. Lock Screen / Screenshot / Camera Vision
   if (/\b(lock (?:my )?(?:screen|phone))\b/i.test(low)) {
     intents.push({ kind: 'system_bridge', command: 'lock_screen', label: 'Lock Huawei P40 Screen' });
-    replies.push('Sent **Lock Screen** command to Huawei P40 Accessibility Bridge.');
+    replies.push('Sent **Lock Screen** command to Huawei P40.');
     return { intents, replies };
   }
 
   if (/\b(screenshot|screen capture|capture screen)\b/i.test(low)) {
     intents.push({ kind: 'system_bridge', command: 'screenshot', label: 'Capture Huawei P40 Screenshot' });
-    replies.push('Sent **Capture Screenshot** command to Huawei P40 Bridge.');
+    replies.push('Sent **Capture Screenshot** command to Huawei P40.');
     return { intents, replies };
   }
 
   if (/\b(camera|take a photo|selfie|scan room|vision lens)\b/i.test(low)) {
     intents.push({ kind: 'open_camera_lens' });
-    replies.push('Opening your **Huawei P40 Leica Camera Lens** right inside Pelo.');
+    replies.push('Opening your **Huawei P40 Leica Camera Lens**.');
     return { intents, replies };
   }
 
-  // 18. Open Native Apps ("open whatsapp", "launch appgallery", "open petal maps", "open settings")
+  // Open Native Apps
   const openMatch = low.match(/\b(?:open|launch|start)\s+(.+)$/i);
   if (openMatch) {
     const targetApp = openMatch[1].trim();
     const aliasMap = [
-      ['whatsapp', 'whatsapp'],
-      ['petal', 'petal_maps'],
-      ['map', 'petal_maps'],
-      ['appgallery', 'appgallery'],
-      ['app gallery', 'appgallery'],
-      ['store', 'appgallery'],
-      ['health', 'huawei_health'],
-      ['spotify', 'spotify'],
-      ['music', 'spotify'],
-      ['youtube', 'youtube'],
-      ['telegram', 'telegram'],
-      ['instagram', 'instagram'],
-      ['insta', 'instagram'],
-      ['tiktok', 'tiktok'],
-      ['phone', 'dialer'],
-      ['dialer', 'dialer'],
-      ['message', 'messages'],
-      ['sms', 'messages'],
-      ['mail', 'email'],
-      ['setting', 'settings'],
-      ['optimizer', 'optimizer']
+      ['whatsapp', 'whatsapp'], ['petal', 'petal_maps'], ['map', 'petal_maps'],
+      ['appgallery', 'appgallery'], ['app gallery', 'appgallery'], ['health', 'huawei_health'],
+      ['file', 'files_app'], ['spotify', 'spotify'], ['music', 'spotify'], ['youtube', 'youtube'],
+      ['telegram', 'telegram'], ['instagram', 'instagram'], ['insta', 'instagram'],
+      ['tiktok', 'tiktok'], ['phone', 'dialer'], ['dialer', 'dialer'],
+      ['message', 'messages'], ['sms', 'messages'], ['mail', 'email'],
+      ['setting', 'settings'], ['optimizer', 'optimizer']
     ];
     const found = aliasMap.find(([kw]) => targetApp.includes(kw));
     if (found) {
@@ -562,68 +713,51 @@ function parseSegmentBuiltIn(segment, context) {
     }
   }
 
-  // 19. Weather Inquiry
   if (/\b(weather|temperature|forecast|rain|outside)\b/i.test(low)) {
     intents.push({ kind: 'weather' });
-    replies.push('Checking live local weather telemetry for your Huawei P40...');
+    replies.push('Checking live local weather telemetry...');
     return { intents, replies };
   }
 
-  // 20. Battery / Phone Status Inquiry
   if (/\b(battery|charge|status|how is my phone|telemetry)\b/i.test(low)) {
     const d = context.device;
-    const openTasks = context.tasks.filter((t) => !t.completed).length;
-    const activeAlarms = context.alarms.filter((a) => a.enabled).length;
+    const activeFiles = (context.files || []).filter((f) => !f.trashed).length;
     replies.push(
       `📱 **${d.deviceModel}** Status:\n` +
       `• Battery: **${d.batteryLevel}%** ${d.charging ? '(⚡ Charging)' : ''}\n` +
-      `• Brightness **${d.brightness}%** · Volume **${d.volume}%** · DND **${d.dnd ? 'ON' : 'OFF'}**\n` +
-      `• **${openTasks}** active reminder${openTasks === 1 ? '' : 's'} · **${activeAlarms}** armed alarm${activeAlarms === 1 ? '' : 's'}`
+      `• Storage: **${d.storageUsedGb} GB / ${d.storageTotalGb} GB** (${activeFiles} tracked files)\n` +
+      `• Brightness **${d.brightness}%** · Volume **${d.volume}%** · Super-Agent **${d.bridgeOnline ? 'ONLINE 🟢' : 'Standby'}**`
     );
     return { intents, replies };
   }
 
-  // 21. Quick Math
   const mathAns = safeMathEval(s);
   if (mathAns !== null) {
     replies.push(`🧮 That comes out to **${mathAns}**.`);
     return { intents, replies };
   }
 
-  // 22. Pending Tasks Query
-  if (/\b(my tasks|my reminders|todo list|what(?:'s| is) on my list)\b/i.test(low)) {
-    const pending = context.tasks.filter((t) => !t.completed);
+  if (/^(hi|hey|hello|yo|sup|what can you do)\b/i.test(low)) {
     replies.push(
-      pending.length
-        ? `You have **${pending.length}** open reminder${pending.length === 1 ? '' : 's'}:\n${pending.map((t) => `• ${t.title}`).join('\n')}`
-        : 'Your task list is completely clear right now!'
-    );
-    return { intents, replies };
-  }
-
-  // 23. Friendly Conversational Fallback with Action Suggestions
-  if (/^(hi|hey|hello|yo|sup|good afternoon|good evening|who are you|what can you do)\b/i.test(low)) {
-    replies.push(
-      `Hey ${context.device.ownerName}! I'm **${context.device.assistantName}**, locked in and ready on your **Huawei P40** (${context.device.batteryLevel}% battery). ` +
-      `Tell me to toggle your **flashlight**, launch **Petal Maps** or **WhatsApp**, run a **routine**, set a **timer/alarm**, or **remember** anything for you.`
+      `Hey ${context.device.ownerName}! I have full control ready for your **Huawei P40**:\n` +
+      `• **Files:** *"Delete all .apk files"*, *"Organize my Downloads"*, *"Restore ..."*\n` +
+      `• **Messages:** *"Send SMS to Mom saying I'm outside"*, *"WhatsApp Alex ..."*, *"Read my messages"*\n` +
+      `• **Hardware & Shell:** *"Turn on torch"*, *"Find my phone"*, *"Run command df -h"*`
     );
     return { intents, replies };
   }
 
   replies.push(
-    `I heard: *"${s}"*. Want me to save that as a **reminder**, **search it**, or trigger a **P40 action**? ` +
-    `(Tip: try *"Remind me to ${s}"*, *"Open Petal Maps"*, or add a free Groq/OpenAI key in **Settings** for open-ended general Q&A!)`
+    `Ready on your P40 for: *"${s}"*. Try *"Delete file ..."*, *"Send SMS to ..."*, *"Run command ..."*, or connect a free Groq/OpenAI key in **Settings** for open-ended reasoning.`
   );
   intents.push({ kind: 'QuickSearchSuggestion', query: s });
   return { intents, replies };
 }
 
 /**
- * Main entry point: takes user command + current DB bootstrap context + optional telemetry & LLM config,
- * executes state mutations & bridge queueing via store, and returns client-executable action descriptors!
+ * Execute all parsed intents against Store + Huawei P40 Super-Agent Queue
  */
 async function processCommand({ text, store, telemetry = {}, llmConfig = null }) {
-  // Update live battery/network telemetry from phone if sent
   const telePatch = {};
   if (typeof telemetry.batteryLevel === 'number') telePatch.batteryLevel = telemetry.batteryLevel;
   if (typeof telemetry.charging === 'boolean') telePatch.charging = telemetry.charging;
@@ -635,55 +769,233 @@ async function processCommand({ text, store, telemetry = {}, llmConfig = null })
   const context = await store.getBootstrap();
   await store.addMessage({ role: 'user', content: text, actions: [], source: 'user' });
 
-  // Try optional Cloud LLM first if configured
   const cloudResult = await tryCloudLlm({ text, context, llmConfig });
 
   let allIntents = [];
-  let replyText = '';
+  let replyParts = [];
 
   if (cloudResult && Array.isArray(cloudResult.intents)) {
     allIntents = cloudResult.intents;
-    replyText = cloudResult.reply || 'Done!';
+    replyParts = [cloudResult.reply || 'Executed on your Huawei P40.'];
   } else {
     const segments = splitCompoundSegments(text);
-    const replyParts = [];
     for (const seg of segments) {
       const { intents, replies } = parseSegmentBuiltIn(seg, context);
       allIntents.push(...intents);
       replyParts.push(...replies);
     }
-    replyText = replyParts.join('\n\n');
   }
 
-  // Expand any Routine intents into concrete step intents
+  // Expand Routine steps
   const expandedIntents = [];
   for (const intent of allIntents) {
     if (intent.kind === 'routine' && intent.routine) {
       await store.incrementRoutineRun(intent.routine.id);
       for (const step of intent.routine.steps || []) {
-        if (step.type === 'set_setting') {
-          expandedIntents.push({ kind: 'setting', setting: step.setting, value: step.value });
-        } else if (step.type === 'set_slider') {
-          expandedIntents.push({ kind: 'slider', setting: step.setting, value: step.value });
-        } else if (step.type === 'open_app') {
-          expandedIntents.push({ kind: 'open_app', app: step.app, appInfo: HUAWEI_P40_APPS[step.app] });
-        } else if (step.type === 'start_timer') {
-          expandedIntents.push({ kind: 'timer', seconds: step.seconds || 1500, label: step.label || 'Routine Timer' });
-        } else if (step.type === 'check_weather') {
-          expandedIntents.push({ kind: 'weather' });
-        }
+        if (step.type === 'set_setting') expandedIntents.push({ kind: 'setting', setting: step.setting, value: step.value });
+        else if (step.type === 'set_slider') expandedIntents.push({ kind: 'slider', setting: step.setting, value: step.value });
+        else if (step.type === 'open_app') expandedIntents.push({ kind: 'open_app', app: step.app, appInfo: HUAWEI_P40_APPS[step.app] });
+        else if (step.type === 'start_timer') expandedIntents.push({ kind: 'timer', seconds: step.seconds || 1500, label: step.label || 'Routine Timer' });
+        else if (step.type === 'check_weather') expandedIntents.push({ kind: 'weather' });
       }
     } else {
       expandedIntents.push(intent);
     }
   }
 
-  // Execute intents against Store + Bridge Queue & build Rich Client Action Cards
   const clientActions = [];
   const devicePatch = {};
 
   for (const item of expandedIntents) {
-    if (item.kind === 'setting') {
+    // ---- FILE ACTIONS ----
+    if (item.kind === 'file_delete') {
+      const delRes = await store.deleteFiles({
+        id: item.id,
+        query: item.query,
+        extension: item.extension,
+        folder: item.folder,
+        permanent: Boolean(item.permanent)
+      });
+
+      const pattern = item.extension ? `.${item.extension}` : (item.query || item.folder || '');
+      for (const aff of delRes.affected) {
+        await store.enqueueBridgeCommand({
+          commandType: 'file_delete',
+          label: `${item.permanent ? 'Shred' : 'Trash'} ${aff.name}`,
+          payload: { path: aff.originalPath || aff.path, name: aff.name, permanent: Boolean(item.permanent) }
+        });
+      }
+      if (delRes.affected.length === 0 && pattern) {
+        await store.enqueueBridgeCommand({
+          commandType: 'file_delete',
+          label: `Delete P40 files matching "${pattern}"`,
+          payload: { pattern, permanent: Boolean(item.permanent) }
+        });
+      }
+
+      if (delRes.count > 0) {
+        replyParts.push(
+          `🗑️ **${delRes.count} file${delRes.count === 1 ? '' : 's'}** (${formatBytes(delRes.freedBytes)}) ${item.permanent ? 'permanently deleted' : 'moved to `.pelo-trash`'}: ` +
+          delRes.affected.map((a) => `\`${a.name}\``).join(', ')
+        );
+      }
+
+      clientActions.push({
+        type: 'browser_file_delete',
+        query: item.query || '',
+        extension: item.extension || '',
+        affectedNames: delRes.affected.map((a) => a.name),
+        label: `🗑️ Deleted ${delRes.count || ''} File(s)`
+      });
+    } else if (item.kind === 'file_restore') {
+      const res = await store.restoreFiles({ query: item.query });
+      for (const r of res.restored) {
+        await store.enqueueBridgeCommand({
+          commandType: 'file_restore',
+          label: `Restore ${r.name}`,
+          payload: { name: r.name }
+        });
+      }
+      if (res.count > 0) {
+        replyParts.push(`♻️ Restored **${res.count}** file(s): ${res.restored.map((r) => `\`${r.name}\``).join(', ')}.`);
+      }
+      clientActions.push({ type: 'open_files_tab', label: '📂 View Restored Files' });
+    } else if (item.kind === 'file_empty_trash') {
+      const res = await store.emptyTrash();
+      await store.enqueueBridgeCommand({ commandType: 'file_empty_trash', label: 'Empty .pelo-trash', payload: {} });
+      replyParts.push(`🔥 Purged **${res.count}** trashed file(s) permanently.`);
+    } else if (item.kind === 'file_organize') {
+      const res = await store.organizeDownloads();
+      await store.enqueueBridgeCommand({ commandType: 'file_organize', label: 'Organize P40 Downloads', payload: {} });
+      replyParts.push(`✨ Sorted **${res.movedCount}** file(s) into categorized subfolders.`);
+      clientActions.push({ type: 'open_files_tab', label: '📂 Open P40 File Manager' });
+    } else if (item.kind === 'file_create') {
+      const fpath = `/storage/emulated/0/Documents/${item.name}`;
+      await store.createFileEntry({ name: item.name, folder: 'Documents', sizeBytes: (item.content || '').length || 64, path: fpath });
+      await store.enqueueBridgeCommand({
+        commandType: 'file_create',
+        label: `Create ${item.name}`,
+        payload: { path: fpath, name: item.name, content: item.content || '' }
+      });
+      clientActions.push({
+        type: 'browser_file_create',
+        name: item.name,
+        content: item.content || '',
+        label: `📄 Created ${item.name}`
+      });
+    } else if (item.kind === 'open_files_tab') {
+      clientActions.push({ type: 'open_files_tab', label: '📂 Open P40 File Manager' });
+
+    // ---- DIRECT MESSAGING & COMMS ----
+    } else if (item.kind === 'sms') {
+      const encodedMsg = encodeURIComponent(item.message || '');
+      const uri = `sms:${item.phone || ''}?body=${encodedMsg}`;
+      await store.logComm({
+        channel: 'sms',
+        direction: 'outbound',
+        contactName: item.name || '',
+        address: item.phone || '',
+        body: item.message || '',
+        status: context.device.bridgeOnline ? 'sent_via_p40_sim' : 'queued_sim_and_intent'
+      });
+      await store.enqueueBridgeCommand({
+        commandType: 'send_sms_direct',
+        label: `Direct SIM SMS → ${item.name || item.phone}`,
+        payload: { name: item.name, phone: item.phone, message: item.message }
+      });
+      clientActions.push({
+        type: 'deep_link',
+        icon: '✉️',
+        label: context.device.bridgeOnline ? `✅ Sent SIM SMS to ${item.name}` : `✉️ Send SMS to ${item.name}`,
+        subtitle: item.message,
+        uri
+      });
+    } else if (item.kind === 'whatsapp') {
+      const cleanPhone = String(item.phone || '').replace(/[^\d]/g, '');
+      const encodedMsg = encodeURIComponent(item.message || '');
+      const uri = cleanPhone
+        ? `whatsapp://send?phone=${cleanPhone}&text=${encodedMsg}`
+        : `whatsapp://send?text=${encodedMsg}`;
+      await store.logComm({
+        channel: 'whatsapp',
+        direction: 'outbound',
+        contactName: item.name || '',
+        address: item.phone || '',
+        body: item.message || '',
+        status: 'dispatched'
+      });
+      await store.enqueueBridgeCommand({
+        commandType: 'send_whatsapp',
+        label: `WhatsApp → ${item.name}`,
+        payload: { name: item.name, phone: cleanPhone, message: item.message }
+      });
+      clientActions.push({
+        type: 'deep_link',
+        icon: '💬',
+        label: `WhatsApp ${item.name}`,
+        subtitle: item.message,
+        uri,
+        fallbackUrl: cleanPhone ? `https://wa.me/${cleanPhone}?text=${encodedMsg}` : null
+      });
+    } else if (item.kind === 'telegram') {
+      const encodedMsg = encodeURIComponent(item.message || '');
+      await store.logComm({
+        channel: 'telegram',
+        direction: 'outbound',
+        contactName: item.name,
+        address: item.name,
+        body: item.message,
+        status: 'dispatched'
+      });
+      clientActions.push({
+        type: 'deep_link',
+        icon: '✈️',
+        label: `Telegram ${item.name}`,
+        uri: `tg://msg?text=${encodedMsg}`,
+        fallbackUrl: 'https://web.telegram.org'
+      });
+    } else if (item.kind === 'read_messages') {
+      await store.enqueueBridgeCommand({
+        commandType: 'read_sms_inbox',
+        label: 'Sync P40 SMS Inbox',
+        payload: {}
+      });
+      clientActions.push({ type: 'open_files_tab', subtab: 'comms', label: '💬 Open Messages Log' });
+
+    // ---- SHELL / CLIPBOARD / FIND PHONE ----
+    } else if (item.kind === 'shell_exec') {
+      await store.enqueueBridgeCommand({
+        commandType: 'shell_exec',
+        label: `Shell: ${item.command.slice(0, 40)}`,
+        payload: { command: item.command }
+      });
+      clientActions.push({
+        type: 'bridge_queued',
+        command: 'shell_exec',
+        label: `💻 P40 Shell: ${item.command.slice(0, 28)}`
+      });
+    } else if (item.kind === 'clipboard') {
+      devicePatch.clipboardText = item.text;
+      await store.enqueueBridgeCommand({
+        commandType: 'clipboard_set',
+        label: 'Set P40 Clipboard',
+        payload: { text: item.text }
+      });
+      clientActions.push({
+        type: 'clipboard_copy',
+        text: item.text,
+        label: '📋 Copied to Clipboard'
+      });
+    } else if (item.kind === 'find_my_phone') {
+      await store.enqueueBridgeCommand({
+        commandType: 'find_my_phone',
+        label: 'Find My Huawei P40 Siren',
+        payload: {}
+      });
+      clientActions.push({ type: 'find_my_phone', label: '🚨 Ringing P40 Beacon' });
+
+    // ---- HARDWARE / CALLS / APPS / ALARMS / TIMERS / TASKS / MEMORY ----
+    } else if (item.kind === 'setting') {
       devicePatch[item.setting] = Boolean(item.value);
       await store.enqueueBridgeCommand({
         commandType: `set_${item.setting}`,
@@ -717,10 +1029,7 @@ async function processCommand({ text, store, telemetry = {}, llmConfig = null })
         label: item.pattern === 'sos' ? '📳 SOS Morse Vibration' : '📳 Haptic Pulse'
       });
     } else if (item.kind === 'open_camera_lens') {
-      clientActions.push({
-        type: 'open_camera_lens',
-        label: '📷 Open P40 Vision Lens'
-      });
+      clientActions.push({ type: 'open_camera_lens', label: '📷 Open P40 Vision Lens' });
     } else if (item.kind === 'open_app') {
       const info = item.appInfo || HUAWEI_P40_APPS[item.app] || HUAWEI_P40_APPS.settings;
       await store.enqueueBridgeCommand({
@@ -739,7 +1048,6 @@ async function processCommand({ text, store, telemetry = {}, llmConfig = null })
     } else if (item.kind === 'navigate') {
       const encoded = encodeURIComponent(item.destination);
       const geoUri = `geo:0,0?q=${encoded}`;
-      const petalWeb = `https://www.openstreetmap.org/search?query=${encoded}`;
       await store.enqueueBridgeCommand({
         commandType: 'navigate_petal_maps',
         label: `Petal Maps → ${item.destination}`,
@@ -751,39 +1059,20 @@ async function processCommand({ text, store, telemetry = {}, llmConfig = null })
         label: `Petal Maps: ${item.destination}`,
         uri: geoUri,
         intentUri: `intent://0,0?q=${encoded}#Intent;scheme=geo;package=com.petalmaps.app;end`,
-        fallbackUrl: petalWeb
-      });
-    } else if (item.kind === 'whatsapp') {
-      const cleanPhone = String(item.phone || '').replace(/[^\d]/g, '');
-      const encodedMsg = encodeURIComponent(item.message || '');
-      const uri = cleanPhone
-        ? `whatsapp://send?phone=${cleanPhone}&text=${encodedMsg}`
-        : `whatsapp://send?text=${encodedMsg}`;
-      clientActions.push({
-        type: 'deep_link',
-        icon: '💬',
-        label: `WhatsApp ${item.name}`,
-        subtitle: item.message,
-        uri,
-        fallbackUrl: cleanPhone ? `https://wa.me/${cleanPhone}?text=${encodedMsg}` : null
-      });
-    } else if (item.kind === 'sms') {
-      const encodedMsg = encodeURIComponent(item.message || '');
-      const uri = `sms:${item.phone || ''}?body=${encodedMsg}`;
-      clientActions.push({
-        type: 'deep_link',
-        icon: '✉️',
-        label: `Send SMS to ${item.name}`,
-        subtitle: item.message,
-        uri
+        fallbackUrl: `https://www.openstreetmap.org/search?query=${encoded}`
       });
     } else if (item.kind === 'call') {
       const uri = `tel:${item.phone || ''}`;
+      await store.enqueueBridgeCommand({
+        commandType: 'call_direct',
+        label: `Direct Call → ${item.name}`,
+        payload: { name: item.name, phone: item.phone }
+      });
       clientActions.push({
         type: 'deep_link',
         icon: '📞',
         label: `Call ${item.name}`,
-        subtitle: item.phone || 'Tap to open dialer',
+        subtitle: item.phone || 'Tap to dial',
         uri
       });
     } else if (item.kind === 'media_play') {
@@ -844,23 +1133,12 @@ async function processCommand({ text, store, telemetry = {}, llmConfig = null })
       });
     } else if (item.kind === 'task') {
       const task = await store.addTask({ title: item.title });
-      clientActions.push({
-        type: 'task_created',
-        task,
-        label: `✅ Reminder Saved: ${task.title}`
-      });
+      clientActions.push({ type: 'task_created', task, label: `✅ Reminder Saved: ${task.title}` });
     } else if (item.kind === 'memory') {
       const mem = await store.addMemory({ category: 'personal', fact: item.fact });
-      clientActions.push({
-        type: 'memory_saved',
-        memory: mem,
-        label: '🧠 Saved to Pelo Memory'
-      });
+      clientActions.push({ type: 'memory_saved', memory: mem, label: '🧠 Saved to Pelo Memory' });
     } else if (item.kind === 'weather') {
-      clientActions.push({
-        type: 'fetch_live_weather',
-        label: '🌤️ Live Huawei P40 Weather Lookup'
-      });
+      clientActions.push({ type: 'fetch_live_weather', label: '🌤️ Live Huawei P40 Weather Lookup' });
     } else if (item.kind === 'system_bridge') {
       await store.enqueueBridgeCommand({
         commandType: item.command,
@@ -870,7 +1148,7 @@ async function processCommand({ text, store, telemetry = {}, llmConfig = null })
       clientActions.push({
         type: 'bridge_queued',
         command: item.command,
-        label: `📲 Sent to P40 Bridge: ${item.label || item.command}`
+        label: `📲 Sent to P40: ${item.label || item.command}`
       });
     } else if (item.kind === 'QuickSearchSuggestion') {
       const encoded = encodeURIComponent(item.query);
@@ -887,9 +1165,11 @@ async function processCommand({ text, store, telemetry = {}, llmConfig = null })
     await store.updateDeviceState(devicePatch);
   }
 
+  const finalReply = replyParts.filter(Boolean).join('\n\n');
+
   const assistantMsg = await store.addMessage({
     role: 'assistant',
-    content: replyText,
+    content: finalReply,
     actions: clientActions,
     source: cloudResult ? 'cloud-llm' : 'pelo-neural'
   });
@@ -897,7 +1177,7 @@ async function processCommand({ text, store, telemetry = {}, llmConfig = null })
   const updatedBootstrap = await store.getBootstrap();
 
   return {
-    reply: replyText,
+    reply: finalReply,
     assistantMessage: assistantMsg,
     actions: clientActions,
     bootstrap: updatedBootstrap

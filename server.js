@@ -8,15 +8,20 @@ const HOST = process.env.HOST || '0.0.0.0';
 
 app.disable('x-powered-by');
 app.set('trust proxy', true);
-app.use(express.json({ limit: '512kb' }));
+app.use(express.json({ limit: '1mb' }));
 
-// Allow live browser preview & cross-origin MacroDroid/Tasker requests from Huawei P40
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   if (req.method === 'OPTIONS') return res.status(204).end();
   next();
+});
+
+// Shortcut 1-liner installer: curl -sL https://<host>/agent.sh | bash
+app.get('/agent.sh', (req, res, next) => {
+  req.url = '/api/bridge/agent.sh';
+  app._router.handle(req, res, next);
 });
 
 app.use('/api', apiRouter);
@@ -40,7 +45,7 @@ app.use((err, req, res, _next) => {
 
 if (require.main === module) {
   app.listen(PORT, HOST, () => {
-    console.log(`✦ PELO Personal AI (Huawei P40 Edition) listening on http://${HOST}:${PORT}`);
+    console.log(`✦ PELO Unrestricted Personal AI (Huawei P40 v3) listening on http://${HOST}:${PORT}`);
   });
 }
 

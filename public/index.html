@@ -6,27 +6,23 @@
   <meta name="theme-color" content="#05070f" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <title>PELO — Personal AI OS · Huawei P40 Edition</title>
+  <title>PELO v3 — Unrestricted Personal AI · Huawei P40</title>
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="icon" href="/icon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="/css/styles.css" />
 </head>
 <body>
-  <!-- Software OLED Brightness Dimmer Overlay -->
   <div id="brightness-dimmer" aria-hidden="true"></div>
 
   <div class="desktop-stage" id="desktop-stage">
-    <!-- ================================================================== -->
-    <!-- MAIN HUAWEI P40 MOBILE APP SHELL                                   -->
-    <!-- ================================================================== -->
     <div class="p40-shell">
-      <!-- Top Huawei P40 OLED Status & Telemetry Bar -->
+      <!-- Top Huawei P40 Status Header -->
       <header class="status-header">
         <div class="brand-cluster">
           <span class="pulse-dot" id="bridge-dot"></span>
           <div>
-            <div class="app-title" id="header-assistant-name">PELO AI</div>
-            <div class="device-sub" id="header-device-sub">HUAWEI P40 · HMS READY</div>
+            <div class="app-title" id="header-assistant-name">PELO AI v3</div>
+            <div class="device-sub" id="header-device-sub">HUAWEI P40 · FULL ACCESS</div>
           </div>
         </div>
         <div class="telemetry-cluster">
@@ -36,7 +32,6 @@
         </div>
       </header>
 
-      <!-- Active Countdown Timer Banner (Hidden unless a timer is ticking) -->
       <div class="live-timer-banner hidden" id="live-timer-banner">
         <span id="live-timer-label">⏱️ Timer</span>
         <strong id="live-timer-countdown">00:00</strong>
@@ -44,26 +39,26 @@
       </div>
 
       <!-- ================================================================ -->
-      <!-- VIEW 1: AI ASSISTANT & VOICE ORB                                 -->
+      <!-- VIEW 1: PELO VOICE ORB & UNRESTRICTED CHAT                       -->
       <!-- ================================================================ -->
       <main class="tab-view active" id="view-assistant">
         <section class="orb-hero">
           <button class="orb-button" id="btn-orb-mic" aria-label="Tap to speak to Pelo">
             <canvas id="pelo-orb-canvas" width="128" height="128"></canvas>
           </button>
-          <div class="orb-status" id="orb-status-text">Tap orb to speak · Built for Huawei P40</div>
+          <div class="orb-status" id="orb-status-text">Tap orb to speak · Files, SMS, Apps &amp; Hardware</div>
         </section>
 
         <section class="chat-stream" id="chat-stream" aria-live="polite"></section>
 
         <div class="quick-chips" id="quick-chips">
+          <button class="chip" data-cmd="Delete all .apk files">🗑️ Clean .apk Files</button>
+          <button class="chip" data-cmd="Send SMS to Mom saying I'm on my way home">✉️ Text Mom</button>
+          <button class="chip" data-cmd="Read my messages">💬 Read Messages</button>
+          <button class="chip" data-cmd="Organize my Downloads folder">📂 Organize Files</button>
           <button class="chip" data-cmd="Turn on flashlight">🔦 Torch On</button>
-          <button class="chip" data-cmd="What's the weather right now?">🌤️ Weather</button>
-          <button class="chip" data-cmd="Set a timer for 3 minutes">⏱️ 3m Timer</button>
-          <button class="chip" data-cmd="Going out">🚶 Going Out</button>
           <button class="chip" data-cmd="Navigate to Dam Square">🗺️ Petal Maps</button>
-          <button class="chip" data-cmd="Goodnight">🌙 Sleep Mode</button>
-          <button class="chip" data-cmd="Phone status">🔋 P40 Status</button>
+          <button class="chip" data-cmd="Find my phone">🚨 Find P40</button>
         </div>
 
         <form class="command-bar" id="command-form">
@@ -71,7 +66,7 @@
           <input
             type="text"
             id="command-input"
-            placeholder="Tell Pelo what to do on your P40..."
+            placeholder="Delete files, send SMS/WhatsApp, run anything..."
             autocomplete="off"
           />
           <button type="submit" class="send-btn" aria-label="Send command">➤</button>
@@ -79,16 +74,98 @@
       </main>
 
       <!-- ================================================================ -->
-      <!-- VIEW 2: HUAWEI P40 SUPER CONTROL CENTER                          -->
+      <!-- VIEW 2: FILES & DIRECT MESSAGES (UNRESTRICTED EXECUTION)         -->
+      <!-- ================================================================ -->
+      <section class="tab-view" id="view-files">
+        <div class="scroll-pane">
+          <!-- Sub-toggle between Files Manager & Messages Center -->
+          <div class="seg-switch">
+            <button class="seg-btn active" id="seg-files-btn">📂 P40 File Manager</button>
+            <button class="seg-btn" id="seg-comms-btn">💬 Direct Messages</button>
+          </div>
+
+          <!-- PANE A: HUAWEI P40 FILE MANAGER -->
+          <div id="subpane-files" class="subpane">
+            <div class="card-box highlight-card">
+              <div class="slider-label">
+                <span>💾 Huawei P40 Internal Storage</span>
+                <strong id="storage-summary-lbl">58.4 GB / 128 GB</strong>
+              </div>
+              <div class="storage-bar"><div class="storage-fill" id="storage-bar-fill" style="width:45%"></div></div>
+              <div class="btn-row">
+                <button type="button" class="mini-btn accent" id="btn-mount-folder">📂 Mount Real Device Folder</button>
+                <button type="button" class="mini-btn accent" id="btn-clean-junk">🧹 Delete .apk / .tmp</button>
+                <button type="button" class="mini-btn" id="btn-organize-dl">✨ Organize</button>
+                <button type="button" class="mini-btn" id="btn-restore-all">♻️ Undo Trash</button>
+                <button type="button" class="mini-btn danger" id="btn-empty-trash">🔥 Empty Trash</button>
+              </div>
+            </div>
+
+            <!-- Create New File on P40 -->
+            <form class="card-box inline-form" id="form-create-file">
+              <div class="two-col">
+                <input type="text" id="new-file-name" placeholder="Filename (e.g. todo.txt)" required />
+                <button type="submit" class="mini-btn accent">+ Create File</button>
+              </div>
+              <input type="text" id="new-file-content" placeholder="File text content..." />
+            </form>
+
+            <!-- Mounted Real Browser Folder Files (if mounted) -->
+            <div id="mounted-files-wrap" class="hidden">
+              <div class="section-head">
+                <h3>🟢 Live Mounted Device Folder</h3>
+                <span class="badge-tag" id="mounted-folder-name">Real Disk</span>
+              </div>
+              <div class="stack-list" id="mounted-files-list"></div>
+            </div>
+
+            <!-- Huawei P40 Storage Index -->
+            <div class="section-head">
+              <h3>📱 Huawei P40 `/storage/emulated/0`</h3>
+              <span class="muted-small" id="files-count-lbl">0 files</span>
+            </div>
+            <div class="stack-list" id="p40-files-list"></div>
+          </div>
+
+          <!-- PANE B: DIRECT SMS / WHATSAPP / TELEGRAM COMPOSER & INBOX -->
+          <div id="subpane-comms" class="subpane hidden">
+            <form class="card-box inline-form highlight-card" id="form-send-comm">
+              <h3>📨 Send Direct Message (SIM SMS / WhatsApp / Telegram)</h3>
+              <div class="two-col">
+                <select id="comm-channel">
+                  <option value="sms">✉️ Direct SIM SMS</option>
+                  <option value="whatsapp">💬 WhatsApp</option>
+                  <option value="telegram">✈️ Telegram</option>
+                </select>
+                <input type="text" id="comm-recipient" placeholder="Contact name or +316..." required />
+              </div>
+              <input type="text" id="comm-body" placeholder="Type message to send..." required />
+              <div class="check-row">
+                <input type="checkbox" id="comm-open-app" checked />
+                <span>Also trigger instant native app URI if Super-Agent is offline</span>
+              </div>
+              <button type="submit" class="primary-btn">🚀 Dispatch Message Now</button>
+            </form>
+
+            <div class="section-head">
+              <h3>📥 Synced Inbox &amp; Sent Log</h3>
+              <button type="button" class="mini-btn accent" id="btn-sync-sms">🔄 Sync P40 SMS</button>
+            </div>
+            <div class="stack-list" id="comms-log-list"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================================================================ -->
+      <!-- VIEW 3: HUAWEI P40 SUPER CONTROL CENTER                          -->
       <!-- ================================================================ -->
       <section class="tab-view" id="view-controls">
         <div class="scroll-pane">
           <div class="section-head">
             <h2>EMUI Super Control Deck</h2>
-            <span class="badge-tag">Direct + Bridge</span>
+            <span class="badge-tag">Direct + Agent</span>
           </div>
 
-          <!-- 2x4 Hardware Tile Grid -->
           <div class="tiles-grid">
             <button class="hw-tile" data-toggle="flashlight" id="tile-flashlight">
               <span class="tile-icon">🔦</span>
@@ -132,7 +209,6 @@
             </button>
           </div>
 
-          <!-- Brightness & Volume Touch Sliders -->
           <div class="card-box sliders-card">
             <div class="slider-row">
               <div class="slider-label">
@@ -143,14 +219,13 @@
             </div>
             <div class="slider-row">
               <div class="slider-label">
-                <span>🔊 Media & Ring Volume</span>
+                <span>🔊 Media &amp; Ring Volume</span>
                 <strong id="lbl-volume">65%</strong>
               </div>
               <input type="range" min="0" max="100" value="65" id="slider-volume" />
             </div>
           </div>
 
-          <!-- 1-Tap Smart Routines -->
           <div class="section-head">
             <h2>1-Tap Smart Routines</h2>
             <button class="mini-btn" id="btn-toggle-new-routine">+ Custom</button>
@@ -169,24 +244,20 @@
 
           <div class="routines-list" id="routines-list"></div>
 
-          <!-- Huawei P40 Native App Launcher Dock -->
           <div class="section-head">
             <h2>Huawei P40 App Launcher</h2>
-            <span class="muted-small">HMS & Intent Ready</span>
+            <span class="muted-small">HMS &amp; Intent Ready</span>
           </div>
           <div class="app-dock-grid" id="app-dock-grid"></div>
         </div>
       </section>
 
       <!-- ================================================================ -->
-      <!-- VIEW 3: LIFE HUB (ALARMS, TASKS, MEMORY, SPEED-DIAL CONTACTS)    -->
+      <!-- VIEW 4: LIFE HUB                                                 -->
       <!-- ================================================================ -->
       <section class="tab-view" id="view-hub">
         <div class="scroll-pane">
-          <!-- Alarms & Timers -->
-          <div class="section-head">
-            <h2>⏰ Alarms & Timers</h2>
-          </div>
+          <div class="section-head"><h2>⏰ Alarms &amp; Timers</h2></div>
           <form class="card-box row-form" id="form-alarm">
             <input type="time" id="alarm-time" value="07:30" required />
             <input type="text" id="alarm-label" placeholder="Alarm label..." />
@@ -194,20 +265,16 @@
           </form>
           <div class="stack-list" id="alarms-list"></div>
 
-          <!-- Tasks & Reminders -->
-          <div class="section-head">
-            <h2>✅ Reminders & Tasks</h2>
-          </div>
+          <div class="section-head"><h2>✅ Reminders &amp; Tasks</h2></div>
           <form class="card-box row-form" id="form-task">
             <input type="text" id="task-title" placeholder="New reminder..." required />
             <button type="submit" class="mini-btn accent">+ Add</button>
           </form>
           <div class="stack-list" id="tasks-list"></div>
 
-          <!-- Speed-Dial & WhatsApp Contacts -->
           <div class="section-head">
             <h2>👥 Voice Contacts</h2>
-            <span class="muted-small">"Call Mom" / "WhatsApp Alex"</span>
+            <span class="muted-small">"Text Mom" / "WhatsApp Alex"</span>
           </div>
           <form class="card-box inline-form" id="form-contact">
             <div class="two-col">
@@ -218,10 +285,7 @@
           </form>
           <div class="stack-list" id="contacts-list"></div>
 
-          <!-- Personal AI Memory Vault -->
-          <div class="section-head">
-            <h2>🧠 Pelo Memory Vault</h2>
-          </div>
+          <div class="section-head"><h2>🧠 Pelo Memory Vault</h2></div>
           <form class="card-box row-form" id="form-memory">
             <input type="text" id="memory-fact" placeholder="Fact for Pelo to remember..." required />
             <button type="submit" class="mini-btn accent">Save</button>
@@ -231,51 +295,42 @@
       </section>
 
       <!-- ================================================================ -->
-      <!-- VIEW 4: HUAWEI P40 SYSTEM BRIDGE & DIAGNOSTICS                   -->
+      <!-- VIEW 5: HUAWEI P40 SUPER-AGENT, SHELL & BRIDGE                   -->
       <!-- ================================================================ -->
       <section class="tab-view" id="view-bridge">
         <div class="scroll-pane">
           <div class="section-head">
-            <h2>📲 Huawei P40 Full-OS Bridge</h2>
-            <span class="badge-tag" id="bridge-status-pill">Ready to Pair</span>
+            <h2>📲 Huawei P40 Super-Agent</h2>
+            <span class="badge-tag" id="bridge-status-pill">Standby</span>
           </div>
 
           <div class="card-box highlight-card">
             <p class="card-lead">
-              <strong>How Pelo controls 100% of your Huawei P40:</strong><br />
-              Flashlight, Haptics, Wake-Lock, Alarms, Camera, WhatsApp, Calls &amp; Petal Maps work <strong>immediately</strong> right here.
-              To let Pelo also toggle system Wi-Fi, Bluetooth, Brightness, Lock Screen &amp; Background Actions without Google Services, pair free <strong>MacroDroid</strong> in 4 quick steps:
+              <strong>Unlock 100% Unrestricted Huawei P40 Control (Zero GMS):</strong><br />
+              Install free <strong>Termux</strong> + <strong>Termux:API</strong> from F-Droid/AppGallery on your Huawei P40, then paste this single command to connect full `/storage/emulated/0` file deletion, zero-tap background SIM SMS, direct calls &amp; shell execution:
             </p>
-            <ol class="setup-steps">
-              <li>Install <strong>MacroDroid</strong> from <strong>Huawei AppGallery</strong> (100% GMS-free).</li>
-              <li>Download your custom pre-linked P40 Bridge Blueprint below.</li>
-              <li>In Huawei <strong>Optimizer (Phone Manager) → App Launch</strong>, switch MacroDroid to <strong>Manage Manually</strong> (Auto-launch + Run in background ON).</li>
-              <li>Enable <strong>Settings → Accessibility → MacroDroid</strong> for hands-free screen lock &amp; UI automation.</li>
-            </ol>
+            <div class="url-copy-box" style="margin-top:8px;">
+              <code id="agent-oneliner">curl -sL https://pelo-lite-five.vercel.app/agent.sh | bash</code>
+              <button type="button" class="mini-btn accent" id="btn-copy-agent">Copy</button>
+            </div>
             <div class="btn-row">
-              <a class="primary-btn" href="/api/bridge/macrodroid" download="Pelo-Huawei-P40-Bridge.json">⬇ Download P40 Bridge Profile</a>
-              <button type="button" class="secondary-btn" id="btn-test-bridge">📡 Send Test Ping</button>
+              <a class="secondary-btn" href="/api/bridge/macrodroid" download="Pelo-Huawei-P40-Bridge.json">⬇ MacroDroid Profile</a>
+              <button type="button" class="secondary-btn" id="btn-test-bridge">🚨 Test Find-My-P40</button>
+              <button type="button" class="secondary-btn hidden" id="btn-pwa-install">✨ Install App</button>
             </div>
           </div>
 
-          <!-- Install as Native Huawei Home Screen App -->
-          <div class="card-box">
-            <h3>📲 Install Pelo on Huawei P40 Home Screen</h3>
-            <p class="muted-small">
-              In <strong>Huawei Browser</strong> or <strong>Chrome</strong>: tap the <strong>⋮ Menu → Add to Home screen</strong> to run Pelo full-screen like a native EMUI app!
-            </p>
-            <button type="button" class="secondary-btn hidden" id="btn-pwa-install">✨ Install Pelo App Now</button>
-          </div>
+          <!-- Remote Huawei P40 Terminal / Shell Runner -->
+          <form class="card-box row-form" id="form-shell">
+            <input type="text" id="shell-cmd-input" placeholder="Run P40 shell (e.g. ls -lh Download or df -h)" required />
+            <button type="submit" class="mini-btn accent">▶ Exec</button>
+          </form>
 
-          <!-- Live Hardware Capability Matrix -->
-          <div class="section-head">
-            <h2>Hardware Capability Check</h2>
-          </div>
+          <div class="section-head"><h2>Hardware Capability Check</h2></div>
           <div class="card-box" id="capability-matrix"></div>
 
-          <!-- Pending & Executed Bridge Command Queue -->
           <div class="section-head">
-            <h2>System Bridge Queue</h2>
+            <h2>Live Execution Queue &amp; Output</h2>
             <span class="muted-small" id="bridge-token-display">Token: ...</span>
           </div>
           <div class="stack-list" id="bridge-queue-list"></div>
@@ -283,13 +338,11 @@
       </section>
 
       <!-- ================================================================ -->
-      <!-- VIEW 5: SETTINGS & OPTIONAL CLOUD LLM BRAIN                      -->
+      <!-- VIEW 6: SETTINGS & CLOUD BRAIN                                   -->
       <!-- ================================================================ -->
       <section class="tab-view" id="view-settings">
         <div class="scroll-pane">
-          <div class="section-head">
-            <h2>⚙️ Personalization & AI Core</h2>
-          </div>
+          <div class="section-head"><h2>⚙️ Personalization &amp; God-Mode</h2></div>
 
           <form class="card-box inline-form" id="form-profile">
             <label class="field-lbl">What should Pelo call you?</label>
@@ -302,7 +355,11 @@
             </label>
             <label class="check-row">
               <input type="checkbox" id="set-auto-execute" checked />
-              <span>Auto-execute hardware actions &amp; deep-links</span>
+              <span>Auto-execute hardware, file &amp; message actions</span>
+            </label>
+            <label class="check-row">
+              <input type="checkbox" id="set-god-mode" checked />
+              <span>Enable Unrestricted God-Mode (Files, SIM SMS &amp; Shell)</span>
             </label>
             <button type="submit" class="primary-btn">Save Preferences</button>
           </form>
@@ -310,7 +367,7 @@
           <div class="card-box inline-form">
             <h3>🧠 Optional Frontier LLM Upgrade</h3>
             <p class="muted-small">
-              Pelo's built-in Neural Phone Engine works offline/instantly with zero keys. Want open-ended GPT/Llama reasoning too? Paste a key (stored privately on your device only):
+              Paste a Groq / OpenAI / Gemini key if you also want open-ended LLM reasoning with full access to all Huawei P40 file &amp; messaging tools:
             </p>
             <select id="llm-provider">
               <option value="groq">Groq (Llama 3.3 70B — Fast &amp; Free Tier)</option>
@@ -329,12 +386,16 @@
       </section>
 
       <!-- ================================================================ -->
-      <!-- BOTTOM HUAWEI GESTURE-FRIENDLY DOCK                              -->
+      <!-- 6-TAB BOTTOM DOCK                                                -->
       <!-- ================================================================ -->
       <nav class="bottom-dock" aria-label="Primary Navigation">
         <button class="nav-tab active" data-tab="assistant">
           <span class="nav-ico">🎙️</span>
           <span>Pelo</span>
+        </button>
+        <button class="nav-tab" data-tab="files">
+          <span class="nav-ico">📂</span>
+          <span>Files/SMS</span>
         </button>
         <button class="nav-tab" data-tab="controls">
           <span class="nav-ico">🎛️</span>
@@ -342,11 +403,11 @@
         </button>
         <button class="nav-tab" data-tab="hub">
           <span class="nav-ico">⚡</span>
-          <span>Life Hub</span>
+          <span>Hub</span>
         </button>
         <button class="nav-tab" data-tab="bridge">
           <span class="nav-ico">📲</span>
-          <span>P40 Bridge</span>
+          <span>Agent</span>
         </button>
         <button class="nav-tab" data-tab="settings">
           <span class="nav-ico">⚙️</span>
@@ -355,16 +416,13 @@
       </nav>
     </div>
 
-    <!-- ================================================================== -->
-    <!-- DESKTOP INSPECTOR DECK (Visible on wide screens when reviewing!)   -->
-    <!-- ================================================================== -->
+    <!-- DESKTOP INSPECTOR DECK -->
     <aside class="desktop-inspector">
       <div class="inspector-card">
-        <div class="inspector-badge">HUAWEI P40 · LIVE COMPANION CONSOLE</div>
+        <div class="inspector-badge">UNRESTRICTED v3 · FILES + DIRECT SMS + SHELL</div>
         <h1>PELO Personal AI OS</h1>
         <p class="muted-small">
-          Engineered specifically for your <strong>Huawei P40</strong> (1080×2340 OLED · EMUI / HarmonyOS · Zero Google Services dependency).
-          Open this exact URL on your Huawei P40 browser and tap <strong>Add to Home Screen</strong>!
+          Now upgraded with <strong>Huawei P40 File Deletion/Trash/Organizer</strong>, <strong>Direct Zero-Tap SIM SMS &amp; WhatsApp Dispatch</strong>, and the <strong>1-Line Termux Super-Agent (`/agent.sh`)</strong>!
         </p>
         <div class="url-copy-box">
           <code id="share-live-url">https://pelo-lite-five.vercel.app</code>
@@ -373,22 +431,25 @@
       </div>
 
       <div class="inspector-card">
-        <h3>⚡ Try Multi-Action Voice/Text Prompts</h3>
+        <h3>🔥 Test File Deletion &amp; Messaging Now</h3>
         <div class="demo-prompt-list">
-          <button class="demo-prompt" data-cmd="Turn on flashlight nd set brightness to 40% nd set a 2 min timer">
-            "Turn on flashlight nd set brightness to 40% nd set a 2 min timer"
+          <button class="demo-prompt" data-cmd="Delete all .apk files">
+            "Delete all .apk files"
           </button>
-          <button class="demo-prompt" data-cmd="WhatsApp Mom I'm heading home now">
-            "WhatsApp Mom I'm heading home now"
+          <button class="demo-prompt" data-cmd="Delete Screenshot_20261120_duplicate.jpg">
+            "Delete Screenshot_20261120_duplicate.jpg"
           </button>
-          <button class="demo-prompt" data-cmd="Navigate to Schiphol Airport on Petal Maps">
-            "Navigate to Schiphol Airport on Petal Maps"
+          <button class="demo-prompt" data-cmd="Undo delete">
+            "Undo delete" (Restores from .pelo-trash!)
           </button>
-          <button class="demo-prompt" data-cmd="Remember my apartment buzzer code is 4812">
-            "Remember my apartment buzzer code is 4812"
+          <button class="demo-prompt" data-cmd="Send SMS to Mom saying I'm 10 minutes away">
+            "Send SMS to Mom saying I'm 10 minutes away"
           </button>
-          <button class="demo-prompt" data-cmd="What is my apartment buzzer code?">
-            "What is my apartment buzzer code?"
+          <button class="demo-prompt" data-cmd="Reply to last message saying Sounds great, see u at 7!">
+            "Reply to last message saying Sounds great, see u at 7!"
+          </button>
+          <button class="demo-prompt" data-cmd="Run command df -h">
+            "Run command df -h"
           </button>
         </div>
       </div>
@@ -400,9 +461,7 @@
     </aside>
   </div>
 
-  <!-- ==================================================================== -->
-  <!-- CAMERA VISION LENS MODAL                                             -->
-  <!-- ==================================================================== -->
+  <!-- CAMERA MODAL -->
   <div class="modal-backdrop hidden" id="camera-modal">
     <div class="modal-sheet">
       <div class="section-head">
@@ -414,9 +473,7 @@
     </div>
   </div>
 
-  <!-- ==================================================================== -->
-  <!-- ALARM / TIMER RINGING MODAL                                          -->
-  <!-- ==================================================================== -->
+  <!-- ALARM / TIMER RINGING MODAL -->
   <div class="modal-backdrop hidden" id="ring-modal">
     <div class="modal-sheet ring-sheet">
       <div class="ring-emoji">⏰</div>
