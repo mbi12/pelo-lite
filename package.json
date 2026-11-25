@@ -1,0 +1,20 @@
+{
+  "name": "i-tutor-app",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "i-tutor — Confidence in learning. Student, Tutor & Parent academic platform.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "build": "node -e \"console.log('i-tutor static & serverless bundle ready')\"",
+    "test": "node --test test/api.test.js"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.1",
+    "express": "^4.21.2"
+  }
+}
