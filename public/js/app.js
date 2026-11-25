@@ -1,3 +1,14 @@
+import { renderEmblemSVG, renderSunriseGaugeSVG, ICONS } from './emblem.js';
+import {
+  SUBJECTS,
+  loadState,
+  saveState,
+  resetState,
+  getOverallConfidence,
+  getWeakestSubject,
+  getSubjectById
+} from './offlineStore.js';
+
 const LOADING_DURATION_MS = 10000; // ~10 seconds
 
 const STATUS_PHASES = [
@@ -8,174 +19,54 @@ const STATUS_PHASES = [
   { threshold: 100, text: 'Ready' }
 ];
 
-/**
- * Generates the 15 sculpted 3D chiseled sunbeam rays radiating from the open book spine,
- * matching the physical 3D embossed rays on the i-tutor golden sun emblem.
- */
-function buildChiseledRaysMarkup({ animated = true } = {}) {
-  const cx = 200;
-  const cy = 182;
-  const angles = [-75, -64.5, -54, -43.5, -33, -22.5, -11.2, 0, 11.2, 22.5, 33, 43.5, 54, 64.5, 75];
+let state = loadState();
+let activeAnimationFrame = null;
 
-  return angles
-    .map((deg, index) => {
-      const rad = ((deg - 90) * Math.PI) / 180;
-      const perpRad = rad + Math.PI / 2;
+// UI Navigation & Ephemeral Session State
+const ui = {
+  view: 'home', // 'home' | 'notes' | 'quiz' | 'flashcards' | 'planner' | 'timer' | 'goal' | 'library' | 'practice' | 'confidence'
+  dockIndex: 0,
+  subjectFilter: 'all',
+  focusNoteId: null,
+  showNewNoteForm: false,
+  showNewCardForm: false,
+  showNewExamForm: false,
+  // Quiz session
+  quizIndex: 0,
+  quizSelectedOption: null,
+  quizScore: 0,
+  quizFinished: false,
+  // Flashcard session
+  cardIndex: 0,
+  cardFlipped: false,
+  // Focus timer
+  timerModeMinutes: 25,
+  timerSecondsLeft: 25 * 60,
+  timerRunning: false,
+  timerIntervalId: null
+};
 
-      const length = index % 2 === 0 ? 104 : 92;
-      const innerOffset = 10;
-      const halfBase = index % 2 === 0 ? 3.1 : 2.5;
-
-      const bx = cx + innerOffset * Math.cos(rad);
-      const by = cy + innerOffset * Math.sin(rad);
-
-      const tipX = cx + length * Math.cos(rad);
-      const tipY = cy + length * Math.sin(rad);
-
-      const leftX = bx - halfBase * Math.cos(perpRad);
-      const leftY = by - halfBase * Math.sin(perpRad);
-
-      const rightX = bx + halfBase * Math.cos(perpRad);
-      const rightY = by + halfBase * Math.sin(perpRad);
-
-      const distFromCenter = Math.abs(index - 7);
-      const delaySec = (2.05 + distFromCenter * 0.14).toFixed(2);
-      const groupAttr = animated
-        ? `class="svg-sun-ray" style="--ray-delay: ${delaySec}s"`
-        : '';
-
-      return `
-        <g ${groupAttr}>
-          <polygon
-            points="${bx.toFixed(1)},${by.toFixed(1)} ${leftX.toFixed(1)},${leftY.toFixed(1)} ${tipX.toFixed(1)},${tipY.toFixed(1)}"
-            fill="#C3850D"
-            opacity="0.72"
-          />
-          <polygon
-            points="${bx.toFixed(1)},${by.toFixed(1)} ${tipX.toFixed(1)},${tipY.toFixed(1)} ${rightX.toFixed(1)},${rightY.toFixed(1)}"
-            fill="#FCE382"
-            opacity="0.88"
-          />
-        </g>
-      `;
-    })
-    .join('');
+function applyTheme() {
+  document.documentElement.setAttribute('data-theme', state.theme === 'night' ? 'night' : 'light');
 }
 
-/**
- * Renders the 3D Rising Golden Sun + Matte Charcoal Open Book emblem (no letters).
- * Used both in the animated 10s splash and as the emblem-only top logo in the app layout.
- */
-function renderEmblemSVG({ animated = true, uid = 'main' } = {}) {
-  const raysMarkup = buildChiseledRaysMarkup({ animated });
-  const svgClass = animated ? 'itutor-emblem-svg' : 'topbar-emblem-svg';
-  const sunRiseClass = animated ? 'class="svg-sun-rise"' : '';
-  const bookGroupClass = animated ? 'class="svg-book-group"' : '';
-  const pageLineClass = animated ? 'class="svg-page-line"' : '';
-
-  return `
-    <svg class="${svgClass}" viewBox="0 0 400 228" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Logo">
-      <defs>
-        <linearGradient id="sunDomeGrad-${uid}" x1="278" y1="36" x2="115" y2="188" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stop-color="#FDE27A" />
-          <stop offset="48%" stop-color="#F2B728" />
-          <stop offset="100%" stop-color="#DD9D13" />
-        </linearGradient>
-
-        <linearGradient id="sunRimGrad-${uid}" x1="70" y1="45" x2="140" y2="190" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stop-color="#C98B12" />
-          <stop offset="100%" stop-color="#9E6A07" />
-        </linearGradient>
-
-        <linearGradient id="sunSheenGrad-${uid}" x1="130" y1="40" x2="220" y2="185" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stop-color="#FFFDF5" stop-opacity="0" />
-          <stop offset="50%" stop-color="#FFFDF5" stop-opacity="0.55" />
-          <stop offset="100%" stop-color="#FFFDF5" stop-opacity="0" />
-        </linearGradient>
-
-        <clipPath id="aboveOpenBookClip-${uid}">
-          <path d="M 24 8 L 376 8 L 376 186 L 346 186 C 292 148, 234 154, 200 188 C 166 154, 108 148, 54 186 L 24 186 Z" />
-        </clipPath>
-
-        <clipPath id="sunDomeInteriorClip-${uid}">
-          <path d="M 74 186 A 126 126 0 0 1 326 186 Z" />
-        </clipPath>
-      </defs>
-
-      <!-- RISING GOLDEN SUN + 15 CHISELED RAYS -->
-      <g clip-path="url(#aboveOpenBookClip-${uid})">
-        <g ${sunRiseClass}>
-          <path
-            d="M 74 186 A 126 126 0 0 1 326 186 L 200 196 Z"
-            fill="url(#sunRimGrad-${uid})"
-            transform="translate(-8, 2.5)"
-          />
-          <path
-            d="M 74 186 A 126 126 0 0 1 326 186 L 200 196 Z"
-            fill="url(#sunDomeGrad-${uid})"
-          />
-          <path
-            d="M 80 182 A 121 121 0 0 1 321 182"
-            stroke="#FFF0A8"
-            stroke-width="1.6"
-            stroke-opacity="0.65"
-            fill="none"
-          />
-
-          ${raysMarkup}
-
-          ${
-            animated
-              ? `
-            <g clip-path="url(#sunDomeInteriorClip-${uid})">
-              <rect
-                class="svg-sun-sheen"
-                x="120"
-                y="35"
-                width="95"
-                height="165"
-                fill="url(#sunSheenGrad-${uid})"
-                transform="skewX(-18)"
-              />
-            </g>
-          `
-              : ''
-          }
-        </g>
-      </g>
-
-      <!-- 3D MATTE CHARCOAL OPEN BOOK -->
-      <g ${bookGroupClass}>
-        <path
-          d="M 52 190 C 108 150, 166 156, 200 190 C 234 156, 292 150, 348 190 L 339 204 C 286 175, 234 179, 200 210 C 166 179, 114 175, 61 204 Z"
-          fill="#10110F"
-          transform="translate(-3.5, 4)"
-        />
-        <path
-          d="M 52 188 C 108 148, 166 154, 200 188 C 234 154, 292 148, 348 188 L 339 202 C 286 173, 234 177, 200 207 C 166 177, 114 173, 61 202 Z"
-          fill="#1E1F1D"
-        />
-        <path
-          d="M 56 187 C 109 150, 166 155, 200 188 C 234 155, 291 150, 344 187"
-          stroke="#3A3C38"
-          stroke-width="1.4"
-          stroke-linecap="round"
-          fill="none"
-        />
-
-        <!-- Left Wing Sculpted Page Grooves -->
-        <path ${pageLineClass} d="M 74 187 C 118 160, 164 164, 195 190" stroke="#787B74" stroke-width="2.1" stroke-linecap="round" fill="none" />
-        <path ${pageLineClass} d="M 82 193 C 122 169, 165 172, 195 195" stroke="#5F625C" stroke-width="1.8" stroke-linecap="round" fill="none" />
-        <path ${pageLineClass} d="M 91 198 C 127 177, 166 180, 195 200" stroke="#484A45" stroke-width="1.6" stroke-linecap="round" fill="none" />
-
-        <!-- Right Wing Sculpted Page Grooves -->
-        <path ${pageLineClass} d="M 326 187 C 282 160, 236 164, 205 190" stroke="#787B74" stroke-width="2.1" stroke-linecap="round" fill="none" />
-        <path ${pageLineClass} d="M 318 193 C 278 169, 235 172, 205 195" stroke="#5F625C" stroke-width="1.8" stroke-linecap="round" fill="none" />
-        <path ${pageLineClass} d="M 309 198 C 273 177, 234 180, 205 200" stroke="#484A45" stroke-width="1.6" stroke-linecap="round" fill="none" />
-      </g>
-    </svg>
-  `;
+function escapeHtml(str = '') {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
+
+function formatTimer(totalSec) {
+  const mins = Math.floor(totalSec / 60);
+  const secs = totalSec % 60;
+  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+}
+
+/* ==========================================================================
+   1. 10-SECOND ANIMATED LOADING SCREEN
+   ========================================================================== */
 
 function renderSplashScreenMarkup() {
   return `
@@ -220,162 +111,1132 @@ function renderSplashScreenMarkup() {
   `;
 }
 
-/**
- * Standalone App Layout — Emblem-Only Logo on Top & Zero Letters Anywhere
- */
-function renderAppLayoutMarkup() {
+/* ==========================================================================
+   2. HOME VIEW — EXACT SKETCH BUTTON MAP
+   ========================================================================== */
+
+function renderHomeWorkspace() {
+  const confidence = getOverallConfidence(state);
+  const goalPct = Math.min(100, Math.round((state.dailyCompleted / Math.max(1, state.dailyGoalTarget)) * 100));
+  const openTasksCount = state.tasks.filter((t) => !t.done).length;
+  const masteredCards = state.flashcards.filter((c) => c.mastered).length;
+  const timerBadgeLabel = ui.timerRunning ? formatTimer(ui.timerSecondsLeft) : 'Timer';
+
   return `
-    <div class="app-layout" id="app-layout">
-      <!-- Top Header with Emblem-Only Logo (No Letters) -->
-      <header class="app-topbar">
-        <div class="topbar-emblem-wrap" id="topbar-logo">
-          ${renderEmblemSVG({ animated: false, uid: 'header' })}
+    <!-- HERO CARD (Confidence + Timer Pill + Continue Studying) -->
+    <section class="layout-hero-card">
+      <div class="hero-top-row">
+        <div class="confidence-chip">
+          <span class="confidence-sun-dot" aria-hidden="true"></span>
+          <div class="confidence-readout">${confidence}% <span>Confidence</span></div>
         </div>
-      </header>
 
-      <!-- Clean Standalone Structural Layout (Zero Letters) -->
-      <main class="app-workspace">
-        <!-- Hero Card Container -->
-        <section class="layout-hero-card">
-          <div class="hero-slot-top">
-            <div class="slot-badge-gold">
-              <span class="slot-badge-dot"></span>
-            </div>
-            <div class="slot-pill-charcoal"></div>
-          </div>
-          <div class="hero-slot-bars">
-            <div class="slot-bar w-65"></div>
-            <div class="slot-bar w-42"></div>
-          </div>
-        </section>
-
-        <!-- 2x2 Module Grid -->
-        <section class="layout-grid">
-          <div class="layout-tile is-selected" data-tile="0">
-            <div class="tile-node"><span class="tile-node-core"></span></div>
-            <div class="tile-lines">
-              <div class="tile-line primary"></div>
-              <div class="tile-line secondary"></div>
-            </div>
-          </div>
-
-          <div class="layout-tile" data-tile="1">
-            <div class="tile-node"><span class="tile-node-core"></span></div>
-            <div class="tile-lines">
-              <div class="tile-line primary"></div>
-              <div class="tile-line secondary"></div>
-            </div>
-          </div>
-
-          <div class="layout-tile" data-tile="2">
-            <div class="tile-node"><span class="tile-node-core"></span></div>
-            <div class="tile-lines">
-              <div class="tile-line primary"></div>
-              <div class="tile-line secondary"></div>
-            </div>
-          </div>
-
-          <div class="layout-tile" data-tile="3">
-            <div class="tile-node"><span class="tile-node-core"></span></div>
-            <div class="tile-lines">
-              <div class="tile-line primary"></div>
-              <div class="tile-line secondary"></div>
-            </div>
-          </div>
-        </section>
-
-        <!-- Wide Lower Workspace Panel -->
-        <section class="layout-wide-panel">
-          <div class="panel-row">
-            <span class="panel-ring"></span>
-            <div class="panel-track">
-              <div class="panel-track-fill" id="panel-track-fill"></div>
-            </div>
-          </div>
-        </section>
-      </main>
-
-      <!-- Bottom Floating Icon-Only Navigation Dock (Zero Letters) -->
-      <nav class="app-bottom-dock">
-        <button type="button" class="dock-slot is-active" data-dock="0" aria-label="1">
-          <svg class="dock-icon" viewBox="0 0 24 24">
-            <path d="M3 10.5L12 3l9 7.5" />
-            <path d="M5.5 9.5V20h13V9.5" />
-          </svg>
+        <button type="button" class="timer-pill-btn" data-open-view="timer">
+          ${ICONS.timer}
+          <span>${timerBadgeLabel}</span>
         </button>
+      </div>
 
-        <button type="button" class="dock-slot" data-dock="1" aria-label="2">
-          <svg class="dock-icon" viewBox="0 0 24 24">
-            <path d="M2 5.5C6.5 4 10 5 12 7c2-2 5.5-3 10-1.5v13C17.5 17 14 18 12 20c-2-2-5.5-3-10-1.5v-13z" />
-            <path d="M12 7v13" />
-          </svg>
-        </button>
+      <div class="hero-last-studied">
+        <span class="hero-eyebrow">Last studied</span>
+        <div class="hero-topic-title">${escapeHtml(state.lastStudied?.title || 'Mathematics — Trigonometry')}</div>
+      </div>
 
-        <button type="button" class="dock-slot" data-dock="2" aria-label="3">
-          <svg class="dock-icon" viewBox="0 0 24 24">
-            <rect x="3.5" y="3.5" width="7" height="7" rx="2" />
-            <rect x="13.5" y="3.5" width="7" height="7" rx="2" />
-            <rect x="3.5" y="13.5" width="7" height="7" rx="2" />
-            <rect x="13.5" y="13.5" width="7" height="7" rx="2" />
-          </svg>
-        </button>
+      <button type="button" class="continue-btn" id="continue-study-btn">
+        <span class="play-accent">${ICONS.play}</span>
+        <span>Continue Studying</span>
+      </button>
+    </section>
 
-        <button type="button" class="dock-slot" data-dock="3" aria-label="4">
-          <svg class="dock-icon" viewBox="0 0 24 24">
-            <circle cx="12" cy="12" r="4" />
-            <path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M18.4 5.6l-1.8 1.8M7.4 16.6l-1.8 1.8" />
-          </svg>
-        </button>
-      </nav>
+    <!-- 2x2 MAIN FEATURE BUTTONS -->
+    <section class="layout-grid">
+      <button type="button" class="feature-tile-btn" data-open-view="notes">
+        <div class="tile-top-row">
+          <div class="tile-icon-box">${ICONS.notes}</div>
+          <span class="tile-count-pill">${state.notes.length} notes</span>
+        </div>
+        <div class="tile-copy">
+          <div class="tile-title">Study Notes</div>
+          <div class="tile-sub">&amp; Formulas</div>
+        </div>
+      </button>
+
+      <button type="button" class="feature-tile-btn" data-open-view="quiz">
+        <div class="tile-top-row">
+          <div class="tile-icon-box">${ICONS.quiz}</div>
+          <span class="tile-count-pill">${state.quizzes.length} Qs</span>
+        </div>
+        <div class="tile-copy">
+          <div class="tile-title">Quick Quiz</div>
+          <div class="tile-sub">Auto-marked</div>
+        </div>
+      </button>
+
+      <button type="button" class="feature-tile-btn" data-open-view="flashcards">
+        <div class="tile-top-row">
+          <div class="tile-icon-box">${ICONS.flashcards}</div>
+          <span class="tile-count-pill">${masteredCards}/${state.flashcards.length}</span>
+        </div>
+        <div class="tile-copy">
+          <div class="tile-title">Flashcards</div>
+          <div class="tile-sub">Tap to flip</div>
+        </div>
+      </button>
+
+      <button type="button" class="feature-tile-btn" data-open-view="planner">
+        <div class="tile-top-row">
+          <div class="tile-icon-box">${ICONS.planner}</div>
+          <span class="tile-count-pill">${openTasksCount} left</span>
+        </div>
+        <div class="tile-copy">
+          <div class="tile-title">Study Planner</div>
+          <div class="tile-sub">&amp; Exam dates</div>
+        </div>
+      </button>
+    </section>
+
+    <!-- LOWER GOAL BAR BUTTON -->
+    <button type="button" class="goal-bar-btn" data-open-view="goal">
+      <div class="goal-ring-badge">${ICONS.target}</div>
+      <div class="goal-bar-body">
+        <div class="goal-bar-labels">
+          <span class="goal-bar-title">Today’s Goal</span>
+          <span class="goal-bar-count">${state.dailyCompleted} / ${state.dailyGoalTarget} done</span>
+        </div>
+        <div class="goal-track">
+          <div class="goal-track-fill" style="width: ${goalPct}%"></div>
+        </div>
+      </div>
+    </button>
+  `;
+}
+
+/* ==========================================================================
+   3. INNER FEATURE VIEWS (100% OFFLINE)
+   ========================================================================== */
+
+function renderSubjectChips() {
+  return `
+    <div class="chip-row">
+      <button type="button" class="filter-chip ${ui.subjectFilter === 'all' ? 'is-active' : ''}" data-filter-sub="all">All</button>
+      ${SUBJECTS.map(
+        (s) => `
+          <button type="button" class="filter-chip ${ui.subjectFilter === s.id ? 'is-active' : ''}" data-filter-sub="${s.id}">
+            ${escapeHtml(s.short)}
+          </button>
+        `
+      ).join('')}
     </div>
   `;
 }
 
-let activeAnimationFrame = null;
+function renderNotesView() {
+  const filtered = state.notes.filter(
+    (n) => ui.subjectFilter === 'all' || n.subjectId === ui.subjectFilter
+  );
 
-function bindAppLayoutInteractions() {
-  const tiles = document.querySelectorAll('.layout-tile');
-  const trackFill = document.getElementById('panel-track-fill');
-  const widths = ['58%', '76%', '44%', '88%'];
+  return `
+    <div class="subview-header">
+      <button type="button" class="back-pill-btn" data-open-view="home">${ICONS.back} <span>Back</span></button>
+      <button type="button" class="action-pill-btn" id="toggle-new-note-btn">${ICONS.plus} <span>New Note</span></button>
+    </div>
 
-  tiles.forEach((tile, idx) => {
-    tile.addEventListener('click', () => {
-      tiles.forEach((t) => t.classList.remove('is-selected'));
-      tile.classList.add('is-selected');
-      if (trackFill) {
-        trackFill.style.width = widths[idx % widths.length];
+    <div class="subview-title-block">
+      <h2>Study Notes &amp; Formulas</h2>
+      <p>Saved directly on your device for offline revision.</p>
+    </div>
+
+    ${renderSubjectChips()}
+
+    ${
+      ui.showNewNoteForm
+        ? `
+      <form class="content-card inline-form" id="new-note-form">
+        <select name="subjectId" class="input-field" required>
+          ${SUBJECTS.map((s) => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('')}
+        </select>
+        <input type="text" name="title" class="input-field" placeholder="Note title (e.g. Cosine Rule)" required />
+        <input type="text" name="formula" class="input-field" placeholder="Key formula (optional)" />
+        <textarea name="summary" rows="3" class="input-field" placeholder="Write your key study summary…" required></textarea>
+        <button type="submit" class="gold-btn">Save Offline Note</button>
+      </form>
+    `
+        : ''
+    }
+
+    <div class="note-list">
+      ${filtered
+        .map((note) => {
+          const sub = getSubjectById(note.subjectId);
+          return `
+            <article class="content-card" data-note-card="${note.id}">
+              <div class="note-card-head">
+                <span class="subject-tag">${escapeHtml(sub.name)}</span>
+              </div>
+              <h3 class="note-title">${escapeHtml(note.title)}</h3>
+              ${
+                note.keyFormulas?.length
+                  ? `<div class="formula-box">${note.keyFormulas.map((f) => `<div>${escapeHtml(f)}</div>`).join('')}</div>`
+                  : ''
+              }
+              <p class="note-summary">${escapeHtml(note.summary)}</p>
+            </article>
+          `;
+        })
+        .join('')}
+    </div>
+  `;
+}
+
+function renderQuizView() {
+  const pool = state.quizzes.filter(
+    (q) => ui.subjectFilter === 'all' || q.subjectId === ui.subjectFilter
+  );
+
+  if (!pool.length) {
+    return `
+      <div class="subview-header">
+        <button type="button" class="back-pill-btn" data-open-view="home">${ICONS.back} <span>Back</span></button>
+      </div>
+      ${renderSubjectChips()}
+      <div class="content-card"><p>No questions in this filter yet.</p></div>
+    `;
+  }
+
+  if (ui.quizFinished) {
+    const pct = Math.round((ui.quizScore / pool.length) * 100);
+    return `
+      <div class="subview-header">
+        <button type="button" class="back-pill-btn" data-open-view="home">${ICONS.back} <span>Back</span></button>
+      </div>
+      <div class="content-card timer-dial-card">
+        <span class="subject-tag">Quiz Complete</span>
+        <div class="timer-digits">${pct}%</div>
+        <p class="note-summary">You got <strong>${ui.quizScore} out of ${pool.length}</strong> right. Your Confidence score has been updated offline.</p>
+        <div class="dual-btn-row" style="width:100%; margin-top: 0.6rem;">
+          <button type="button" class="secondary-btn" data-open-view="home">Home</button>
+          <button type="button" class="gold-btn" id="restart-quiz-btn">Try Again</button>
+        </div>
+      </div>
+    `;
+  }
+
+  const safeIdx = Math.min(ui.quizIndex, pool.length - 1);
+  const currentQ = pool[safeIdx];
+  const sub = getSubjectById(currentQ.subjectId);
+  const answered = ui.quizSelectedOption !== null;
+
+  return `
+    <div class="subview-header">
+      <button type="button" class="back-pill-btn" data-open-view="home">${ICONS.back} <span>Back</span></button>
+      <span class="tile-count-pill">Question ${safeIdx + 1} / ${pool.length}</span>
+    </div>
+
+    <div class="subview-title-block">
+      <h2>Quick Quiz</h2>
+      <p>Instant offline marking &amp; explanation.</p>
+    </div>
+
+    ${renderSubjectChips()}
+
+    <div class="content-card">
+      <div class="note-card-head">
+        <span class="subject-tag">${escapeHtml(sub.name)} · ${escapeHtml(currentQ.topic)}</span>
+      </div>
+      <h3 class="note-title">${escapeHtml(currentQ.question)}</h3>
+
+      <div class="inline-form">
+        ${currentQ.options
+          .map((opt, idx) => {
+            let stateCls = '';
+            if (answered) {
+              if (idx === currentQ.correctIndex) stateCls = 'is-correct';
+              else if (idx === ui.quizSelectedOption) stateCls = 'is-wrong';
+            }
+            return `
+              <button
+                type="button"
+                class="quiz-option-btn ${stateCls}"
+                data-quiz-opt="${idx}"
+                ${answered ? 'disabled' : ''}
+              >
+                ${escapeHtml(opt)}
+              </button>
+            `;
+          })
+          .join('')}
+      </div>
+
+      ${
+        answered
+          ? `
+        <div class="quiz-explain">
+          <strong>${ui.quizSelectedOption === currentQ.correctIndex ? 'Correct!' : 'Keep going:'}</strong>
+          ${escapeHtml(currentQ.explanation)}
+        </div>
+        <button type="button" class="gold-btn" id="next-quiz-btn">
+          ${safeIdx + 1 < pool.length ? 'Next Question →' : 'See Results'}
+        </button>
+      `
+          : ''
       }
-    });
-  });
+    </div>
+  `;
+}
 
-  const dockButtons = document.querySelectorAll('.dock-slot');
-  dockButtons.forEach((btn, idx) => {
-    btn.addEventListener('click', () => {
-      dockButtons.forEach((b) => b.classList.remove('is-active'));
-      btn.classList.add('is-active');
-      if (tiles[idx]) {
-        tiles.forEach((t) => t.classList.remove('is-selected'));
-        tiles[idx].classList.add('is-selected');
-      }
-      if (trackFill) {
-        trackFill.style.width = widths[idx % widths.length];
-      }
-    });
-  });
+function renderFlashcardsView() {
+  const deck = state.flashcards.filter(
+    (c) => ui.subjectFilter === 'all' || c.subjectId === ui.subjectFilter
+  );
 
-  // Double-tap / double-click the top emblem to replay the 10-second intro anytime
-  const topLogo = document.getElementById('topbar-logo');
-  if (topLogo) {
-    topLogo.addEventListener('dblclick', () => startTenSecondLoadingSequence());
+  const safeIdx = deck.length ? ui.cardIndex % deck.length : 0;
+  const card = deck[safeIdx];
+  const sub = card ? getSubjectById(card.subjectId) : SUBJECTS[0];
+
+  return `
+    <div class="subview-header">
+      <button type="button" class="back-pill-btn" data-open-view="home">${ICONS.back} <span>Back</span></button>
+      <button type="button" class="action-pill-btn" id="toggle-new-card-btn">${ICONS.plus} <span>Add Card</span></button>
+    </div>
+
+    <div class="subview-title-block">
+      <h2>Flashcards</h2>
+      <p>Tap the card to flip between question and answer.</p>
+    </div>
+
+    ${renderSubjectChips()}
+
+    ${
+      ui.showNewCardForm
+        ? `
+      <form class="content-card inline-form" id="new-card-form">
+        <select name="subjectId" class="input-field" required>
+          ${SUBJECTS.map((s) => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('')}
+        </select>
+        <input type="text" name="front" class="input-field" placeholder="Front (Question or Prompt)" required />
+        <textarea name="back" rows="2" class="input-field" placeholder="Back (Answer or Formula)" required></textarea>
+        <button type="submit" class="gold-btn">Save Flashcard</button>
+      </form>
+    `
+        : ''
+    }
+
+    ${
+      card
+        ? `
+      <div class="flashcard-stage" id="flashcard-flip-box">
+        <span class="flashcard-side-label">${escapeHtml(sub.short)} · ${ui.cardFlipped ? 'Answer' : 'Question'} (${safeIdx + 1}/${deck.length})</span>
+        <div class="flashcard-text">${escapeHtml(ui.cardFlipped ? card.back : card.front)}</div>
+        <span class="tile-sub">${ui.cardFlipped ? 'Tap to see question' : 'Tap card to reveal answer'}</span>
+      </div>
+
+      <div class="dual-btn-row">
+        <button type="button" class="secondary-btn" id="fc-practice-btn">Need Practice</button>
+        <button type="button" class="gold-btn" id="fc-gotit-btn">Got It ✓</button>
+      </div>
+    `
+        : `<div class="content-card"><p>No flashcards in this subject yet.</p></div>`
+    }
+  `;
+}
+
+function renderPlannerView() {
+  return `
+    <div class="subview-header">
+      <button type="button" class="back-pill-btn" data-open-view="home">${ICONS.back} <span>Back</span></button>
+      <button type="button" class="action-pill-btn" id="toggle-exam-form-btn">${ICONS.plus} <span>Exam Date</span></button>
+    </div>
+
+    <div class="subview-title-block">
+      <h2>Study Planner &amp; Exams</h2>
+      <p>Offline daily study checklist and upcoming countdowns.</p>
+    </div>
+
+    <div class="content-card">
+      <h3 class="note-title">Today’s Study Checklist</h3>
+      <form class="inline-form" id="add-task-form" style="flex-direction: row;">
+        <input type="text" name="title" class="input-field" placeholder="Add study task…" required />
+        <button type="submit" class="gold-btn" style="white-space: nowrap;">Add</button>
+      </form>
+
+      <div class="inline-form">
+        ${state.tasks
+          .map(
+            (t) => `
+            <div class="task-item ${t.done ? 'is-done' : ''}" data-toggle-task="${t.id}">
+              <div class="task-check">${t.done ? ICONS.check : ''}</div>
+              <span class="task-label">${escapeHtml(t.title)}</span>
+            </div>
+          `
+          )
+          .join('')}
+      </div>
+    </div>
+
+    ${
+      ui.showNewExamForm
+        ? `
+      <form class="content-card inline-form" id="add-exam-form">
+        <input type="text" name="title" class="input-field" placeholder="Exam paper name (e.g. Maths Paper 1)" required />
+        <input type="number" name="daysAway" min="1" max="365" class="input-field" placeholder="Days remaining (e.g. 14)" required />
+        <button type="submit" class="gold-btn">Save Countdown</button>
+      </form>
+    `
+        : ''
+    }
+
+    <div class="content-card">
+      <h3 class="note-title">Exam Countdowns</h3>
+      <div class="inline-form">
+        ${state.exams
+          .map(
+            (ex) => `
+            <div class="exam-row">
+              <span class="task-label">${escapeHtml(ex.title)}</span>
+              <span class="exam-days-badge">${Number(ex.daysAway)} days left</span>
+            </div>
+          `
+          )
+          .join('')}
+      </div>
+    </div>
+  `;
+}
+
+function renderTimerView() {
+  return `
+    <div class="subview-header">
+      <button type="button" class="back-pill-btn" data-open-view="home">${ICONS.back} <span>Back</span></button>
+      <span class="tile-count-pill">${state.focusMinutesToday} mins today</span>
+    </div>
+
+    <div class="subview-title-block">
+      <h2>Offline Focus Timer</h2>
+      <p>Stay locked in without distractions or internet.</p>
+    </div>
+
+    <div class="chip-row">
+      ${[25, 15, 5]
+        .map(
+          (m) => `
+          <button type="button" class="filter-chip ${ui.timerModeMinutes === m ? 'is-active' : ''}" data-timer-preset="${m}">
+            ${m === 5 ? '5m Break' : `${m}m Focus`}
+          </button>
+        `
+        )
+        .join('')}
+    </div>
+
+    <div class="content-card timer-dial-card">
+      <span class="subject-tag">${ui.timerRunning ? 'Focus Session Active' : 'Ready to Focus'}</span>
+      <div class="timer-digits" id="timer-live-readout">${formatTimer(ui.timerSecondsLeft)}</div>
+      <div class="dual-btn-row" style="width: 100%; margin-top: 0.6rem;">
+        <button type="button" class="secondary-btn" id="timer-reset-btn">Reset</button>
+        <button type="button" class="gold-btn" id="timer-toggle-btn">
+          ${ui.timerRunning ? 'Pause' : 'Start Timer'}
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+function renderGoalView() {
+  const weakest = getWeakestSubject(state);
+  const goalPct = Math.min(100, Math.round((state.dailyCompleted / Math.max(1, state.dailyGoalTarget)) * 100));
+
+  return `
+    <div class="subview-header">
+      <button type="button" class="back-pill-btn" data-open-view="home">${ICONS.back} <span>Back</span></button>
+      <span class="tile-count-pill">${state.streakDays}-day streak</span>
+    </div>
+
+    <div class="subview-title-block">
+      <h2>Today’s Goal &amp; Weak Spot</h2>
+      <p>Complete quizzes, flashcards, or focus blocks to fill your daily ring.</p>
+    </div>
+
+    <div class="content-card">
+      <div class="goal-bar-labels">
+        <span class="goal-bar-title">Daily Sessions Completed</span>
+        <span class="goal-bar-count">${state.dailyCompleted} / ${state.dailyGoalTarget}</span>
+      </div>
+      <div class="goal-track" style="height: 11px;">
+        <div class="goal-track-fill" style="width: ${goalPct}%"></div>
+      </div>
+
+      <div class="chip-row" style="margin-top: 0.35rem;">
+        ${[3, 4, 5, 6]
+          .map(
+            (target) => `
+            <button type="button" class="filter-chip ${state.dailyGoalTarget === target ? 'is-active' : ''}" data-goal-target="${target}">
+              Goal: ${target}/day
+            </button>
+          `
+          )
+          .join('')}
+      </div>
+    </div>
+
+    <div class="content-card">
+      <span class="subject-tag">Recommended Focus Next</span>
+      <h3 class="note-title">${escapeHtml(weakest.subject.name)} (${weakest.score}% Confidence)</h3>
+      <p class="note-summary">This is currently your lowest-confidence subject. A quick 3-minute quiz will lift it immediately.</p>
+      <button type="button" class="continue-btn" id="practice-weakspot-btn" data-sub="${weakest.subject.id}">
+        <span class="play-accent">${ICONS.play}</span>
+        <span>Practice ${escapeHtml(weakest.subject.short)} Now</span>
+      </button>
+    </div>
+  `;
+}
+
+function renderLibraryHubView() {
+  return `
+    <div class="subview-title-block">
+      <h2>Study Library</h2>
+      <p>Your offline notes, formulas, and flashcard decks.</p>
+    </div>
+    <section class="layout-grid">
+      <button type="button" class="feature-tile-btn" data-open-view="notes">
+        <div class="tile-top-row">
+          <div class="tile-icon-box">${ICONS.notes}</div>
+          <span class="tile-count-pill">${state.notes.length} notes</span>
+        </div>
+        <div class="tile-copy">
+          <div class="tile-title">Study Notes</div>
+          <div class="tile-sub">Formulas &amp; guides</div>
+        </div>
+      </button>
+
+      <button type="button" class="feature-tile-btn" data-open-view="flashcards">
+        <div class="tile-top-row">
+          <div class="tile-icon-box">${ICONS.flashcards}</div>
+          <span class="tile-count-pill">${state.flashcards.length} cards</span>
+        </div>
+        <div class="tile-copy">
+          <div class="tile-title">Flashcards</div>
+          <div class="tile-sub">Active recall deck</div>
+        </div>
+      </button>
+    </section>
+  `;
+}
+
+function renderPracticeHubView() {
+  return `
+    <div class="subview-title-block">
+      <h2>Practice &amp; Focus</h2>
+      <p>Test yourself offline, run a study timer, or plan exams.</p>
+    </div>
+    <section class="layout-grid">
+      <button type="button" class="feature-tile-btn" data-open-view="quiz">
+        <div class="tile-top-row">
+          <div class="tile-icon-box">${ICONS.quiz}</div>
+          <span class="tile-count-pill">${state.quizzes.length} Qs</span>
+        </div>
+        <div class="tile-copy">
+          <div class="tile-title">Quick Quiz</div>
+          <div class="tile-sub">Instant marking</div>
+        </div>
+      </button>
+
+      <button type="button" class="feature-tile-btn" data-open-view="timer">
+        <div class="tile-top-row">
+          <div class="tile-icon-box">${ICONS.timer}</div>
+          <span class="tile-count-pill">25m</span>
+        </div>
+        <div class="tile-copy">
+          <div class="tile-title">Focus Timer</div>
+          <div class="tile-sub">Study sprints</div>
+        </div>
+      </button>
+
+      <button type="button" class="feature-tile-btn" data-open-view="planner" style="grid-column: span 2; min-height: 112px;">
+        <div class="tile-top-row">
+          <div class="tile-icon-box">${ICONS.planner}</div>
+          <span class="tile-count-pill">${state.exams.length} exams</span>
+        </div>
+        <div class="tile-copy">
+          <div class="tile-title">Study Planner &amp; Exam Dates</div>
+          <div class="tile-sub">Daily checklist &amp; countdowns</div>
+        </div>
+      </button>
+    </section>
+  `;
+}
+
+function renderConfidenceSettingsView() {
+  const overall = getOverallConfidence(state);
+
+  return `
+    <div class="subview-title-block">
+      <h2>Confidence &amp; App Settings</h2>
+      <p>100% standalone — all progress lives privately on this device.</p>
+    </div>
+
+    <div class="content-card gauge-box">
+      ${renderSunriseGaugeSVG(overall)}
+      <div class="gauge-big-num">${overall}%</div>
+      <span class="tile-sub">Overall Sunrise Confidence</span>
+    </div>
+
+    <div class="content-card">
+      <h3 class="note-title">Subject Confidence</h3>
+      ${SUBJECTS.map((s) => {
+        const sc = Number(state.subjectConfidence?.[s.id] ?? 75);
+        return `
+          <div class="subject-meter-row">
+            <div class="subject-meter-top">
+              <span>${escapeHtml(s.name)}</span>
+              <span>${sc}%</span>
+            </div>
+            <div class="goal-track">
+              <div class="goal-track-fill" style="width: ${sc}%"></div>
+            </div>
+          </div>
+        `;
+      }).join('')}
+    </div>
+
+    <div class="content-card">
+      <h3 class="note-title">Standalone Controls</h3>
+      <div class="dual-btn-row">
+        <button type="button" class="secondary-btn" id="toggle-theme-btn">
+          ${state.theme === 'night' ? '☀️ Cream Mode' : '🌙 Night Mode'}
+        </button>
+        <button type="button" class="secondary-btn" id="replay-intro-btn">
+          ↻ 10s Intro
+        </button>
+      </div>
+      <div class="dual-btn-row">
+        <button type="button" class="secondary-btn" id="export-backup-btn">Export Backup</button>
+        <button type="button" class="secondary-btn" id="reset-data-btn">Reset Demo</button>
+      </div>
+    </div>
+  `;
+}
+
+/* ==========================================================================
+   4. MAIN SHELL RENDERER & EVENT WIRING
+   ========================================================================== */
+
+function renderWorkspaceByView() {
+  switch (ui.view) {
+    case 'notes':
+      return renderNotesView();
+    case 'quiz':
+      return renderQuizView();
+    case 'flashcards':
+      return renderFlashcardsView();
+    case 'planner':
+      return renderPlannerView();
+    case 'timer':
+      return renderTimerView();
+    case 'goal':
+      return renderGoalView();
+    case 'library':
+      return renderLibraryHubView();
+    case 'practice':
+      return renderPracticeHubView();
+    case 'confidence':
+      return renderConfidenceSettingsView();
+    case 'home':
+    default:
+      return renderHomeWorkspace();
   }
 }
 
-function showAppLayout() {
+function renderAppShell() {
   const appEl = document.getElementById('app');
   if (!appEl) return;
-  appEl.innerHTML = renderAppLayoutMarkup();
-  bindAppLayoutInteractions();
+
+  applyTheme();
+
+  appEl.innerHTML = `
+    <div class="app-layout" id="app-layout">
+      <!-- Top Bar with Emblem-Only Logo (Zero Letters in Header) -->
+      <header class="app-topbar">
+        <button type="button" class="topbar-emblem-btn" id="topbar-logo" aria-label="Home">
+          ${renderEmblemSVG({ animated: false, uid: 'header' })}
+        </button>
+      </header>
+
+      <main class="app-workspace">
+        ${renderWorkspaceByView()}
+      </main>
+
+      <!-- Bottom Floating Icon-Only Dock -->
+      <nav class="app-bottom-dock" aria-label="Primary Navigation">
+        <button type="button" class="dock-slot ${ui.dockIndex === 0 ? 'is-active' : ''}" data-dock-tab="0" aria-label="Home">
+          ${ICONS.homeDock}
+        </button>
+        <button type="button" class="dock-slot ${ui.dockIndex === 1 ? 'is-active' : ''}" data-dock-tab="1" aria-label="Library">
+          ${ICONS.libraryDock}
+        </button>
+        <button type="button" class="dock-slot ${ui.dockIndex === 2 ? 'is-active' : ''}" data-dock-tab="2" aria-label="Practice">
+          ${ICONS.practiceDock}
+        </button>
+        <button type="button" class="dock-slot ${ui.dockIndex === 3 ? 'is-active' : ''}" data-dock-tab="3" aria-label="Confidence">
+          ${ICONS.confidenceDock}
+        </button>
+      </nav>
+    </div>
+  `;
+
+  bindAppEvents();
 }
+
+function openView(targetView) {
+  ui.view = targetView;
+  if (targetView === 'home') ui.dockIndex = 0;
+  else if (targetView === 'library' || targetView === 'notes' || targetView === 'flashcards') ui.dockIndex = 1;
+  else if (targetView === 'practice' || targetView === 'quiz' || targetView === 'timer' || targetView === 'planner') ui.dockIndex = 2;
+  else if (targetView === 'confidence' || targetView === 'goal') ui.dockIndex = 3;
+
+  if (targetView === 'quiz') {
+    ui.quizIndex = 0;
+    ui.quizSelectedOption = null;
+    ui.quizScore = 0;
+    ui.quizFinished = false;
+  }
+
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  renderAppShell();
+}
+
+function bindAppEvents() {
+  // Top emblem: single click -> Home, double click -> replay 10s intro
+  const topLogo = document.getElementById('topbar-logo');
+  if (topLogo) {
+    topLogo.addEventListener('click', () => {
+      if (ui.view !== 'home') openView('home');
+    });
+    topLogo.addEventListener('dblclick', () => startTenSecondLoadingSequence());
+  }
+
+  // View navigation buttons
+  document.querySelectorAll('[data-open-view]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const next = btn.getAttribute('data-open-view');
+      if (next) openView(next);
+    });
+  });
+
+  // Bottom Dock Tabs
+  const dockViews = ['home', 'library', 'practice', 'confidence'];
+  document.querySelectorAll('[data-dock-tab]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const idx = Number(btn.getAttribute('data-dock-tab') || 0);
+      ui.dockIndex = idx;
+      ui.view = dockViews[idx] || 'home';
+      renderAppShell();
+    });
+  });
+
+  // Continue Studying button on Hero Card
+  const continueBtn = document.getElementById('continue-study-btn');
+  if (continueBtn) {
+    continueBtn.addEventListener('click', () => {
+      const lastSub = state.lastStudied?.subjectId || 'maths';
+      ui.subjectFilter = lastSub;
+      if (state.lastStudied?.type === 'quiz') openView('quiz');
+      else if (state.lastStudied?.type === 'flashcard') openView('flashcards');
+      else openView('notes');
+    });
+  }
+
+  // Subject filter chips
+  document.querySelectorAll('[data-filter-sub]').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      ui.subjectFilter = chip.getAttribute('data-filter-sub') || 'all';
+      ui.quizIndex = 0;
+      ui.quizSelectedOption = null;
+      ui.quizFinished = false;
+      ui.cardIndex = 0;
+      ui.cardFlipped = false;
+      renderAppShell();
+    });
+  });
+
+  // --- Notes Events ---
+  const toggleNoteBtn = document.getElementById('toggle-new-note-btn');
+  if (toggleNoteBtn) {
+    toggleNoteBtn.addEventListener('click', () => {
+      ui.showNewNoteForm = !ui.showNewNoteForm;
+      renderAppShell();
+    });
+  }
+
+  const newNoteForm = document.getElementById('new-note-form');
+  if (newNoteForm) {
+    newNoteForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const fd = new FormData(newNoteForm);
+      const subjectId = String(fd.get('subjectId') || 'maths');
+      const title = String(fd.get('title') || '').trim();
+      const formula = String(fd.get('formula') || '').trim();
+      const summary = String(fd.get('summary') || '').trim();
+      if (!title || !summary) return;
+
+      const sub = getSubjectById(subjectId);
+      const newNote = {
+        id: `note-${Date.now()}`,
+        subjectId,
+        title,
+        topic: sub.short,
+        keyFormulas: formula ? [formula] : [],
+        summary,
+        bookmarked: true
+      };
+      state.notes.unshift(newNote);
+      state.lastStudied = {
+        type: 'note',
+        id: newNote.id,
+        subjectId,
+        title: `${sub.name} — ${title}`
+      };
+      saveState(state);
+      ui.showNewNoteForm = false;
+      renderAppShell();
+    });
+  }
+
+  document.querySelectorAll('[data-note-card]').forEach((cardEl) => {
+    cardEl.addEventListener('click', () => {
+      const id = cardEl.getAttribute('data-note-card');
+      const found = state.notes.find((n) => n.id === id);
+      if (found) {
+        const sub = getSubjectById(found.subjectId);
+        state.lastStudied = {
+          type: 'note',
+          id: found.id,
+          subjectId: found.subjectId,
+          title: `${sub.name} — ${found.topic || found.title}`
+        };
+        saveState(state);
+      }
+    });
+  });
+
+  // --- Quick Quiz Events ---
+  const pool = state.quizzes.filter(
+    (q) => ui.subjectFilter === 'all' || q.subjectId === ui.subjectFilter
+  );
+  document.querySelectorAll('[data-quiz-opt]').forEach((optBtn) => {
+    optBtn.addEventListener('click', () => {
+      const chosen = Number(optBtn.getAttribute('data-quiz-opt'));
+      const currentQ = pool[Math.min(ui.quizIndex, pool.length - 1)];
+      if (!currentQ) return;
+
+      ui.quizSelectedOption = chosen;
+      const sub = getSubjectById(currentQ.subjectId);
+      state.lastStudied = {
+        type: 'quiz',
+        id: currentQ.id,
+        subjectId: currentQ.subjectId,
+        title: `${sub.name} — ${currentQ.topic}`
+      };
+
+      if (chosen === currentQ.correctIndex) {
+        ui.quizScore += 1;
+        state.subjectConfidence[currentQ.subjectId] = Math.min(
+          100,
+          Number(state.subjectConfidence[currentQ.subjectId] || 75) + 2
+        );
+      } else {
+        state.subjectConfidence[currentQ.subjectId] = Math.max(
+          40,
+          Number(state.subjectConfidence[currentQ.subjectId] || 75) - 1
+        );
+      }
+      saveState(state);
+      renderAppShell();
+    });
+  });
+
+  const nextQuizBtn = document.getElementById('next-quiz-btn');
+  if (nextQuizBtn) {
+    nextQuizBtn.addEventListener('click', () => {
+      if (ui.quizIndex + 1 < pool.length) {
+        ui.quizIndex += 1;
+        ui.quizSelectedOption = null;
+      } else {
+        ui.quizFinished = true;
+        state.dailyCompleted += 1;
+        saveState(state);
+      }
+      renderAppShell();
+    });
+  }
+
+  const restartQuizBtn = document.getElementById('restart-quiz-btn');
+  if (restartQuizBtn) {
+    restartQuizBtn.addEventListener('click', () => {
+      ui.quizIndex = 0;
+      ui.quizSelectedOption = null;
+      ui.quizScore = 0;
+      ui.quizFinished = false;
+      renderAppShell();
+    });
+  }
+
+  // --- Flashcards Events ---
+  const flipBox = document.getElementById('flashcard-flip-box');
+  if (flipBox) {
+    flipBox.addEventListener('click', () => {
+      ui.cardFlipped = !ui.cardFlipped;
+      renderAppShell();
+    });
+  }
+
+  const toggleNewCardBtn = document.getElementById('toggle-new-card-btn');
+  if (toggleNewCardBtn) {
+    toggleNewCardBtn.addEventListener('click', () => {
+      ui.showNewCardForm = !ui.showNewCardForm;
+      renderAppShell();
+    });
+  }
+
+  const newCardForm = document.getElementById('new-card-form');
+  if (newCardForm) {
+    newCardForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const fd = new FormData(newCardForm);
+      const subjectId = String(fd.get('subjectId') || 'maths');
+      const front = String(fd.get('front') || '').trim();
+      const back = String(fd.get('back') || '').trim();
+      if (!front || !back) return;
+      state.flashcards.unshift({
+        id: `fc-${Date.now()}`,
+        subjectId,
+        front,
+        back,
+        mastered: false
+      });
+      saveState(state);
+      ui.showNewCardForm = false;
+      ui.cardIndex = 0;
+      ui.cardFlipped = false;
+      renderAppShell();
+    });
+  }
+
+  const deck = state.flashcards.filter(
+    (c) => ui.subjectFilter === 'all' || c.subjectId === ui.subjectFilter
+  );
+  const fcPracticeBtn = document.getElementById('fc-practice-btn');
+  if (fcPracticeBtn && deck.length) {
+    fcPracticeBtn.addEventListener('click', () => {
+      const card = deck[ui.cardIndex % deck.length];
+      card.mastered = false;
+      ui.cardIndex = (ui.cardIndex + 1) % deck.length;
+      ui.cardFlipped = false;
+      saveState(state);
+      renderAppShell();
+    });
+  }
+
+  const fcGotItBtn = document.getElementById('fc-gotit-btn');
+  if (fcGotItBtn && deck.length) {
+    fcGotItBtn.addEventListener('click', () => {
+      const card = deck[ui.cardIndex % deck.length];
+      if (!card.mastered) {
+        card.mastered = true;
+        state.subjectConfidence[card.subjectId] = Math.min(
+          100,
+          Number(state.subjectConfidence[card.subjectId] || 75) + 1
+        );
+      }
+      const sub = getSubjectById(card.subjectId);
+      state.lastStudied = {
+        type: 'flashcard',
+        id: card.id,
+        subjectId: card.subjectId,
+        title: `${sub.name} — Flashcards`
+      };
+      ui.cardIndex = (ui.cardIndex + 1) % deck.length;
+      ui.cardFlipped = false;
+      saveState(state);
+      renderAppShell();
+    });
+  }
+
+  // --- Study Planner Events ---
+  document.querySelectorAll('[data-toggle-task]').forEach((el) => {
+    el.addEventListener('click', () => {
+      const id = el.getAttribute('data-toggle-task');
+      const task = state.tasks.find((t) => t.id === id);
+      if (task) {
+        task.done = !task.done;
+        if (task.done) state.dailyCompleted += 1;
+        saveState(state);
+        renderAppShell();
+      }
+    });
+  });
+
+  const addTaskForm = document.getElementById('add-task-form');
+  if (addTaskForm) {
+    addTaskForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const fd = new FormData(addTaskForm);
+      const title = String(fd.get('title') || '').trim();
+      if (!title) return;
+      state.tasks.unshift({
+        id: `t-${Date.now()}`,
+        title,
+        subjectId: 'maths',
+        done: false
+      });
+      saveState(state);
+      renderAppShell();
+    });
+  }
+
+  const toggleExamFormBtn = document.getElementById('toggle-exam-form-btn');
+  if (toggleExamFormBtn) {
+    toggleExamFormBtn.addEventListener('click', () => {
+      ui.showNewExamForm = !ui.showNewExamForm;
+      renderAppShell();
+    });
+  }
+
+  const addExamForm = document.getElementById('add-exam-form');
+  if (addExamForm) {
+    addExamForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const fd = new FormData(addExamForm);
+      const title = String(fd.get('title') || '').trim();
+      const daysAway = Number(fd.get('daysAway') || 7);
+      if (!title) return;
+      state.exams.push({
+        id: `ex-${Date.now()}`,
+        subjectId: 'maths',
+        title,
+        daysAway
+      });
+      state.exams.sort((a, b) => a.daysAway - b.daysAway);
+      saveState(state);
+      ui.showNewExamForm = false;
+      renderAppShell();
+    });
+  }
+
+  // --- Focus Timer Events ---
+  document.querySelectorAll('[data-timer-preset]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const mins = Number(btn.getAttribute('data-timer-preset') || 25);
+      stopFocusTimer();
+      ui.timerModeMinutes = mins;
+      ui.timerSecondsLeft = mins * 60;
+      renderAppShell();
+    });
+  });
+
+  const timerToggleBtn = document.getElementById('timer-toggle-btn');
+  if (timerToggleBtn) {
+    timerToggleBtn.addEventListener('click', () => {
+      if (ui.timerRunning) {
+        stopFocusTimer();
+      } else {
+        startFocusTimer();
+      }
+      renderAppShell();
+    });
+  }
+
+  const timerResetBtn = document.getElementById('timer-reset-btn');
+  if (timerResetBtn) {
+    timerResetBtn.addEventListener('click', () => {
+      stopFocusTimer();
+      ui.timerSecondsLeft = ui.timerModeMinutes * 60;
+      renderAppShell();
+    });
+  }
+
+  // --- Goal & Weak-Spot Events ---
+  document.querySelectorAll('[data-goal-target]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      state.dailyGoalTarget = Number(btn.getAttribute('data-goal-target') || 4);
+      saveState(state);
+      renderAppShell();
+    });
+  });
+
+  const weakSpotBtn = document.getElementById('practice-weakspot-btn');
+  if (weakSpotBtn) {
+    weakSpotBtn.addEventListener('click', () => {
+      ui.subjectFilter = weakSpotBtn.getAttribute('data-sub') || 'all';
+      openView('quiz');
+    });
+  }
+
+  // --- Confidence & Settings Events ---
+  const themeBtn = document.getElementById('toggle-theme-btn');
+  if (themeBtn) {
+    themeBtn.addEventListener('click', () => {
+      state.theme = state.theme === 'night' ? 'light' : 'night';
+      saveState(state);
+      renderAppShell();
+    });
+  }
+
+  const replayIntroBtn = document.getElementById('replay-intro-btn');
+  if (replayIntroBtn) {
+    replayIntroBtn.addEventListener('click', () => startTenSecondLoadingSequence());
+  }
+
+  const exportBackupBtn = document.getElementById('export-backup-btn');
+  if (exportBackupBtn) {
+    exportBackupBtn.addEventListener('click', () => {
+      const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'i-tutor-offline-backup.json';
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+  }
+
+  const resetDataBtn = document.getElementById('reset-data-btn');
+  if (resetDataBtn) {
+    resetDataBtn.addEventListener('click', () => {
+      state = resetState();
+      renderAppShell();
+    });
+  }
+}
+
+function startFocusTimer() {
+  if (ui.timerIntervalId) clearInterval(ui.timerIntervalId);
+  ui.timerRunning = true;
+  ui.timerIntervalId = setInterval(() => {
+    if (ui.timerSecondsLeft > 0) {
+      ui.timerSecondsLeft -= 1;
+      const liveEl = document.getElementById('timer-live-readout');
+      if (liveEl) liveEl.textContent = formatTimer(ui.timerSecondsLeft);
+    } else {
+      stopFocusTimer();
+      state.focusMinutesToday += ui.timerModeMinutes;
+      state.dailyCompleted += 1;
+      saveState(state);
+      ui.timerSecondsLeft = ui.timerModeMinutes * 60;
+      renderAppShell();
+    }
+  }, 1000);
+}
+
+function stopFocusTimer() {
+  ui.timerRunning = false;
+  if (ui.timerIntervalId) {
+    clearInterval(ui.timerIntervalId);
+    ui.timerIntervalId = null;
+  }
+}
+
+/* ==========================================================================
+   5. BOOT WITH 10-SECOND LOADING SEQUENCE
+   ========================================================================== */
 
 function startTenSecondLoadingSequence() {
   const appEl = document.getElementById('app');
@@ -404,15 +1265,9 @@ function startTenSecondLoadingSequence() {
     const pct = rawRatio * 100;
     const roundedPct = Math.min(100, Math.floor(pct));
 
-    if (fillEl) {
-      fillEl.style.width = `${pct.toFixed(2)}%`;
-    }
-    if (percentEl) {
-      percentEl.textContent = `${roundedPct}%`;
-    }
-    if (progressbarEl) {
-      progressbarEl.setAttribute('aria-valuenow', String(roundedPct));
-    }
+    if (fillEl) fillEl.style.width = `${pct.toFixed(2)}%`;
+    if (percentEl) percentEl.textContent = `${roundedPct}%`;
+    if (progressbarEl) progressbarEl.setAttribute('aria-valuenow', String(roundedPct));
 
     let currentPhase = STATUS_PHASES[0].text;
     for (const phase of STATUS_PHASES) {
@@ -436,7 +1291,9 @@ function startTenSecondLoadingSequence() {
       setTimeout(() => {
         if (splashEl) splashEl.classList.add('is-exiting');
         setTimeout(() => {
-          showAppLayout();
+          ui.view = 'home';
+          ui.dockIndex = 0;
+          renderAppShell();
         }, 620);
       }, 280);
     }
@@ -453,5 +1310,6 @@ function registerOfflineServiceWorker() {
   }
 }
 
+applyTheme();
 registerOfflineServiceWorker();
 startTenSecondLoadingSequence();

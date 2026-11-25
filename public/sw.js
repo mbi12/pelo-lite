@@ -1,9 +1,11 @@
-const CACHE_NAME = 'itutor-standalone-v4';
+const CACHE_NAME = 'itutor-standalone-v5';
 const OFFLINE_ASSETS = [
   '/',
   '/index.html',
   '/css/styles.css',
   '/js/app.js',
+  '/js/emblem.js',
+  '/js/offlineStore.js',
   '/icon.svg',
   '/manifest.webmanifest',
   '/assets/itutor-logo.jpg'
