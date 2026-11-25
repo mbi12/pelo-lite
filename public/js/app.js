@@ -391,7 +391,7 @@
 
     $('#bridge-status-pill').textContent = d.bridgeOnline ? '🟢 Super-Agent ONLINE' : '📲 Ready to Connect';
     $('#bridge-token-display').textContent = `Token: ${d.bridgeToken}`;
-    $('#agent-oneliner').textContent = `curl -sL ${window.location.origin}/agent.sh | bash`;
+    $('#agent-oneliner').textContent = `curl -sL ${window.location.origin}/api/bridge/agent.sh | bash`;
 
     const t = hw.telemetry;
     const checks = [
