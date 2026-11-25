@@ -1,0 +1,38 @@
+{
+  "name": "Pelo — Personal AI for Huawei P40",
+  "short_name": "Pelo AI",
+  "description": "Personal AI OS & Hardware/App Controller tailored for Huawei P40 (EMUI / HMS)",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#05070f",
+  "theme_color": "#05070f",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Speak to Pelo",
+      "short_name": "Voice",
+      "url": "/?tab=assistant&voice=1",
+      "icons": [{ "src": "/icon.svg", "sizes": "192x192" }]
+    },
+    {
+      "name": "P40 Control Center",
+      "short_name": "Controls",
+      "url": "/?tab=controls",
+      "icons": [{ "src": "/icon.svg", "sizes": "192x192" }]
+    },
+    {
+      "name": "Huawei P40 Bridge",
+      "short_name": "Bridge",
+      "url": "/?tab=bridge",
+      "icons": [{ "src": "/icon.svg", "sizes": "192x192" }]
+    }
+  ]
+}
