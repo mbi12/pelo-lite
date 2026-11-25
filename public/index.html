@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PELO // Deep-Space Exoplanet Observatory &amp; Telemetry API</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="stylesheet" href="/css/styles.css" />
+</head>
+<body>
+  <!-- Top Mission Control Bar -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">✦</div>
+      <div class="brand-text">
+        <span class="brand-title">PELO <span class="brand-slash">//</span> OBSERVATORY</span>
+        <span class="brand-sub">
+          <span class="status-dot"></span>
+          <span id="health-summary">REST API + KEPLER ENGINE ONLINE</span>
+        </span>
+      </div>
+    </div>
+
+    <!-- Procedural Discovery Bar -->
+    <form id="discover-form" class="discover-bar" autocomplete="off">
+      <div class="seed-input-wrap">
+        <span class="seed-prefix">SEED://</span>
+        <input
+          id="seed-input"
+          type="text"
+          placeholder="Type any word, coordinate, or name (e.g. amsterdam, dune, nova)..."
+          maxlength="80"
+        />
+      </div>
+      <select id="spectral-bias" title="Optional Spectral Class Filter">
+        <option value="">Any Star</option>
+        <option value="G">G · Solar</option>
+        <option value="K">K · Amber</option>
+        <option value="M">M · Red Dwarf</option>
+        <option value="F">F · Bright</option>
+        <option value="B">B · Sapphire</option>
+        <option value="O">O · Hypergiant</option>
+        <option value="PSR">PSR · Pulsar</option>
+        <option value="WD">WD · White Dwarf</option>
+      </select>
+      <button type="submit" class="btn btn-primary" id="discover-btn">
+        ✦ Synthesize System
+      </button>
+      <button type="button" class="btn btn-ghost" id="random-btn" title="Generate random deep-space sector">
+        🎲 Random
+      </button>
+    </form>
+
+    <!-- Right Instrumentation Controls -->
+    <div class="topbar-actions">
+      <button type="button" class="btn btn-chip" id="audio-toggle" title="Toggle Radio-Telescope Acoustic Sonification">
+        <span id="audio-icon">🔇</span>
+        <span class="hide-sm">Radio Synth</span>
+      </button>
+      <button type="button" class="btn btn-api" id="api-drawer-toggle">
+        <span>⚡ API Console</span>
+        <span class="api-badge" id="api-req-count">0</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Main 3-Column Mission Control Workspace -->
+  <main class="workspace">
+    <!-- Left Sidebar: Star Catalog & Top Habitable Worlds -->
+    <aside class="panel panel-left">
+      <div class="panel-tabs">
+        <button type="button" class="tab-btn active" data-tab="systems">
+          Star Systems <span class="tab-count" id="systems-count-badge">0</span>
+        </button>
+        <button type="button" class="tab-btn" data-tab="habitable">
+          Top Worlds <span class="tab-count emerald" id="habitable-count-badge">0</span>
+        </button>
+      </div>
+
+      <!-- Systems Tab Content -->
+      <div id="tab-systems" class="tab-pane active">
+        <div class="catalog-filters">
+          <input
+            type="search"
+            id="system-search"
+            placeholder="Filter catalog..."
+            class="search-input"
+          />
+          <div class="filter-pills">
+            <button type="button" class="pill active" data-filter="all">All</button>
+            <button type="button" class="pill" data-filter="habitable">★ Habitable</button>
+            <button type="button" class="pill" data-filter="PSR">Pulsars</button>
+          </div>
+        </div>
+        <div id="systems-list" class="entity-list"></div>
+      </div>
+
+      <!-- Top Habitable Worlds Tab Content -->
+      <div id="tab-habitable" class="tab-pane">
+        <div class="pane-caption">
+          Ranked across all systems by Schulze-Makuch Earth Similarity Index (ESI) via <code>GET /api/planets</code>
+        </div>
+        <div id="top-planets-list" class="entity-list"></div>
+      </div>
+    </aside>
+
+    <!-- Center Stage: Interactive 60fps Keplerian Orrery -->
+    <section class="stage">
+      <canvas id="orrery-canvas"></canvas>
+
+      <!-- Quick Seed Inspiration Chips -->
+      <div class="quick-seeds">
+        <span class="quick-label">Quick Seeds:</span>
+        <button type="button" class="seed-chip" data-seed="amsterdam-canal-prime">amsterdam</button>
+        <button type="button" class="seed-chip" data-seed="arrakis-spice-dune">dune</button>
+        <button type="button" class="seed-chip" data-seed="europa-abyssal-ocean">europa</button>
+        <button type="button" class="seed-chip" data-seed="crab-nebula-lighthouse" data-spectral="PSR">pulsar</button>
+        <button type="button" class="seed-chip" data-seed="rigel-blue-supergiant" data-spectral="O">hypergiant</button>
+      </div>
+
+      <!-- Canvas Overlay Controls (Time Warp + Overlays + Zoom) -->
+      <div class="stage-controls">
+        <div class="control-group" title="Orbital Time-Warp Multiplier">
+          <span class="ctrl-label">TIME</span>
+          <button type="button" class="ctrl-btn" data-speed="0">⏸</button>
+          <button type="button" class="ctrl-btn active" data-speed="1">1×</button>
+          <button type="button" class="ctrl-btn" data-speed="6">6×</button>
+          <button type="button" class="ctrl-btn" data-speed="25">25×</button>
+        </div>
+
+        <div class="control-group">
+          <button type="button" class="ctrl-btn active" id="toggle-hz" title="Toggle Circumstellar Habitable Zone">
+            HZ Band
+          </button>
+          <button type="button" class="ctrl-btn active" id="toggle-labels" title="Toggle Planet Orbit Labels">
+            Labels
+          </button>
+        </div>
+
+        <div class="control-group">
+          <button type="button" class="ctrl-btn" id="zoom-in" title="Zoom In">+</button>
+          <button type="button" class="ctrl-btn" id="zoom-out" title="Zoom Out">−</button>
+          <button type="button" class="ctrl-btn" id="zoom-reset" title="Reset Camera">Center</button>
+        </div>
+      </div>
+
+      <!-- Floating Star Telemetry Bar -->
+      <div class="star-hud" id="star-hud">
+        <div class="star-hud-main">
+          <span class="star-orb" id="hud-star-orb"></span>
+          <div>
+            <div class="hud-star-name" id="hud-star-name">Loading...</div>
+            <div class="hud-star-sub" id="hud-star-sub">—</div>
+          </div>
+        </div>
+        <div class="star-hud-metrics">
+          <div class="hud-metric">
+            <span class="m-label">MASS</span>
+            <span class="m-val" id="hud-mass">—</span>
+          </div>
+          <div class="hud-metric">
+            <span class="m-label">TEMP</span>
+            <span class="m-val" id="hud-temp">—</span>
+          </div>
+          <div class="hud-metric">
+            <span class="m-label">LUMINOSITY</span>
+            <span class="m-val" id="hud-lum">—</span>
+          </div>
+          <div class="hud-metric">
+            <span class="m-label">HABITABLE ZONE</span>
+            <span class="m-val emerald" id="hud-hz">—</span>
+          </div>
+          <div class="hud-metric">
+            <span class="m-label">SIM EPOCH</span>
+            <span class="m-val mono" id="hud-epoch">Day 0.0</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Hover Tooltip -->
+      <div id="canvas-tooltip" class="canvas-tooltip hidden"></div>
+    </section>
+
+    <!-- Right Sidebar: Selected Exoplanet Dossier -->
+    <aside class="panel panel-right" id="planet-dossier">
+      <div class="dossier-header">
+        <div>
+          <div class="dossier-eyebrow" id="planet-orbit-tag">ORBIT 01</div>
+          <h2 class="dossier-title" id="planet-name">Select a World</h2>
+          <div class="dossier-type" id="planet-type">—</div>
+        </div>
+        <button type="button" class="bookmark-btn" id="bookmark-btn" title="Bookmark Candidate (PATCH /api/planets/:id)">
+          ☆
+        </button>
+      </div>
+
+      <!-- 3D Shaded Procedural Planet Globe + ESI Ring -->
+      <div class="globe-showcase">
+        <canvas id="planet-globe" width="180" height="180"></canvas>
+        <div class="esi-card" title="Schulze-Makuch Earth Similarity Index (0.00 to 1.00)">
+          <svg class="esi-ring" viewBox="0 0 80 80">
+            <circle class="esi-track" cx="40" cy="40" r="33" />
+            <circle class="esi-fill" id="esi-circle" cx="40" cy="40" r="33" />
+          </svg>
+          <div class="esi-center">
+            <span class="esi-score" id="planet-esi">0.00</span>
+            <span class="esi-label">ESI</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Orbit Quick Selector Strip -->
+      <div class="orbit-strip" id="orbit-strip"></div>
+
+      <!-- Telemetry Grid -->
+      <div class="telemetry-grid">
+        <div class="t-box">
+          <span class="t-label">SURFACE TEMP</span>
+          <span class="t-value" id="planet-temp">—</span>
+        </div>
+        <div class="t-box">
+          <span class="t-label">ORBITAL PERIOD</span>
+          <span class="t-value" id="planet-period">—</span>
+        </div>
+        <div class="t-box">
+          <span class="t-label">SEMI-MAJOR AXIS</span>
+          <span class="t-value" id="planet-au">—</span>
+        </div>
+        <div class="t-box">
+          <span class="t-label">RADIUS / MASS</span>
+          <span class="t-value" id="planet-size">—</span>
+        </div>
+        <div class="t-box">
+          <span class="t-label">GRAVITY / TILT</span>
+          <span class="t-value" id="planet-gravity">—</span>
+        </div>
+        <div class="t-box">
+          <span class="t-label">MOONS &amp; RINGS</span>
+          <span class="t-value" id="planet-moons">—</span>
+        </div>
+      </div>
+
+      <!-- Atmospheric Composition Spectrum -->
+      <div class="section-block">
+        <div class="section-title">ATMOSPHERIC SPECTROSCOPY</div>
+        <div class="atmo-bar" id="atmo-bar"></div>
+        <div class="atmo-legend" id="atmo-legend"></div>
+      </div>
+
+      <!-- Surface Anomaly & Deep Scan -->
+      <div class="section-block">
+        <div class="section-title-row">
+          <span class="section-title">DEEP-SPACE TELEMETRY</span>
+          <span class="scan-badge" id="scan-count-badge">0 scans</span>
+        </div>
+        <div class="anomaly-banner" id="planet-anomaly">—</div>
+        <button type="button" class="btn btn-scan" id="scan-btn">
+          <span class="radar-dot"></span>
+          Run Spectroscopic Scan (POST /scan)
+        </button>
+        <div id="scans-feed" class="scans-feed"></div>
+      </div>
+
+      <!-- Explorer Notes (PATCH /api/planets/:id) -->
+      <div class="section-block">
+        <div class="section-title-row">
+          <span class="section-title">EXPLORER LOG</span>
+          <span class="save-indicator" id="notes-status">Saved to SQLite</span>
+        </div>
+        <textarea
+          id="planet-notes"
+          rows="2"
+          placeholder="Record field observations for this exoplanet..."
+        ></textarea>
+      </div>
+    </aside>
+  </main>
+
+  <!-- Slide-Up Live REST API Playground & Network Inspector Drawer -->
+  <section id="api-drawer" class="api-drawer hidden" aria-label="Live REST API Console">
+    <div class="api-drawer-header">
+      <div class="api-drawer-title">
+        <span class="api-pill">REST API v1</span>
+        <strong>Live API Playground &amp; Telemetry Log</strong>
+        <span class="api-sub">Backed by Express + SQLite WAL · All UI actions call real <code>/api/*</code> endpoints</span>
+      </div>
+      <button type="button" class="btn btn-ghost btn-sm" id="api-drawer-close">✕ Close</button>
+    </div>
+
+    <div class="api-drawer-body">
+      <!-- Endpoint Presets & Request Builder -->
+      <div class="api-tester">
+        <div class="preset-row">
+          <button type="button" class="preset-btn active" data-method="GET" data-path="/api">GET /api</button>
+          <button type="button" class="preset-btn" data-method="GET" data-path="/api/health">GET /api/health</button>
+          <button type="button" class="preset-btn" data-method="GET" data-path="/api/stats">GET /api/stats</button>
+          <button type="button" class="preset-btn" data-method="GET" data-path="/api/systems?habitable=true">GET /api/systems?habitable=true</button>
+          <button type="button" class="preset-btn" data-method="GET" data-path="/api/planets?minEsi=0.65">GET /api/planets?minEsi=0.65</button>
+          <button type="button" class="preset-btn" data-method="POST" data-path="/api/systems/discover" data-body='{"seed":"andromeda-spire","spectralBias":"K"}'>POST /api/systems/discover</button>
+          <button type="button" class="preset-btn" data-method="POST" data-path="/api/simulate/orbit" data-body='{"starMassSolar":1.0,"semiMajorAxisAu":1.0,"eccentricity":0.08,"timeDays":120}'>POST /api/simulate/orbit</button>
+        </div>
+
+        <div class="req-bar">
+          <select id="play-method" class="method-select">
+            <option value="GET">GET</option>
+            <option value="POST">POST</option>
+            <option value="PATCH">PATCH</option>
+            <option value="DELETE">DELETE</option>
+          </select>
+          <input type="text" id="play-path" value="/api" class="path-input" />
+          <button type="button" class="btn btn-primary btn-sm" id="play-send">Send Request</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="play-curl" title="Copy cURL command for terminal">Copy cURL</button>
+        </div>
+
+        <div id="play-body-wrap" class="play-body-wrap hidden">
+          <label for="play-body" class="mini-label">JSON Request Body</label>
+          <textarea id="play-body" rows="3" spellcheck="false"></textarea>
+        </div>
+
+        <div class="res-header">
+          <span id="play-status" class="res-status">Ready</span>
+          <span id="play-latency" class="res-latency"></span>
+        </div>
+        <pre id="play-output" class="json-viewer">// Click "Send Request" or select any endpoint preset above to inspect live JSON responses.</pre>
+      </div>
+
+      <!-- Live Session Network Log -->
+      <div class="api-network-log">
+        <div class="log-header">
+          <span>LIVE NETWORK STREAM</span>
+          <button type="button" class="link-btn" id="clear-log-btn">Clear</button>
+        </div>
+        <div id="network-log-list" class="network-log-list"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Toast Notification -->
+  <div id="toast" class="toast hidden"></div>
+
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>
