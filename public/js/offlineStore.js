@@ -1,32 +1,65 @@
-import { createDefaultSnapshot } from './defaultSeed.js';
+import { createDefaultSnapshot, SUBJECT_LIST } from './defaultSeed.js';
 
-const VAULT_KEY = 'itutor_offline_vault_v2';
-const OUTBOX_KEY = 'itutor_offline_outbox_v2';
-const SESSION_KEY = 'itutor_session_v2';
+const VAULT_KEY = 'itutor_offline_vault_v3';
+const PERSONAL_KEY = 'itutor_personal_study_v3';
+const OUTBOX_KEY = 'itutor_offline_outbox_v3';
+const SESSION_KEY = 'itutor_session_v3';
+
+export { SUBJECT_LIST };
+
+function createDefaultPersonalState() {
+  const seed = createDefaultSnapshot();
+  return {
+    dailyGoalTarget: 4,
+    dailyCompleted: 2,
+    streakDays: 5,
+    focusMinutesToday: 25,
+    subjectConfidence: {
+      Mathematics: 78,
+      'Physical Sciences': 72,
+      Accounting: 85,
+      'Life Sciences': 80,
+      English: 76
+    },
+    flashcards: seed.flashcards,
+    customQuizzes: [],
+    bookmarkedNoteIds: ['note-trig', 'note-newton'],
+    assignmentDrafts: {}, // { [assignmentId]: "saved offline work..." }
+    scratchpad: 'sin(2x) = 2 sin x cos x\ncos(2x) = 1 - 2sin²x\nRemember to convert cm³ ÷ 1000 = dm³!',
+    tasks: [
+      { id: 'tk-1', title: 'Complete Trig Remote Worksheet 4', subject: 'Mathematics', done: false },
+      { id: 'tk-2', title: 'Flip unmastered Mechanics Flashcards', subject: 'Physical Sciences', done: false },
+      { id: 'tk-3', title: 'Review Year-End Adjustments Note', subject: 'Accounting', done: true },
+      { id: 'tk-4', title: '25m Offline Focus Sprint', subject: 'Mathematics', done: true }
+    ],
+    exams: [
+      { id: 'ex-1', title: 'Mathematics Paper 2', subject: 'Mathematics', daysAway: 12 },
+      { id: 'ex-2', title: 'Physical Sciences Paper 1', subject: 'Physical Sciences', daysAway: 16 },
+      { id: 'ex-3', title: 'Accounting Final', subject: 'Accounting', daysAway: 21 }
+    ]
+  };
+}
 
 export function loadVault() {
+  const seed = createDefaultSnapshot();
   try {
     const raw = localStorage.getItem(VAULT_KEY);
     if (!raw) {
-      const seed = {
-        ...createDefaultSnapshot(),
-        lastDownloadedAt: new Date().toISOString()
-      };
-      saveVault(seed);
-      return seed;
+      const fresh = { ...seed, lastDownloadedAt: new Date().toISOString() };
+      saveVault(fresh);
+      return fresh;
     }
     const parsed = JSON.parse(raw);
-    const seed = createDefaultSnapshot();
     return {
       ...seed,
       ...parsed,
+      notes: parsed.notes?.length ? parsed.notes : seed.notes,
+      quizzes: parsed.quizzes?.length ? parsed.quizzes : seed.quizzes,
+      attendance: parsed.attendance?.length ? parsed.attendance : seed.attendance,
       tuitionInfo: parsed.tuitionInfo || seed.tuitionInfo
     };
   } catch {
-    return {
-      ...createDefaultSnapshot(),
-      lastDownloadedAt: new Date().toISOString()
-    };
+    return { ...seed, lastDownloadedAt: new Date().toISOString() };
   }
 }
 
@@ -34,8 +67,54 @@ export function saveVault(vault) {
   try {
     localStorage.setItem(VAULT_KEY, JSON.stringify(vault));
   } catch {
-    // Ignore storage quota errors
+    // Ignore quota errors
   }
+}
+
+export function loadPersonal() {
+  const def = createDefaultPersonalState();
+  try {
+    const raw = localStorage.getItem(PERSONAL_KEY);
+    if (!raw) {
+      savePersonal(def);
+      return def;
+    }
+    const parsed = JSON.parse(raw);
+    return {
+      ...def,
+      ...parsed,
+      subjectConfidence: { ...def.subjectConfidence, ...(parsed.subjectConfidence || {}) },
+      assignmentDrafts: parsed.assignmentDrafts || {}
+    };
+  } catch {
+    return def;
+  }
+}
+
+export function savePersonal(personal) {
+  try {
+    localStorage.setItem(PERSONAL_KEY, JSON.stringify(personal));
+  } catch {
+    // Ignore
+  }
+}
+
+export function getOverallConfidence(personal) {
+  const vals = Object.values(personal.subjectConfidence || {});
+  if (!vals.length) return 78;
+  return Math.round(vals.reduce((a, b) => a + Number(b || 0), 0) / vals.length);
+}
+
+export function getWeakestSubject(personal) {
+  let weakest = 'Physical Sciences';
+  let min = 101;
+  for (const [sub, val] of Object.entries(personal.subjectConfidence || {})) {
+    if (Number(val) < min) {
+      min = Number(val);
+      weakest = sub;
+    }
+  }
+  return { subject: weakest, score: min };
 }
 
 export function loadOutbox() {
@@ -51,7 +130,7 @@ export function saveOutbox(queue) {
   try {
     localStorage.setItem(OUTBOX_KEY, JSON.stringify(queue));
   } catch {
-    // Ignore storage quota errors
+    // Ignore
   }
 }
 
@@ -60,7 +139,6 @@ export function loadSession() {
     const raw = localStorage.getItem(SESSION_KEY);
     if (!raw) {
       return {
-        // Default to Student view so user sees full layout immediately, with 1-tap switch to Visitor/Teacher/Parent/Admin
         currentUserId: 'stu-thabo',
         theme: 'light',
         simulateOffline: false
@@ -84,10 +162,6 @@ export function saveSession(session) {
   }
 }
 
-/**
- * Optimistically applies an action locally so it works 100% offline with instant feedback,
- * then queues it in the Offline Outbox for automatic cloud sync when online.
- */
 export function dispatchOfflineAction(vault, action) {
   const p = action.payload || {};
 
@@ -102,10 +176,10 @@ export function dispatchOfflineAction(vault, action) {
       vault.assignments.unshift(p);
       break;
     case 'SUBMIT_ASSIGNMENT': {
-      const existingIdx = vault.submissions.findIndex(
+      const idx = vault.submissions.findIndex(
         (s) => s.assignment_id === p.assignment_id && s.student_id === p.student_id
       );
-      if (existingIdx >= 0) vault.submissions[existingIdx] = { ...vault.submissions[existingIdx], ...p };
+      if (idx >= 0) vault.submissions[idx] = { ...vault.submissions[idx], ...p };
       else vault.submissions.unshift(p);
       break;
     }
@@ -118,6 +192,14 @@ export function dispatchOfflineAction(vault, action) {
       }
       break;
     }
+    case 'LOG_ATTENDANCE':
+      vault.attendance = vault.attendance || [];
+      vault.attendance.unshift(p);
+      break;
+    case 'ADD_STUDY_NOTE':
+      vault.notes = vault.notes || [];
+      vault.notes.unshift(p);
+      break;
     case 'CREATE_STUDY_GROUP':
       vault.rooms.unshift(p);
       break;
@@ -143,17 +225,10 @@ export function dispatchOfflineAction(vault, action) {
   saveVault(vault);
 
   const outbox = loadOutbox();
-  outbox.push({
-    ...action,
-    queuedAt: new Date().toISOString()
-  });
+  outbox.push({ ...action, queuedAt: new Date().toISOString() });
   saveOutbox(outbox);
 }
 
-/**
- * Flushes any queued offline actions and automatically downloads fresh timetables,
- * remote assignments, messages, study groups, broadcasts, and tuition info to local storage.
- */
 export async function syncWithServer({ simulateOffline = false } = {}) {
   if (simulateOffline || (typeof navigator !== 'undefined' && navigator.onLine === false)) {
     return { status: 'offline', vault: loadVault(), pendingCount: loadOutbox().length };
@@ -161,33 +236,34 @@ export async function syncWithServer({ simulateOffline = false } = {}) {
 
   const outbox = loadOutbox();
   try {
-    let res;
-    if (outbox.length > 0) {
-      res = await fetch('/api/sync', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ actions: outbox })
-      });
-    } else {
-      res = await fetch('/api/sync', { method: 'GET' });
-    }
+    const res =
+      outbox.length > 0
+        ? await fetch('/api/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ actions: outbox })
+          })
+        : await fetch('/api/sync', { method: 'GET' });
 
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const remoteSnap = await res.json();
 
-    if (outbox.length > 0) {
-      saveOutbox([]);
-    }
+    if (outbox.length > 0) saveOutbox([]);
 
+    const seed = createDefaultSnapshot();
     const updatedVault = {
-      profiles: remoteSnap.profiles || [],
+      profiles: remoteSnap.profiles?.length ? remoteSnap.profiles : seed.profiles,
       timetables: remoteSnap.timetables || [],
       assignments: remoteSnap.assignments || [],
       submissions: remoteSnap.submissions || [],
+      attendance: remoteSnap.attendance?.length ? remoteSnap.attendance : seed.attendance,
+      notes: remoteSnap.notes?.length ? remoteSnap.notes : seed.notes,
+      quizzes: seed.quizzes,
+      flashcards: seed.flashcards,
       rooms: remoteSnap.rooms || [],
       messages: remoteSnap.messages || [],
       broadcasts: remoteSnap.broadcasts || [],
-      tuitionInfo: remoteSnap.tuitionInfo || createDefaultSnapshot().tuitionInfo,
+      tuitionInfo: remoteSnap.tuitionInfo || seed.tuitionInfo,
       enquiries: remoteSnap.enquiries || [],
       lastDownloadedAt: remoteSnap.syncedAt || new Date().toISOString()
     };

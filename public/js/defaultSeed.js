@@ -1,3 +1,11 @@
+export const SUBJECT_LIST = [
+  'Mathematics',
+  'Physical Sciences',
+  'Accounting',
+  'Life Sciences',
+  'English'
+];
+
 export function createDefaultSnapshot() {
   return {
     profiles: [
@@ -75,7 +83,7 @@ export function createDefaultSnapshot() {
         subject: 'Mathematics',
         topic: 'Trigonometry Identities & Double Angles',
         teacher_name: 'Ms. Naledi Khumalo',
-        location_mode: 'Studio A · Saved Offline',
+        location_mode: 'Studio A · Auto-Saved Offline',
         grade_group: 'Grade 12',
         owner_id: null,
         is_official: true
@@ -88,7 +96,7 @@ export function createDefaultSnapshot() {
         subject: 'Physical Sciences',
         topic: 'Newton’s Laws & Free-Body Diagrams',
         teacher_name: 'Mr. Sipho Ndlovu',
-        location_mode: 'Lab 2 · Saved Offline',
+        location_mode: 'Lab 2 · Auto-Saved Offline',
         grade_group: 'Grade 12',
         owner_id: null,
         is_official: true
@@ -101,7 +109,7 @@ export function createDefaultSnapshot() {
         subject: 'Accounting',
         topic: 'Year-End Adjustments & Balance Sheet',
         teacher_name: 'Mrs. Claire Jacobs',
-        location_mode: 'Room B1 · Saved Offline',
+        location_mode: 'Room B1 · Auto-Saved Offline',
         grade_group: 'Grade 12',
         owner_id: null,
         is_official: true
@@ -203,6 +211,249 @@ export function createDefaultSnapshot() {
         teacher_feedback:
           'Excellent step-by-step working, Thabo! Dividing by 13 months for the 1-month prepayment was spot on.',
         submitted_at: '2026-11-25T10:15:00.000Z'
+      }
+    ],
+    attendance: [
+      {
+        id: 'att-1',
+        session_date: '2026-11-24',
+        subject: 'Mathematics',
+        student_id: 'stu-thabo',
+        student_name: 'Thabo Mokoena',
+        status: 'present',
+        teacher_name: 'Ms. Naledi Khumalo',
+        lesson_note: 'Strong participation on double-angle proofs.'
+      },
+      {
+        id: 'att-2',
+        session_date: '2026-11-24',
+        subject: 'Mathematics',
+        student_id: 'stu-amahle',
+        student_name: 'Amahle Nkosi',
+        status: 'present',
+        teacher_name: 'Ms. Naledi Khumalo',
+        lesson_note: 'Solved Q3 on the board cleanly.'
+      },
+      {
+        id: 'att-3',
+        session_date: '2026-11-25',
+        subject: 'Physical Sciences',
+        student_id: 'stu-thabo',
+        student_name: 'Thabo Mokoena',
+        status: 'present',
+        teacher_name: 'Mr. Sipho Ndlovu',
+        lesson_note: 'Completed free-body pulley diagram.'
+      },
+      {
+        id: 'att-4',
+        session_date: '2026-11-25',
+        subject: 'Physical Sciences',
+        student_id: 'stu-liam',
+        student_name: 'Liam van der Merwe',
+        status: 'late',
+        teacher_name: 'Mr. Sipho Ndlovu',
+        lesson_note: 'Arrived 10m late; caught up on tension calculations.'
+      }
+    ],
+    notes: [
+      {
+        id: 'note-trig',
+        subject: 'Mathematics',
+        title: 'Trigonometry Identities & Double Angles',
+        formulas: [
+          'sin²θ + cos²θ = 1',
+          'tan θ = sin θ / cos θ',
+          'sin(2θ) = 2 sin θ cos θ',
+          'cos(2θ) = cos²θ − sin²θ = 2cos²θ − 1 = 1 − 2sin²θ'
+        ],
+        summary:
+          'Always convert tan θ into sin θ / cos θ first when proving identities, factor common terms, and look for sin²θ + cos²θ = 1 before expanding brackets.',
+        author_name: 'Ms. Naledi Khumalo'
+      },
+      {
+        id: 'note-quad',
+        subject: 'Mathematics',
+        title: 'Quadratic Formula & Turning Points',
+        formulas: [
+          'x = [ −b ± √(b² − 4ac) ] / (2a)',
+          'Turning point x = −b / (2a)',
+          'Δ = b² − 4ac'
+        ],
+        summary:
+          'Write every quadratic in standard form ax² + bx + c = 0 before reading a, b, and c. Check the discriminant Δ first to determine the nature of roots.',
+        author_name: 'Ms. Naledi Khumalo'
+      },
+      {
+        id: 'note-newton',
+        subject: 'Physical Sciences',
+        title: 'Newton’s Laws & Net Force',
+        formulas: ['F_net = m · a', 'w = m · g  (g = 9.8 m·s⁻²)', 'f_k = μ_k · N'],
+        summary:
+          'Draw a labelled free-body diagram before writing F_net = ma. Resolve angled forces into parallel and perpendicular components first.',
+        author_name: 'Mr. Sipho Ndlovu'
+      },
+      {
+        id: 'note-mole',
+        subject: 'Physical Sciences',
+        title: 'Stoichiometry & Mole Ratios',
+        formulas: [
+          'n = m / M',
+          'c = n / V  (V in dm³)',
+          'n = V / V_m  (STP V_m = 22.4 dm³·mol⁻¹)'
+        ],
+        summary:
+          'Convert cm³ to dm³ by dividing by 1000. Divide moles available by balanced coefficients to identify the limiting reagent.',
+        author_name: 'Mr. Sipho Ndlovu'
+      },
+      {
+        id: 'note-acc',
+        subject: 'Accounting',
+        title: 'Accounting Equation & Year-End Adjustments',
+        formulas: [
+          'Assets = Owner’s Equity + Liabilities',
+          'Gross Profit = Sales − Cost of Sales',
+          'Current Ratio = Current Assets : Current Liabilities'
+        ],
+        summary:
+          'Prepaid expenses belong to the next financial year (deduct from expense, add to receivables). Accrued expenses add to both the expense and payables.',
+        author_name: 'Mrs. Claire Jacobs'
+      },
+      {
+        id: 'note-essay',
+        subject: 'English',
+        title: 'PEEL Analytical Essay Structure',
+        formulas: [
+          'P — Point (Topic claim)',
+          'E — Evidence (Embedded quote)',
+          'E — Explain (Language & effect)',
+          'L — Link (Tie to prompt)'
+        ],
+        summary:
+          'Avoid retelling the plot. Name the exact literary device (metaphor, irony, tone shift) and unpack its effect on the reader.',
+        author_name: 'Mrs. Claire Jacobs'
+      }
+    ],
+    quizzes: [
+      {
+        id: 'q-1',
+        subject: 'Mathematics',
+        topic: 'Trigonometry',
+        question: 'Which expression is always equal to sin²θ + cos²θ for any real angle θ?',
+        options: ['0', '1', '2 sin θ cos θ', 'tan²θ'],
+        correctIndex: 1,
+        explanation: 'By the Pythagorean identity, sin²θ + cos²θ = 1 for all angles θ.'
+      },
+      {
+        id: 'q-2',
+        subject: 'Mathematics',
+        topic: 'Trigonometry',
+        question: 'What is the simplified double-angle expansion for sin(2θ)?',
+        options: ['sin²θ − cos²θ', '2 sin θ cos θ', '2 cos²θ − 1', 'sin θ + cos θ'],
+        correctIndex: 1,
+        explanation: 'sin(2θ) expands directly to 2 sin θ cos θ.'
+      },
+      {
+        id: 'q-3',
+        subject: 'Mathematics',
+        topic: 'Functions',
+        question: 'For f(x) = 2x² − 8x + 5, what is the x-coordinate of the turning point?',
+        options: ['x = −2', 'x = 2', 'x = 4', 'x = −4'],
+        correctIndex: 1,
+        explanation: 'Using x = −b / (2a) = −(−8) / (2 × 2) = 8 / 4 = 2.'
+      },
+      {
+        id: 'q-4',
+        subject: 'Physical Sciences',
+        topic: 'Mechanics',
+        question: 'A 4 kg block accelerates at 3 m·s⁻² on a frictionless surface. What is F_net?',
+        options: ['0.75 N', '7 N', '12 N', '39.2 N'],
+        correctIndex: 2,
+        explanation: 'F_net = m × a = 4 kg × 3 m·s⁻² = 12 N.'
+      },
+      {
+        id: 'q-5',
+        subject: 'Physical Sciences',
+        topic: 'Stoichiometry',
+        question: 'How many dm³ are in 250 cm³ when calculating molar concentration c = n / V?',
+        options: ['0.025 dm³', '0.25 dm³', '2.5 dm³', '25 dm³'],
+        correctIndex: 1,
+        explanation: 'Divide cm³ by 1000: 250 / 1000 = 0.25 dm³.'
+      },
+      {
+        id: 'q-6',
+        subject: 'Accounting',
+        topic: 'Financial Statements',
+        question: 'If Assets = 150,000 and Liabilities = 45,000, what is Owner’s Equity?',
+        options: ['195,000', '105,000', '45,000', '150,000'],
+        correctIndex: 1,
+        explanation: 'Owner’s Equity = Assets − Liabilities = 150,000 − 45,000 = 105,000.'
+      },
+      {
+        id: 'q-7',
+        subject: 'Life Sciences',
+        topic: 'Genetics',
+        question: 'In mRNA, which base pairs with Adenine (A) on the DNA template strand?',
+        options: ['Thymine (T)', 'Uracil (U)', 'Cytosine (C)', 'Guanine (G)'],
+        correctIndex: 1,
+        explanation: 'RNA uses Uracil (U) instead of Thymine, so DNA Adenine pairs with mRNA Uracil.'
+      },
+      {
+        id: 'q-8',
+        subject: 'English',
+        topic: 'Essays',
+        question: 'In a PEEL body paragraph, what comes immediately after your Evidence quote?',
+        options: [
+          'A brand-new unrelated topic',
+          'Explanation of how the diction/device proves your point',
+          'The bibliography',
+          'A full plot summary'
+        ],
+        correctIndex: 1,
+        explanation: 'Explain unpacks how the quote’s language or literary device supports your argument.'
+      }
+    ],
+    flashcards: [
+      {
+        id: 'fc-1',
+        subject: 'Mathematics',
+        front: 'How do you rewrite tan θ when proving trig identities?',
+        back: 'tan θ = sin θ / cos θ   (where cos θ ≠ 0)',
+        mastered: true
+      },
+      {
+        id: 'fc-2',
+        subject: 'Mathematics',
+        front: 'Three forms of cos(2θ)?',
+        back: '1) cos²θ − sin²θ\n2) 2cos²θ − 1\n3) 1 − 2sin²θ',
+        mastered: false
+      },
+      {
+        id: 'fc-3',
+        subject: 'Physical Sciences',
+        front: 'State Newton’s Second Law in words & formula.',
+        back: 'F_net = m · a — Net force equals mass times acceleration in the direction of the net force.',
+        mastered: false
+      },
+      {
+        id: 'fc-4',
+        subject: 'Accounting',
+        front: 'How do you adjust an Accrued Expense at year-end?',
+        back: 'ADD to the expense in the Income Statement and record under Trade & Other Payables.',
+        mastered: true
+      },
+      {
+        id: 'fc-5',
+        subject: 'Life Sciences',
+        front: 'Where does Translation occur during protein synthesis?',
+        back: 'At the Ribosome in the cytoplasm.',
+        mastered: true
+      },
+      {
+        id: 'fc-6',
+        subject: 'English',
+        front: 'What does PEEL stand for?',
+        back: 'Point · Evidence · Explain · Link',
+        mastered: true
       }
     ],
     rooms: [
@@ -327,6 +578,7 @@ export function createDefaultSnapshot() {
           id: 'plan-single',
           name: 'Single Subject Boost',
           price: 'R450 / month',
+          numericRate: 450,
           badge: 'Grades 8 – 12',
           features: [
             '2 Afternoon Tuition Classes per week',
@@ -338,6 +590,7 @@ export function createDefaultSnapshot() {
           id: 'plan-bundle',
           name: '3-Subject Core Package',
           price: 'R1,100 / month',
+          numericRate: 1100,
           badge: 'Most Popular',
           features: [
             'Choose any 3 subjects (Maths, Sciences, Accounting, English)',
@@ -349,6 +602,7 @@ export function createDefaultSnapshot() {
           id: 'plan-unlimited',
           name: 'Full Exam Mastery (All Subjects)',
           price: 'R1,550 / month',
+          numericRate: 1550,
           badge: 'Complete Support',
           features: [
             'Unlimited Subject Classes + Past-Paper Boot Camps',
@@ -360,6 +614,7 @@ export function createDefaultSnapshot() {
           id: 'plan-private',
           name: '1-on-1 Private Mentoring',
           price: 'R220 / hour',
+          numericRate: 220,
           badge: 'Flexible',
           features: [
             'Personalised individual sessions (In-person or Remote)',

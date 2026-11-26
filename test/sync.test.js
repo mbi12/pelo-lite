@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { createApp } from '../server.js';
 
-test('i-tutor offline-sync API: timetables, remote assignments, study groups, broadcasts & tuition info', async () => {
+test('i-tutor unified v3 offline-sync API: timetables, remote assignments, notes, attendance, study groups, broadcasts & tuition info', async () => {
   const app = createApp();
   const server = http.createServer(app);
 
@@ -19,6 +19,9 @@ test('i-tutor offline-sync API: timetables, remote assignments, study groups, br
     assert.ok(snap1.timetables.length >= 6);
     assert.ok(snap1.assignments.length >= 3);
     assert.ok(snap1.assignments[0].offline_pack_content.length > 10);
+    assert.ok(snap1.notes.length >= 6);
+    assert.ok(snap1.attendance.length >= 4);
+    assert.ok(snap1.quizzes.length >= 8);
     assert.ok(snap1.tuitionInfo.plans.length >= 4);
     assert.ok(snap1.tuitionInfo.contacts.phone);
 
@@ -53,6 +56,30 @@ test('i-tutor offline-sync API: timetables, remote assignments, study groups, br
           max_marks: 25,
           instructions: 'Complete offline and submit.',
           offline_pack_content: '1) Prove cyclic quad PQRS [10 marks]'
+        }
+      },
+      {
+        type: 'ADD_STUDY_NOTE',
+        payload: {
+          id: 'note-test-offline',
+          subject: 'Mathematics',
+          title: 'Cyclic Quadrilaterals Summary',
+          formulas: ['Opposite angles sum to 180°', 'Exterior angle = interior opposite angle'],
+          summary: 'Check for bowtie angles subtended by the same chord.',
+          author_name: 'Ms. Naledi Khumalo'
+        }
+      },
+      {
+        type: 'LOG_ATTENDANCE',
+        payload: {
+          id: 'att-test-offline',
+          session_date: '2026-11-25',
+          subject: 'Mathematics',
+          student_id: 'stu-thabo',
+          student_name: 'Thabo Mokoena',
+          status: 'present',
+          teacher_name: 'Ms. Naledi Khumalo',
+          lesson_note: 'Completed cyclic quad proofs.'
         }
       },
       {
@@ -113,6 +140,8 @@ test('i-tutor offline-sync API: timetables, remote assignments, study groups, br
 
     assert.ok(snap2.timetables.some((t) => t.id === 'tt-test-offline'));
     assert.ok(snap2.assignments.some((a) => a.id === 'asg-test-remote'));
+    assert.ok(snap2.notes.some((n) => n.id === 'note-test-offline'));
+    assert.ok(snap2.attendance.some((a) => a.id === 'att-test-offline'));
     assert.ok(snap2.rooms.some((r) => r.id === 'room-grp-test'));
     assert.ok(snap2.messages.some((m) => m.id === 'msg-test-1'));
     assert.ok(snap2.broadcasts.some((b) => b.id === 'bc-test-1'));

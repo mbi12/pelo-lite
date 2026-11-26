@@ -64,7 +64,9 @@ async function detectMode() {
 function readLocalDb() {
   try {
     if (fs.existsSync(LOCAL_DB_PATH)) {
-      return JSON.parse(fs.readFileSync(LOCAL_DB_PATH, 'utf8'));
+      const parsed = JSON.parse(fs.readFileSync(LOCAL_DB_PATH, 'utf8'));
+      const fallback = createDefaultSnapshot();
+      return { ...fallback, ...parsed };
     }
   } catch {
     // Recreate on parse failure
@@ -85,6 +87,8 @@ function writeLocalDb(snapshot) {
 
 export async function getFullSnapshot() {
   const mode = await detectMode();
+  const fallback = createDefaultSnapshot();
+
   if (mode === 'supabase') {
     try {
       const [
@@ -92,6 +96,8 @@ export async function getFullSnapshot() {
         timetables,
         assignments,
         submissions,
+        attendance,
+        notes,
         rooms,
         messages,
         broadcasts,
@@ -102,6 +108,8 @@ export async function getFullSnapshot() {
         sbFetch('itutor_v2_timetables?select=*&order=created_at.asc'),
         sbFetch('itutor_v2_assignments?select=*&order=created_at.desc'),
         sbFetch('itutor_v2_submissions?select=*&order=submitted_at.desc'),
+        sbFetch('itutor_v2_attendance?select=*&order=created_at.desc'),
+        sbFetch('itutor_v2_notes?select=*&order=created_at.desc'),
         sbFetch('itutor_v2_rooms?select=*&order=updated_at.desc'),
         sbFetch('itutor_v2_messages?select=*&order=created_at.asc'),
         sbFetch('itutor_v2_broadcasts?select=*&order=created_at.desc'),
@@ -109,7 +117,6 @@ export async function getFullSnapshot() {
         sbFetch('itutor_v2_enquiries?select=*&order=created_at.desc')
       ]);
 
-      const fallback = createDefaultSnapshot();
       const tuitionRow = tuitionRows?.[0];
 
       return {
@@ -119,11 +126,18 @@ export async function getFullSnapshot() {
         timetables: timetables || [],
         assignments: assignments || [],
         submissions: submissions || [],
+        attendance: attendance?.length ? attendance : fallback.attendance,
+        notes: notes?.length ? notes : fallback.notes,
+        quizzes: fallback.quizzes,
+        flashcards: fallback.flashcards,
         rooms: rooms || [],
         messages: messages || [],
         broadcasts: broadcasts || [],
         tuitionInfo: tuitionRow
-          ? { plans: tuitionRow.plans || fallback.tuitionInfo.plans, contacts: tuitionRow.contacts || fallback.tuitionInfo.contacts }
+          ? {
+              plans: tuitionRow.plans || fallback.tuitionInfo.plans,
+              contacts: tuitionRow.contacts || fallback.tuitionInfo.contacts
+            }
           : fallback.tuitionInfo,
         enquiries: enquiries || []
       };
@@ -226,6 +240,38 @@ export async function applyOutboxActions(actions = []) {
           }
           break;
 
+        case 'LOG_ATTENDANCE':
+          await sbFetch('itutor_v2_attendance', {
+            method: 'POST',
+            prefer: 'resolution=merge-duplicates,return=minimal',
+            body: {
+              id: p.id,
+              session_date: p.session_date,
+              subject: p.subject,
+              student_id: p.student_id,
+              student_name: p.student_name,
+              status: p.status || 'present',
+              teacher_name: p.teacher_name || 'Educator',
+              lesson_note: p.lesson_note || ''
+            }
+          });
+          break;
+
+        case 'ADD_STUDY_NOTE':
+          await sbFetch('itutor_v2_notes', {
+            method: 'POST',
+            prefer: 'resolution=merge-duplicates,return=minimal',
+            body: {
+              id: p.id,
+              subject: p.subject || 'Mathematics',
+              title: p.title,
+              formulas: Array.isArray(p.formulas) ? p.formulas : [],
+              summary: p.summary || '',
+              author_name: p.author_name || 'Student'
+            }
+          });
+          break;
+
         case 'CREATE_STUDY_GROUP':
           await sbFetch('itutor_v2_rooms', {
             method: 'POST',
@@ -317,23 +363,19 @@ export async function applyOutboxActions(actions = []) {
     return getFullSnapshot();
   }
 
-  // Local file fallback inside firewalled sandbox
+  // Local file fallback
   const db = readLocalDb();
   for (const act of actions) {
     const p = act?.payload || {};
     switch (act?.type) {
       case 'ADD_TIMETABLE':
-        if (!db.timetables.some((t) => t.id === p.id)) {
-          db.timetables.push(p);
-        }
+        if (!db.timetables.some((t) => t.id === p.id)) db.timetables.push(p);
         break;
       case 'DELETE_TIMETABLE':
         db.timetables = db.timetables.filter((t) => t.id !== p.id);
         break;
       case 'CREATE_ASSIGNMENT':
-        if (!db.assignments.some((a) => a.id === p.id)) {
-          db.assignments.unshift(p);
-        }
+        if (!db.assignments.some((a) => a.id === p.id)) db.assignments.unshift(p);
         break;
       case 'SUBMIT_ASSIGNMENT': {
         const idx = db.submissions.findIndex((s) => s.id === p.id);
@@ -350,26 +392,26 @@ export async function applyOutboxActions(actions = []) {
         }
         break;
       }
+      case 'LOG_ATTENDANCE':
+        db.attendance = db.attendance || [];
+        if (!db.attendance.some((a) => a.id === p.id)) db.attendance.unshift(p);
+        break;
+      case 'ADD_STUDY_NOTE':
+        db.notes = db.notes || [];
+        if (!db.notes.some((n) => n.id === p.id)) db.notes.unshift(p);
+        break;
       case 'CREATE_STUDY_GROUP':
-        if (!db.rooms.some((r) => r.id === p.id)) {
-          db.rooms.unshift(p);
-        }
+        if (!db.rooms.some((r) => r.id === p.id)) db.rooms.unshift(p);
         break;
       case 'SEND_MESSAGE':
-        if (!db.messages.some((m) => m.id === p.id)) {
-          db.messages.push(p);
-        }
+        if (!db.messages.some((m) => m.id === p.id)) db.messages.push(p);
         break;
       case 'SEND_BROADCAST':
-        if (!db.broadcasts.some((b) => b.id === p.id)) {
-          db.broadcasts.unshift(p);
-        }
+        if (!db.broadcasts.some((b) => b.id === p.id)) db.broadcasts.unshift(p);
         break;
       case 'SUBMIT_ENQUIRY':
         db.enquiries = db.enquiries || [];
-        if (!db.enquiries.some((e) => e.id === p.id)) {
-          db.enquiries.unshift(p);
-        }
+        if (!db.enquiries.some((e) => e.id === p.id)) db.enquiries.unshift(p);
         break;
       case 'UPDATE_TUITION_INFO':
         if (p.plans && p.contacts) {
