@@ -1,3 +1,4 @@
+import { getAlertSettings, saveAlertSettings, createMessageTracker, unlockNotificationAudio, playNotificationSound, showBrowserMessageAlert, getPushDevice, enableClosedAppNotifications, disableClosedAppNotifications } from './notifications.js';
 import { renderEmblemSVG, renderSunriseGaugeSVG, ICONS } from './emblem.js';
 import {
   SUBJECT_LIST,
@@ -810,10 +811,10 @@ function getVisibleTimetables(user) {
   );
 }
 
-function getVisibleRooms(user) {
+function getVisibleRooms(user, snapshot = vaultState) {
   if (!user || user.role === 'visitor') return [];
-  if (canEditEverything(user)) return vaultState.rooms || [];
-  return (vaultState.rooms || []).filter((r) => {
+  if (canEditEverything(user)) return snapshot.rooms || [];
+  return (snapshot.rooms || []).filter((r) => {
     const isMember = (r.participant_ids || []).includes(user.id);
     if (user.role === 'parent') {
       // Parents only see direct 1:1 teacher & academy channels, never student peer study groups
@@ -1015,26 +1016,9 @@ function scrollChatToBottom() {
 
 function getVaultSyncSignature(v) {
   if (!v) return '';
-  const msgs = v.messages || [];
-  const lastMsg = msgs[msgs.length - 1];
-  const rooms = v.rooms || [];
-  const profiles = v.profiles || [];
-  const asgs = v.assignments || [];
-  const subs = v.submissions || [];
-  const att = v.attendance || [];
-  const bcs = v.broadcasts || [];
-  return [
-    msgs.length,
-    lastMsg ? `${lastMsg.id}:${lastMsg.body?.length || 0}` : '',
-    rooms.length,
-    rooms[0]?.id || '',
-    profiles.length,
-    profiles.map((p) => `${p.id}:${p.status}:${p.last_seen_at || ''}`).join(','),
-    asgs.length,
-    subs.map((s) => `${s.id}:${s.status}:${s.marks_awarded ?? ''}`).join(','),
-    att.length,
-    bcs.length
-  ].join('|');
+  // Counts alone miss same-length edits, attachments and room membership changes.
+  const { lastDownloadedAt, ...content } = v;
+  return JSON.stringify(content);
 }
 
 function renderChatMessagesInnerHTML(roomMessages, user, superEdit) {
@@ -2145,6 +2129,16 @@ function buildMyAccountStage(user) {
       </div>
       <button class="outline-btn" id="btn-signout-main">${ICONS.logout} Switch Account</button>
     </div>
+
+    <section class="panel-card form-stack" aria-label="Notification preferences">
+      <h2 class="panel-title">Notifications & Sounds</h2>
+      <p class="row-sub">Get message alerts even when i-tutor is closed. On iPhone/iPad (iOS 16.4+), add i-tutor to your Home Screen and open it there first.</p>
+      <label><input type="checkbox" data-alert-setting="enabled" ${getAlertSettings(user.id).enabled ? 'checked' : ''} /> New-message alerts</label>
+      <label><input type="checkbox" data-alert-setting="sound" ${getAlertSettings(user.id).sound ? 'checked' : ''} /> Message sounds</label>
+      <label><input type="checkbox" data-alert-setting="browser" ${getAlertSettings(user.id).browser && getPushDevice()?.userId === user.id ? 'checked' : ''} /> Notify me when the app is closed (permission required)</label>
+      <button class="outline-btn" type="button" id="test-notification-sound">Test sound</button>
+      <p class="row-sub">Lock-screen alerts hide message text. Your phone controls notification sounds; Silent Mode, Do Not Disturb, and browser restrictions still apply.</p>
+    </section>
 
     <form class="panel-card form-stack" id="my-profile-form">
       <div class="panel-head">
@@ -4917,6 +4911,8 @@ function buildTuitionContactsStage(user) {
 
 function renderApp(opts = {}) {
   closeActiveInAppPopover();
+  const messageAlert = document.getElementById('message-alert');
+  if (messageAlert && messageAlert.dataset.account !== getActiveUser()?.id) messageAlert.remove();
   applyTheme();
   const rootEl = document.getElementById('app');
   if (!rootEl) return;
@@ -5363,7 +5359,9 @@ function renderApp(opts = {}) {
   }
 }
 
-function signOutToPortal(defaultTab = 'signin') {
+async function signOutToPortal(defaultTab = 'signin') {
+  try { await disableClosedAppNotifications(); }
+  catch { showToast('Could not revoke device alerts. Please retry signing out.'); return; }
   const prevUid = sessionState.currentUserId;
   if (prevUid && prevUid !== 'visitor') {
     const prevProfile = (vaultState.profiles || []).find((p) => p.id === prevUid);
@@ -5472,6 +5470,51 @@ function bindChatBubbleEventsOnly() {
 }
 
 function bindWorkspaceEvents(user) {
+  document.querySelectorAll('[data-alert-setting]').forEach((input) => {
+    input.addEventListener('change', async () => {
+      const settings = getAlertSettings(user.id);
+      const key = input.dataset.alertSetting;
+      let enabled = input.checked;
+      input.disabled = true;
+      try {
+        if (key === 'browser') {
+          if (enabled) {
+            await enableClosedAppNotifications(user, { sound: settings.sound });
+            settings.enabled = true;
+          } else {
+            await disableClosedAppNotifications();
+          }
+        } else if (key === 'enabled' && !enabled) {
+          await disableClosedAppNotifications();
+          settings.browser = false;
+        } else if (key === 'sound' && getPushDevice()?.userId === user.id) {
+          await enableClosedAppNotifications(user, { sound: enabled });
+        }
+      } catch (err) {
+        enabled = key === 'browser' && input.checked ? false : settings[key];
+        showToast(err.message || 'Could not update notification settings.');
+      } finally {
+        input.disabled = false;
+      }
+      // An async permission dialog must not re-bind a device after account switch.
+      if (getActiveUser()?.id !== user.id) {
+        await disableClosedAppNotifications().catch(() => {});
+        return;
+      }
+      input.checked = enabled;
+      settings[key] = enabled;
+      if (!getPushDevice()) settings.browser = false;
+      saveAlertSettings(user.id, settings);
+      document.querySelectorAll('[data-alert-setting]').forEach((field) => {
+        field.checked = Boolean(settings[field.dataset.alertSetting]);
+      });
+    });
+  });
+  document.getElementById('test-notification-sound')?.addEventListener('click', () => {
+    unlockNotificationAudio();
+    setTimeout(playNotificationSound, 100);
+  });
+
   // Close any open ⋯ row menus when clicking outside
   document.querySelectorAll('.row-more-menu').forEach((menuEl) => {
     menuEl.addEventListener('toggle', () => {
@@ -8107,6 +8150,64 @@ document.addEventListener('DOMContentLoaded', () => {
     e.preventDefault();
   });
 
+  document.addEventListener('pointerdown', unlockNotificationAudio, { passive: true });
+  document.addEventListener('keydown', unlockNotificationAudio);
+  const device = getPushDevice();
+  if (device && device.userId !== sessionState.currentUserId) {
+    void disableClosedAppNotifications().catch(() => {});
+  }
+  const trackMessages = createMessageTracker();
+  let alertTimer;
+  const openAlertChat = (roomId) => {
+    if (!getActiveUser() || getActiveUser().role === 'visitor') return;
+    ui.view = 'messages';
+    if (roomId) ui.selectedRoomId = roomId;
+    ui.mobileChatThreadOpen = true;
+    document.getElementById('message-alert')?.remove();
+    renderApp();
+  };
+  navigator.serviceWorker?.addEventListener('message', (event) => {
+    if (event.data?.type === 'OPEN_MESSAGES') openAlertChat();
+  });
+  if (new URLSearchParams(location.search).get('view') === 'messages') ui.view = 'messages';
+  window.addEventListener('itutor:synced', (event) => {
+    const snapshot = event.detail;
+    const user = getActiveUser();
+    const userId = user && user.role !== 'visitor' ? user.id : null;
+    const incoming = trackMessages(userId, snapshot.messages || [], new Set(getVisibleRooms(user, snapshot).map((r) => r.id)));
+    const settings = getAlertSettings(userId);
+    if (!incoming.length || !settings.enabled) return;
+    const latest = incoming[incoming.length - 1];
+    if (settings.sound && !(document.hidden && getPushDevice()?.userId === userId)) playNotificationSound();
+    if (document.hidden && settings.browser && getPushDevice()?.userId !== userId) void showBrowserMessageAlert(incoming.length);
+    document.getElementById('message-alert')?.remove();
+    const alert = document.createElement('div');
+    alert.id = 'message-alert';
+    alert.dataset.account = userId;
+    alert.className = 'message-notification';
+    alert.setAttribute('role', 'status');
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'message-notification-open';
+    open.textContent = incoming.length > 1 ? `${incoming.length} new messages · Open chats` : `New message from ${latest.sender_name || 'a member'} · Open chat`;
+    const alertUserId = userId;
+    open.onclick = () => {
+      if (getActiveUser()?.id === alertUserId) {
+        vaultState = loadVault();
+        openAlertChat(latest.room_id);
+      } else alert.remove();
+    };
+    const dismiss = document.createElement('button');
+    dismiss.type = 'button';
+    dismiss.textContent = '×';
+    dismiss.setAttribute('aria-label', 'Dismiss notification');
+    dismiss.onclick = () => alert.remove();
+    alert.append(open, dismiss);
+    document.body.append(alert);
+    clearTimeout(alertTimer);
+    alertTimer = setTimeout(() => alert.remove(), 7000);
+  });
+
   applyTheme();
   const rootEl = document.getElementById('app');
   if (!rootEl) return;
@@ -8121,7 +8222,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
     navigator.serviceWorker
-      .register('/sw.js?v=24', { updateViaCache: 'none' })
+      .register('/sw.js?v=27', { updateViaCache: 'none' })
       .then((reg) => reg.update().catch(() => {}))
       .catch(() => {});
   }
@@ -8156,31 +8257,39 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   };
 
+  let backgroundSyncRunning = false;
   const runLiveBackgroundSync = async (forcePresence = false) => {
-    if (isOfflineActive() || document.hidden || document.getElementById('splash-screen')) return;
-    const prevSig = getVaultSyncSignature(vaultState);
-    const res = await syncWithServer({ simulateOffline: false, forcePresence });
-    if (!res.vault) return;
-    const nextSig = getVaultSyncSignature(res.vault);
-    if (nextSig === prevSig) {
-      refreshPresenceBadgesInPlace();
-      return;
-    }
+    if (backgroundSyncRunning) return;
+    if (isOfflineActive() || document.getElementById('splash-screen')) return;
+    backgroundSyncRunning = true;
+    try {
+      const res = await syncWithServer({ simulateOffline: false, forcePresence });
+      // Compare against current state; a send may have updated it during the request.
+      const prevSig = getVaultSyncSignature(vaultState);
+      if (!res.vault) return;
+      const nextSig = getVaultSyncSignature(res.vault);
+      if (nextSig === prevSig) {
+        refreshPresenceBadgesInPlace();
+        return;
+      }
 
-    vaultState = res.vault;
-    if (ui.showAuthPortal) return;
+      vaultState = res.vault;
+      if (ui.showAuthPortal) return;
 
-    const activeEl = document.activeElement;
-    const isTypingInField =
-      activeEl &&
-      (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'SELECT');
+      const activeEl = document.activeElement;
+      const isTypingInField =
+        activeEl &&
+        (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'SELECT');
 
-    if (ui.view === 'messages' && activeEl && activeEl.id === 'chat-text-input') {
-      updateActiveViewWithoutDroppingInput();
-    } else if (!isTypingInField && !activeFloatingPopover && !ui.editingMessageId) {
-      renderApp({ preserveScroll: true });
-    } else {
-      refreshPresenceBadgesInPlace();
+      if (ui.view === 'messages' && activeEl && activeEl.id === 'chat-text-input') {
+        updateActiveViewWithoutDroppingInput();
+      } else if (!isTypingInField && !activeFloatingPopover && !ui.editingMessageId) {
+        renderApp({ preserveScroll: true });
+      } else {
+        refreshPresenceBadgesInPlace();
+      }
+    } finally {
+      backgroundSyncRunning = false;
     }
   };
 
@@ -8196,15 +8305,15 @@ document.addEventListener('DOMContentLoaded', () => {
     runLiveBackgroundSync(false);
   });
 
-  // Poll every 4.5s while in Messages for near-instant multi-device chat, or every 18s elsewhere
+  // Faster chat polling without overlapping slow background requests.
   let lastBgPollAt = Date.now();
   setInterval(() => {
-    const intervalMs = ui.view === 'messages' ? 4500 : 18000;
+    const intervalMs = document.hidden ? 15000 : ui.view === 'messages' ? 1500 : 5000;
     if (Date.now() - lastBgPollAt >= intervalMs) {
       lastBgPollAt = Date.now();
       runLiveBackgroundSync();
     }
-  }, 1500);
+  }, 500);
 
   runAnimatedSplash(rootEl, () => {
     renderApp();

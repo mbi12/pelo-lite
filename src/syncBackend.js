@@ -16,7 +16,7 @@ function getSupabaseConfig() {
   return { url, key };
 }
 
-async function sbFetch(tablePath, { method = 'GET', body = null, prefer = 'return=representation' } = {}) {
+export async function sbFetch(tablePath, { method = 'GET', body = null, prefer = 'return=representation' } = {}) {
   const cfg = getSupabaseConfig();
   if (!cfg) throw new Error('Supabase env missing');
 
@@ -52,12 +52,10 @@ async function detectMode() {
     resolvedMode = 'local';
     return resolvedMode;
   }
-  try {
-    await sbFetch('itutor_v2_profiles?select=id&limit=1');
-    resolvedMode = 'supabase';
-  } catch {
-    resolvedMode = 'local';
-  }
+  // Never acknowledge cloud writes in an ephemeral, private local database.
+  // On cloud failure, return an error so clients keep their retry queues.
+  await sbFetch('itutor_v2_profiles?select=id&limit=1');
+  resolvedMode = 'supabase';
   return resolvedMode;
 }
 
@@ -219,8 +217,8 @@ export async function getFullSnapshot() {
           : fallback.tuitionInfo,
         enquiries: enquiries || []
       };
-    } catch {
-      resolvedMode = 'local';
+    } catch (err) {
+      throw err; // Preserve the client's outbox when cloud reads fail.
     }
   }
 
@@ -654,6 +652,7 @@ export async function applyOutboxActions(actions = []) {
         }
       } catch (actErr) {
         console.error(`Supabase action failed (${act?.type}):`, actErr?.message || actErr);
+        throw new Error('Cloud save failed; queued changes must be retried');
       }
     }
 

@@ -8,13 +8,14 @@
     "start": "node scripts/prepare-vendor.mjs && node server.js",
     "dev": "node scripts/prepare-vendor.mjs && node server.js",
     "build": "node scripts/prepare-vendor.mjs",
-    "test": "node scripts/prepare-vendor.mjs && node --check server.js && node --check public/js/app.js && node --test test/sync.test.js"
+    "test": "node scripts/prepare-vendor.mjs && node --check server.js && node --check public/js/app.js && node --test test/*.test.js"
   },
   "engines": {
     "node": ">=20.0.0"
   },
   "dependencies": {
     "express": "^4.21.2",
-    "pdfjs-dist": "^5.0.0 || ^6.0.0"
+    "pdfjs-dist": "^5.0.0 || ^6.0.0",
+    "web-push": "^4.0.0"
   }
 }

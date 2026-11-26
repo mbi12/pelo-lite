@@ -709,6 +709,8 @@ async function runSingleSyncPass({ simulateOffline = false, forcePresence = fals
       : '';
 
   const outboxBatch = loadOutbox();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
   try {
     if (outboxBatch.length > 0) {
       await flushQueuedBlobsInOutbox(outboxBatch);
@@ -727,7 +729,8 @@ async function runSingleSyncPass({ simulateOffline = false, forcePresence = fals
           actions: outboxBatch,
           ...(activeUid ? { presenceUserId: activeUid } : {})
         }),
-        cache: 'no-store'
+        cache: 'no-store',
+        signal: controller.signal
       });
     } else {
       const shouldSendHeartbeat =
@@ -742,7 +745,7 @@ async function runSingleSyncPass({ simulateOffline = false, forcePresence = fals
       const syncUrl = shouldSendHeartbeat
         ? `/api/sync?uid=${encodeURIComponent(activeUid)}`
         : '/api/sync';
-      res = await fetch(syncUrl, { method: 'GET', cache: 'no-store' });
+      res = await fetch(syncUrl, { method: 'GET', cache: 'no-store', signal: controller.signal });
     }
 
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -782,29 +785,36 @@ async function runSingleSyncPass({ simulateOffline = false, forcePresence = fals
     }
 
     saveVault(updatedVault);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('itutor:synced', { detail: updatedVault }));
+    }
 
     if (remainingOutbox.length > 0) {
-      return runSingleSyncPass({ simulateOffline });
+      return { status: 'pending', vault: updatedVault, pendingCount: remainingOutbox.length };
     }
 
     return { status: 'synced', vault: updatedVault, pendingCount: 0 };
   } catch {
     return { status: 'offline', vault: loadVault(), pendingCount: loadOutbox().length };
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
-export async function syncWithServer(opts = {}) {
-  if (activeSyncPromise) {
-    activeSyncPromise = activeSyncPromise.then(
-      () => runSingleSyncPass(opts),
-      () => runSingleSyncPass(opts)
-    );
-  } else {
-    activeSyncPromise = runSingleSyncPass(opts);
-  }
-  try {
-    return await activeSyncPromise;
-  } finally {
-    activeSyncPromise = null;
-  }
+// Coalesce concurrent callers instead of building a queue of redundant polls.
+// Actions added during a request are flushed before the shared runner resolves.
+export function syncWithServer(opts = {}) {
+  if (activeSyncPromise) return activeSyncPromise;
+  activeSyncPromise = (async () => {
+    try {
+      let result;
+      do {
+        result = await runSingleSyncPass(opts);
+      } while (result.status === 'pending');
+      return result;
+    } finally {
+      activeSyncPromise = null;
+    }
+  })();
+  return activeSyncPromise;
 }

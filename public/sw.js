@@ -1,14 +1,15 @@
-const CACHE_NAME = 'itutor-standalone-v24';
+const CACHE_NAME = 'itutor-standalone-v27';
 const OFFLINE_ASSETS = [
   '/',
   '/index.html',
-  '/css/styles.css?v=24',
+  '/css/styles.css?v=27',
   '/css/styles.css',
-  '/js/app.js?v=24',
+  '/js/app.js?v=27',
   '/js/app.js',
   '/js/emblem.js',
   '/js/mediaViewer.js',
   '/js/offlineStore.js',
+  '/js/notifications.js',
   '/js/defaultSeed.js',
   '/vendor/pdfjs/pdf.min.js',
   '/vendor/pdfjs/pdf.worker.min.js',
@@ -16,6 +17,9 @@ const OFFLINE_ASSETS = [
   '/samples/newton-pulley-diagram.svg',
   '/assets/itutor-official-flyer.jpg',
   '/icon.svg',
+  '/assets/icon-180.png',
+  '/assets/icon-192.png',
+  '/assets/icon-512.png',
   '/manifest.webmanifest',
   '/assets/itutor-logo.jpg'
 ];
@@ -76,4 +80,34 @@ self.addEventListener('fetch', (event) => {
           .then((cached) => cached || caches.match('/index.html'))
       )
   );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  event.waitUntil((async () => {
+    const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const client = windows.find((item) => new URL(item.url).origin === self.location.origin);
+    if (client) {
+      await client.focus();
+      client.postMessage({ type: 'OPEN_MESSAGES' });
+    } else {
+      await self.clients.openWindow('/?view=messages');
+    }
+  })());
+});
+
+// Push wakes this service worker even when there is no open page or polling.
+self.addEventListener('push', (event) => {
+  event.waitUntil((async () => {
+    let payload = {};
+    try { payload = event.data?.json() || {}; } catch { /* Generic safe alert. */ }
+    const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const visible = windows.some((client) => client.visibilityState === 'visible');
+    await self.registration.showNotification('i-tutor · New message', {
+      body: 'Open i-tutor to read your new message.',
+      icon: '/assets/icon-192.png', badge: '/icon.svg', tag: 'itutor-messages',
+      silent: payload.sound === false || visible,
+      data: { view: 'messages' }
+    });
+  })());
 });

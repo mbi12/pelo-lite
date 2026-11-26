@@ -1,7 +1,9 @@
 import express from 'express';
+import { createPushService } from './src/pushService.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  sbFetch,
   getFullSnapshot,
   applyOutboxActions,
   touchUserPresence,
@@ -15,6 +17,7 @@ const __dirname = path.dirname(__filename);
 
 export function createApp() {
   const app = express();
+  const push = createPushService({ db: sbFetch });
   app.disable('x-powered-by');
 
   app.use((req, res, next) => {
@@ -46,6 +49,31 @@ export function createApp() {
   });
 
   app.use(express.json({ limit: '6mb' }));
+
+  app.get('/api/push/config', (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(push.publicConfig());
+  });
+
+  // Browser permission alone is not account authorization. Check existing
+  // account credentials on the server before binding an endpoint to an account.
+  app.post('/api/push/subscribe', async (req, res) => {
+    try {
+      await push.subscribe({ ...req.body, requestOrigin: req.headers.origin });
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(err.status || 503).json({ error: err.status ? err.message : 'Could not register this device. Please retry.' });
+    }
+  });
+
+  app.post('/api/push/unsubscribe', async (req, res) => {
+    try {
+      await push.unsubscribe(req.body || {});
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(err.status || 503).json({ error: 'Could not remove server subscription.' });
+    }
+  });
 
   app.post('/api/upload-sign', async (req, res) => {
     try {
@@ -97,6 +125,12 @@ export function createApp() {
         await touchUserPresence(presenceUid, { force: true });
       }
       const snapshot = await applyOutboxActions(actions);
+      try {
+        await push.notifyMessages(actions, snapshot);
+      } catch {
+        // A push-provider outage must not turn a saved message into a failed send.
+        console.warn('Push notification dispatch unavailable.');
+      }
       res.json(snapshot);
     } catch (err) {
       res.status(500).json({ error: err.message || 'Sync push failed' });

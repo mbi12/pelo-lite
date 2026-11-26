@@ -6,3 +6,5 @@ node_modules/
 data/
 public/vendor/
 .DS_Store
+
+.venv/

@@ -1,5 +1,5 @@
 {
-  "name": "i-tutor — Confidence in learning",
+  "name": "i-tutor \u2014 Confidence in learning",
   "short_name": "i-tutor",
   "description": "i-tutor standalone offline-first learning application.",
   "start_url": "/",
@@ -8,10 +8,23 @@
   "theme_color": "#EFE7DC",
   "icons": [
     {
+      "src": "/assets/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/assets/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
       "src": "/icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any maskable"
     }
-  ]
+  ],
+  "id": "/"
 }
