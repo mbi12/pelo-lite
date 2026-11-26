@@ -1,4 +1,4 @@
-const CACHE_NAME = 'itutor-standalone-v8';
+const CACHE_NAME = 'itutor-standalone-v9';
 const OFFLINE_ASSETS = [
   '/',
   '/index.html',
@@ -37,19 +37,19 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url);
   if (request.method !== 'GET' || url.pathname.startsWith('/api/')) return;
 
+  // Network-first when online so latest optimizations & animations appear immediately,
+  // with instant fallback to cached offline assets when offline!
   event.respondWith(
-    caches.match(request).then((cached) => {
-      const networkFetch = fetch(request)
-        .then((response) => {
-          if (response && response.status === 200) {
-            const copy = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
-          }
-          return response;
-        })
-        .catch(() => cached);
-
-      return cached || networkFetch;
-    })
+    fetch(request)
+      .then((response) => {
+        if (response && response.status === 200) {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+        }
+        return response;
+      })
+      .catch(() =>
+        caches.match(request).then((cached) => cached || caches.match('/index.html'))
+      )
   );
 });

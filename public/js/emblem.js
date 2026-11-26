@@ -175,8 +175,8 @@ export function renderSunriseGaugeSVG(score = 78) {
         </linearGradient>
       </defs>
       <path d="M 20 90 A 70 70 0 0 1 160 90" fill="none" stroke="currentColor" stroke-opacity="0.12" stroke-width="11" stroke-linecap="round" />
-      <path d="M 20 90 A 70 70 0 0 1 160 90" fill="none" stroke="url(#sunriseArcGold)" stroke-width="11" stroke-linecap="round" stroke-dasharray="${arcLen}" stroke-dashoffset="${offset}" />
-      <path d="M 58 90 A 32 32 0 0 1 122 90 Z" fill="#F2B728" fill-opacity="0.22" />
+      <path class="sunrise-arc-progress" style="--arc-len: ${arcLen}; --arc-offset: ${offset};" d="M 20 90 A 70 70 0 0 1 160 90" fill="none" stroke="url(#sunriseArcGold)" stroke-width="11" stroke-linecap="round" stroke-dasharray="${arcLen}" stroke-dashoffset="${offset}" />
+      <path class="sunrise-core-pulse" d="M 58 90 A 32 32 0 0 1 122 90 Z" fill="#F2B728" fill-opacity="0.24" />
     </svg>
   `;
 }
@@ -316,6 +316,16 @@ export const ICONS = {
     <svg viewBox="0 0 24 24" class="nav-svg-sm" aria-hidden="true">
       <path d="M10 4H5.5A1.5 1.5 0 0 0 4 5.5v13A1.5 1.5 0 0 0 5.5 20H10" />
       <path d="M15 16l4-4-4-4M9 12h10" />
+    </svg>
+  `,
+  menu: `
+    <svg viewBox="0 0 24 24" class="nav-svg" aria-hidden="true">
+      <path d="M4 7h16M4 12h16M4 17h11" />
+    </svg>
+  `,
+  close: `
+    <svg viewBox="0 0 24 24" class="nav-svg" aria-hidden="true">
+      <path d="M6 6l12 12M18 6L6 18" />
     </svg>
   `
 };

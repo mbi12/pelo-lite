@@ -86,6 +86,10 @@ const ui = {
   editingPlanId: null,
   showNewPlanForm: false,
 
+  // Mobile responsive shell state
+  mobileDrawerOpen: false,
+  mobileSearchOpen: false,
+
   // Live timer & scratchpad
   timerSeconds: 25 * 60,
   timerRunning: false,
@@ -98,6 +102,7 @@ let personalState = loadPersonal();
 let sessionState = loadSession();
 let timerHandle = null;
 let toastHandle = null;
+let lastAnimatedKey = '';
 
 function esc(str = '') {
   return String(str ?? '')
@@ -144,14 +149,32 @@ function applyTheme() {
   }
 }
 
+function renderToastOnly() {
+  const host = document.getElementById('live-toast-host');
+  if (!host) return;
+  host.innerHTML = ui.toast ? `<div class="toast-banner" role="status">${esc(ui.toast)}</div>` : '';
+}
+
 function showToast(msg) {
   ui.toast = msg;
-  renderApp();
+  if (document.getElementById('live-toast-host')) {
+    renderToastOnly();
+  } else {
+    renderApp({ preserveScroll: true });
+  }
   if (toastHandle) clearTimeout(toastHandle);
   toastHandle = setTimeout(() => {
     ui.toast = '';
-    renderApp();
-  }, 3400);
+    renderToastOnly();
+  }, 3300);
+}
+
+function updateTimerReadoutsOnly() {
+  const formatted = formatClock(ui.timerSeconds);
+  document.querySelectorAll('.js-timer-readout').forEach((el) => {
+    el.textContent = formatted;
+    el.classList.toggle('is-ticking', ui.timerRunning);
+  });
 }
 
 function formatClock(sec) {
@@ -1723,12 +1746,23 @@ function buildFlashcardsSubstage(user) {
     ${
       card
         ? `
-      <div class="flashcard-flip-card" id="flip-card-stage">
-        <span class="pill-badge">${esc(card.subject)} · ${ui.cardState.flipped ? 'ANSWER' : 'QUESTION (Tap Card to Flip)'}</span>
-        <h2 style="font-size:1.24rem;font-weight:800;max-width:560px;line-height:1.45;white-space:pre-line;">
-          ${esc(ui.cardState.flipped ? card.back : card.front)}
-        </h2>
-        <span class="row-sub">${masteredIds.includes(card.id) ? '✓ Mastered' : 'Tap anywhere on card to flip'}</span>
+      <div class="flashcard-3d-scene" id="flip-card-stage" role="button" tabindex="0" aria-label="Flip flashcard">
+        <div class="flashcard-3d-inner ${ui.cardState.flipped ? 'is-flipped' : ''}" id="flashcard-3d-inner">
+          <div class="flashcard-face front">
+            <span class="pill-badge">${esc(card.subject)} · QUESTION (Tap to Flip 3D)</span>
+            <h2 style="font-size:1.18rem;font-weight:800;max-width:560px;line-height:1.45;white-space:pre-line;">
+              ${esc(card.front)}
+            </h2>
+            <span class="row-sub">${masteredIds.includes(card.id) ? '✓ Mastered' : 'Tap card anywhere to flip'}</span>
+          </div>
+          <div class="flashcard-face back">
+            <span class="pill-badge">${esc(card.subject)} · ANSWER</span>
+            <h2 style="font-size:1.14rem;font-weight:800;max-width:560px;line-height:1.45;white-space:pre-line;">
+              ${esc(card.back)}
+            </h2>
+            <span class="row-sub">Tap card to flip back</span>
+          </div>
+        </div>
       </div>
 
       <div style="display:flex;justify-content:space-between;gap:0.6rem;flex-wrap:wrap;">
@@ -1752,7 +1786,9 @@ function buildFocusScratchpadSubstage() {
           <h2 class="panel-title">Pomodoro Focus Timer</h2>
           <span class="pill-badge">${personalState.focusMinutesToday || 25}m Focused Today</span>
         </div>
-        <div class="timer-readout-big">${formatClock(ui.timerSeconds)}</div>
+        <div class="timer-readout-big js-timer-readout ${ui.timerRunning ? 'is-ticking' : ''}">${formatClock(
+          ui.timerSeconds
+        )}</div>
         <div style="display:flex;justify-content:center;gap:0.5rem;flex-wrap:wrap;">
           <button class="dark-cta-btn" data-timer-action="toggle">${ui.timerRunning ? 'Pause' : 'Start Focus'}</button>
           <button class="outline-btn" data-timer-preset="25">25m Deep</button>
@@ -2287,13 +2323,16 @@ function buildTuitionContactsStage(user) {
    6. MAIN SHELL RENDERER & EVENT WIRING
    ========================================================================== */
 
-function renderApp() {
+function renderApp(opts = {}) {
   applyTheme();
   const rootEl = document.getElementById('app');
   if (!rootEl) return;
 
+  const prevScrollY = opts.preserveScroll !== false ? window.scrollY : 0;
+
   const user = getActiveUser();
   if (!user) {
+    lastAnimatedKey = 'auth';
     renderAuthPortal(rootEl);
     return;
   }
@@ -2305,25 +2344,30 @@ function renderApp() {
   const pendingAdmissions = getPendingAdmissionsCount();
   const superEdit = canEditEverything(user);
 
+  const routeKey = `${user.id}:${ui.view}:${ui.toolkitTab}:${ui.broadcastSubtab}`;
+  const shouldAnimateStage = routeKey !== lastAnimatedKey;
+  lastAnimatedKey = routeKey;
+
   const navItems = [
-    { id: 'overview', label: 'Overview Hub', icon: ICONS.home, badge: '' },
+    { id: 'overview', label: 'Overview Hub', short: 'Hub', icon: ICONS.home, badge: '' },
     ...(superEdit
       ? [
           {
             id: 'admissions',
             label: 'Admissions & Accounts',
+            short: pendingAdmissions ? `Admissions (${pendingAdmissions})` : 'Admissions',
             icon: ICONS.users,
             badge: pendingAdmissions ? `${pendingAdmissions} New` : `${(vaultState.profiles || []).length}`
           }
         ]
       : []),
-    { id: 'timetable', label: 'Timetable & Exams', icon: ICONS.timetable, badge: String(vaultState.timetables.length) },
-    { id: 'assignments', label: 'Remote Assignments', icon: ICONS.assignment, badge: String(vaultState.assignments.length) },
-    { id: 'toolkit', label: 'Offline Study Toolkit', icon: ICONS.toolkit, badge: '4 Tools' },
-    { id: 'messages', label: 'Chats & Study Groups', icon: ICONS.messages, badge: visibleRooms.length ? String(visibleRooms.length) : '' },
-    { id: 'broadcasts', label: 'Broadcasts & Attendance', icon: ICONS.broadcast, badge: String(vaultState.broadcasts.length) },
-    { id: 'tuition', label: 'Tuition Prices & Contact', icon: ICONS.tuition, badge: superEdit ? 'Editable' : 'Open' },
-    { id: 'account', label: user.role === 'visitor' ? 'Join / Sign In' : 'My Account', icon: ICONS.user, badge: '' }
+    { id: 'timetable', label: 'Timetable & Exams', short: 'Schedule', icon: ICONS.timetable, badge: String(vaultState.timetables.length) },
+    { id: 'assignments', label: 'Remote Assignments', short: 'Tasks', icon: ICONS.assignment, badge: String(vaultState.assignments.length) },
+    { id: 'toolkit', label: 'Offline Study Toolkit', short: 'Toolkit', icon: ICONS.toolkit, badge: '4 Tools' },
+    { id: 'messages', label: 'Chats & Study Groups', short: 'Chats', icon: ICONS.messages, badge: visibleRooms.length ? String(visibleRooms.length) : '' },
+    { id: 'broadcasts', label: 'Broadcasts & Attendance', short: 'Broadcasts', icon: ICONS.broadcast, badge: String(vaultState.broadcasts.length) },
+    { id: 'tuition', label: 'Tuition Prices & Contact', short: 'Tuition', icon: ICONS.tuition, badge: superEdit ? 'Edit' : 'Open' },
+    { id: 'account', label: user.role === 'visitor' ? 'Join / Sign In' : 'My Account', short: 'Account', icon: ICONS.user, badge: '' }
   ];
 
   let centerHTML = '';
@@ -2337,9 +2381,21 @@ function renderApp() {
   else if (ui.view === 'tuition') centerHTML = buildTuitionContactsStage(user);
   else if (ui.view === 'account') centerHTML = buildMyAccountStage(user);
 
+  const navButtonsMarkup = (uidSuffix) =>
+    navItems
+      .map(
+        (item) => `
+      <button class="nav-item-btn ${ui.view === item.id ? 'is-active' : ''}" data-nav="${item.id}" data-nav-src="${uidSuffix}">
+        <span class="nav-item-left">${item.icon} <span>${esc(item.label)}</span></span>
+        ${item.badge ? `<span class="nav-badge">${esc(item.badge)}</span>` : ''}
+      </button>
+    `
+      )
+      .join('');
+
   rootEl.innerHTML = `
     <div class="workspace-shell">
-      <!-- ZONE 1: LEFT NAVIGATION RAIL -->
+      <!-- ZONE 1: LEFT NAVIGATION RAIL (DESKTOP) -->
       <aside class="sidebar-rail">
         <div>
           <button class="brand-header-btn" data-nav="overview" title="Go to Overview Hub">
@@ -2367,22 +2423,13 @@ function renderApp() {
             </div>
             <div class="mini-btn-row">
               <button class="rail-mini-btn" data-nav="account">My Account</button>
-              <button class="rail-mini-btn" id="btn-rail-signout">Switch / Out</button>
+              <button class="rail-mini-btn" data-action-signout="1">Switch / Out</button>
             </div>
           </div>
 
           <nav class="sidebar-nav" aria-label="Main navigation">
             <div class="nav-section-label">Workspace</div>
-            ${navItems
-              .map(
-                (item) => `
-              <button class="nav-item-btn ${ui.view === item.id ? 'is-active' : ''}" data-nav="${item.id}">
-                <span class="nav-item-left">${item.icon} <span>${esc(item.label)}</span></span>
-                ${item.badge ? `<span class="nav-badge">${esc(item.badge)}</span>` : ''}
-              </button>
-            `
-              )
-              .join('')}
+            ${navButtonsMarkup('rail')}
           </nav>
         </div>
 
@@ -2395,16 +2442,16 @@ function renderApp() {
               ${outboxCount ? `<span class="nav-badge">${outboxCount} Queued</span>` : ''}
             </div>
             <div class="mini-btn-row">
-              <button class="rail-mini-btn" id="btn-sync-now">Sync Now</button>
-              <button class="rail-mini-btn" id="btn-toggle-offline">${offline ? 'Go Online' : 'Test Offline'}</button>
+              <button class="rail-mini-btn" data-action-sync="1">Sync Now</button>
+              <button class="rail-mini-btn" data-action-toggle-offline="1">${offline ? 'Go Online' : 'Test Offline'}</button>
             </div>
           </div>
 
           <div class="mini-btn-row">
-            <button class="rail-mini-btn" id="btn-night-mode">${
+            <button class="rail-mini-btn" data-action-night="1">${
               sessionState.theme === 'night' ? '☀ Cream Theme' : '☾ Night Study'
             }</button>
-            <button class="rail-mini-btn" id="btn-replay-splash">↻ 10s Intro</button>
+            <button class="rail-mini-btn" data-action-replay="1">↻ 10s Intro</button>
           </div>
         </div>
       </aside>
@@ -2412,9 +2459,13 @@ function renderApp() {
       <!-- ZONE 2: WIDE ADAPTIVE MAIN STAGE -->
       <div class="main-stage">
         <header class="stage-topbar">
+          <button class="mobile-menu-trigger" id="btn-open-mobile-drawer" aria-label="Open full workspace menu">
+            ${ICONS.menu}
+          </button>
+
           <div class="mobile-brand-cluster" data-nav="overview" style="cursor:pointer;">
             <div class="mobile-emblem-mini">${renderEmblemSVG({ animated: false, uid: 'mob', className: 'brand-emblem-svg' })}</div>
-            <strong style="font-size:1.05rem;">i-tutor</strong>
+            <strong><span style="color:var(--gold-deep);">i</span>-tutor</strong>
           </div>
 
           <div class="search-box-wrap">
@@ -2429,22 +2480,65 @@ function renderApp() {
           </div>
 
           <div class="topbar-actions">
+            <button
+              class="mobile-search-toggle ${ui.mobileSearchOpen || ui.searchQuery ? 'is-open' : ''}"
+              id="btn-toggle-mobile-search"
+              aria-label="Search workspace"
+              title="Search"
+            >
+              ${ICONS.search}
+            </button>
+
             ${
               superEdit
-                ? `<button class="gold-cta-btn" data-nav="admissions">${ICONS.users} Admissions (${pendingAdmissions})</button>`
-                : `<button class="gold-cta-btn" data-nav="tuition">${ICONS.tuition} Prices & Contact</button>`
+                ? `<button class="gold-cta-btn hide-label-mobile" data-nav="admissions" title="Admissions (${pendingAdmissions})">
+                    ${ICONS.users}<span>Admissions (${pendingAdmissions})</span>
+                  </button>`
+                : `<button class="gold-cta-btn hide-label-mobile" data-nav="tuition" title="Prices & Contact">
+                    ${ICONS.tuition}<span>Prices & Contact</span>
+                  </button>`
             }
-            <button class="outline-btn" id="top-offline-pill" title="Toggle offline simulation">
+
+            <button class="outline-btn" data-action-toggle-offline="1" title="Toggle offline simulation">
               <span class="dot-indicator ${offline ? 'offline' : ''}"></span>
-              ${offline ? `Offline (${outboxCount})` : 'Synced'}
+              <span>${offline ? `Offline (${outboxCount})` : 'Synced'}</span>
             </button>
-            <button class="outline-btn" id="top-signout-btn" title="Switch account or sign out">
-              ${ICONS.logout} ${user.role === 'visitor' ? 'Sign In / Join' : 'Switch'}
+
+            <button class="outline-btn" data-action-signout="1" title="Switch account or sign out">
+              ${ICONS.logout}
+              <span>${user.role === 'visitor' ? 'Join' : 'Switch'}</span>
             </button>
           </div>
         </header>
 
-        <main class="stage-body">
+        <!-- EXPANDABLE MOBILE SEARCH DRAWER -->
+        <div class="mobile-search-drawer ${ui.mobileSearchOpen || ui.searchQuery ? 'is-open' : ''}">
+          <div class="search-box-wrap">
+            <span class="search-icon-pos">${ICONS.search}</span>
+            <input
+              type="search"
+              class="global-search-input"
+              id="mobile-search-input"
+              placeholder="Search accounts, notes, schedule, tasks..."
+              value="${esc(ui.searchQuery)}"
+            />
+          </div>
+        </div>
+
+        <!-- HORIZONTAL QUICK-JUMP STRIP ON MOBILE (ZERO CLIPPING, ALL 9 AREAS REACHABLE IN 1 TAP) -->
+        <nav class="mobile-quick-strip" aria-label="Quick section jump">
+          ${navItems
+            .map(
+              (item) => `
+            <button class="quick-strip-pill ${ui.view === item.id ? 'is-active' : ''}" data-nav="${item.id}">
+              ${item.icon}<span>${esc(item.short)}</span>
+            </button>
+          `
+            )
+            .join('')}
+        </nav>
+
+        <main class="stage-body ${shouldAnimateStage ? 'is-entering' : ''}">
           ${centerHTML}
         </main>
       </div>
@@ -2465,7 +2559,9 @@ function renderApp() {
             <span class="panel-title" style="font-size:0.9rem;">Live Focus Timer</span>
             <span class="muted-pill">${ui.timerRunning ? 'Ticking' : 'Ready'}</span>
           </div>
-          <div class="timer-readout-big" style="font-size:1.85rem;">${formatClock(ui.timerSeconds)}</div>
+          <div class="timer-readout-big js-timer-readout ${ui.timerRunning ? 'is-ticking' : ''}" style="font-size:1.85rem;">${formatClock(
+            ui.timerSeconds
+          )}</div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.4rem;">
             <button class="dark-cta-btn" data-timer-action="toggle" style="padding:0.48rem;">
               ${ui.timerRunning ? 'Pause' : 'Start'}
@@ -2489,15 +2585,78 @@ function renderApp() {
           `
             )
             .join('')}
-          <button class="outline-btn" id="btn-export-vault" style="margin-top:0.35rem;">
+          <button class="outline-btn" data-action-export="1" style="margin-top:0.35rem;">
             ${ICONS.download} Export Offline Backup
           </button>
         </section>
       </aside>
     </div>
 
+    <!-- ANIMATED SLIDE-OUT MOBILE MENU DRAWER -->
+    <div class="mobile-drawer-backdrop ${ui.mobileDrawerOpen ? 'is-open' : ''}" id="mobile-drawer-backdrop"></div>
+    <aside class="mobile-drawer-panel ${ui.mobileDrawerOpen ? 'is-open' : ''}" id="mobile-drawer-panel" aria-label="Mobile menu drawer">
+      <div>
+        <div class="drawer-head-row">
+          <div style="display:flex;align-items:center;gap:0.55rem;">
+            <div style="width:36px;height:36px;">${renderEmblemSVG({ animated: false, uid: 'drawer', className: 'brand-emblem-svg' })}</div>
+            <div>
+              <div class="brand-title" style="font-size:1.05rem;"><span class="gold-i">i</span>-tutor</div>
+              <div class="brand-sub">Confidence in learning</div>
+            </div>
+          </div>
+          <button class="drawer-close-btn" id="btn-close-mobile-drawer" aria-label="Close menu">${ICONS.close}</button>
+        </div>
+
+        <div class="account-rail-card" style="margin-top:0.75rem;">
+          <div class="account-rail-top">
+            <div class="account-avatar-gold">${esc(initials(user.name))}</div>
+            <div style="min-width:0;flex:1;">
+              <div style="font-size:0.84rem;font-weight:800;color:#F8F3EC;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                ${esc(user.name)}
+              </div>
+              <div style="font-size:0.68rem;color:var(--gold);font-weight:750;text-transform:uppercase;">
+                ${esc(user.role)} ${superEdit ? '· Full Editor' : ''}
+              </div>
+            </div>
+          </div>
+          <div class="mini-btn-row">
+            <button class="rail-mini-btn" data-nav="account">My Account</button>
+            <button class="rail-mini-btn" data-action-signout="1">Switch / Out</button>
+          </div>
+        </div>
+
+        <nav class="sidebar-nav" aria-label="Drawer navigation">
+          <div class="nav-section-label">All Workspaces</div>
+          ${navButtonsMarkup('drawer')}
+        </nav>
+      </div>
+
+      <div class="sidebar-footer" style="margin-top:0.85rem;">
+        <div class="offline-vault-box">
+          <div class="vault-status-row">
+            <span><span class="dot-indicator ${offline ? 'offline' : ''}"></span>${
+    offline ? 'Offline Mode Active' : 'Online · Auto-Synced'
+  }</span>
+            ${outboxCount ? `<span class="nav-badge">${outboxCount} Queued</span>` : ''}
+          </div>
+          <div class="mini-btn-row">
+            <button class="rail-mini-btn" data-action-sync="1">Sync Now</button>
+            <button class="rail-mini-btn" data-action-toggle-offline="1">${offline ? 'Go Online' : 'Test Offline'}</button>
+          </div>
+        </div>
+
+        <div class="mini-btn-row">
+          <button class="rail-mini-btn" data-action-night="1">${
+            sessionState.theme === 'night' ? '☀ Cream Theme' : '☾ Night Study'
+          }</button>
+          <button class="rail-mini-btn" data-action-export="1">⬇ Backup</button>
+        </div>
+        <button class="rail-mini-btn" data-action-replay="1" style="width:100%;justify-content:center;">↻ Replay 10s Rising-Sun Intro</button>
+      </div>
+    </aside>
+
     <!-- MOBILE LABELED 5-TAB BOTTOM BAR -->
-    <nav class="mobile-tabbar" aria-label="Mobile navigation">
+    <nav class="mobile-tabbar" aria-label="Mobile bottom navigation">
       <button class="mob-tab-btn ${ui.view === 'overview' ? 'is-active' : ''}" data-nav="overview">
         ${ICONS.home}<span>Hub</span>
       </button>
@@ -2516,15 +2675,21 @@ function renderApp() {
       <button class="mob-tab-btn ${ui.view === 'toolkit' ? 'is-active' : ''}" data-nav="toolkit">
         ${ICONS.toolkit}<span>Toolkit</span>
       </button>
-      <button class="mob-tab-btn ${ui.view === 'messages' ? 'is-active' : ''}" data-nav="messages">
-        ${ICONS.messages}<span>Chats</span>
+      <button class="mob-tab-btn" id="mob-tab-more">
+        ${ICONS.menu}<span>Menu</span>
       </button>
     </nav>
 
-    ${ui.toast ? `<div class="toast-banner" role="status">${esc(ui.toast)}</div>` : ''}
+    <div id="live-toast-host">
+      ${ui.toast ? `<div class="toast-banner" role="status">${esc(ui.toast)}</div>` : ''}
+    </div>
   `;
 
   bindWorkspaceEvents(user);
+
+  if (opts.preserveScroll !== false && !shouldAnimateStage && prevScrollY > 0) {
+    window.scrollTo(0, prevScrollY);
+  }
 }
 
 function signOutToPortal(defaultTab = 'signin') {
@@ -2537,10 +2702,49 @@ function signOutToPortal(defaultTab = 'signin') {
 }
 
 function bindWorkspaceEvents(user) {
+  // Mobile Slide-Out Drawer controls
+  const openDrawer = () => {
+    ui.mobileDrawerOpen = true;
+    const backdrop = document.getElementById('mobile-drawer-backdrop');
+    const panel = document.getElementById('mobile-drawer-panel');
+    if (backdrop) backdrop.classList.add('is-open');
+    if (panel) panel.classList.add('is-open');
+  };
+  const closeDrawer = () => {
+    ui.mobileDrawerOpen = false;
+    const backdrop = document.getElementById('mobile-drawer-backdrop');
+    const panel = document.getElementById('mobile-drawer-panel');
+    if (backdrop) backdrop.classList.remove('is-open');
+    if (panel) panel.classList.remove('is-open');
+  };
+
+  const btnOpenDrawer = document.getElementById('btn-open-mobile-drawer');
+  if (btnOpenDrawer) btnOpenDrawer.addEventListener('click', openDrawer);
+  const mobTabMore = document.getElementById('mob-tab-more');
+  if (mobTabMore) mobTabMore.addEventListener('click', openDrawer);
+  const btnCloseDrawer = document.getElementById('btn-close-mobile-drawer');
+  if (btnCloseDrawer) btnCloseDrawer.addEventListener('click', closeDrawer);
+  const drawerBackdrop = document.getElementById('mobile-drawer-backdrop');
+  if (drawerBackdrop) drawerBackdrop.addEventListener('click', closeDrawer);
+
+  // Mobile Expandable Search toggle
+  const btnMobSearch = document.getElementById('btn-toggle-mobile-search');
+  if (btnMobSearch) {
+    btnMobSearch.addEventListener('click', () => {
+      ui.mobileSearchOpen = !ui.mobileSearchOpen;
+      renderApp({ preserveScroll: true });
+      if (ui.mobileSearchOpen) {
+        const mobInput = document.getElementById('mobile-search-input');
+        if (mobInput) mobInput.focus();
+      }
+    });
+  }
+
   document.querySelectorAll('[data-nav]').forEach((el) => {
     el.addEventListener('click', () => {
       ui.view = el.getAttribute('data-nav');
-      renderApp();
+      ui.mobileDrawerOpen = false;
+      renderApp({ preserveScroll: false });
       window.scrollTo({ top: 0, behavior: 'smooth' });
     });
   });
@@ -2549,7 +2753,8 @@ function bindWorkspaceEvents(user) {
     el.addEventListener('click', () => {
       ui.view = 'toolkit';
       ui.toolkitTab = el.getAttribute('data-open-toolkit');
-      renderApp();
+      ui.mobileDrawerOpen = false;
+      renderApp({ preserveScroll: false });
     });
   });
 
@@ -2557,12 +2762,20 @@ function bindWorkspaceEvents(user) {
     el.addEventListener('click', () => {
       ui.view = 'assignments';
       ui.expandedAssignmentId = el.getAttribute('data-jump-assign');
-      renderApp();
+      ui.mobileDrawerOpen = false;
+      renderApp({ preserveScroll: false });
     });
   });
 
   // Sign out / Switch account / Visitor apply buttons
-  ['btn-rail-signout', 'top-signout-btn', 'btn-signout-main', 'btn-go-signin-portal'].forEach((id) => {
+  document.querySelectorAll('[data-action-signout]').forEach((el) => {
+    el.addEventListener('click', () => {
+      ui.mobileDrawerOpen = false;
+      signOutToPortal('signin');
+    });
+  });
+
+  ['btn-signout-main', 'btn-go-signin-portal'].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.addEventListener('click', () => signOutToPortal('signin'));
   });
@@ -2577,75 +2790,76 @@ function bindWorkspaceEvents(user) {
     quickNewAssign.addEventListener('click', () => {
       ui.view = 'assignments';
       ui.showAssignCreator = true;
-      renderApp();
+      renderApp({ preserveScroll: false });
     });
   }
 
-  // Global search
-  const searchInput = document.getElementById('global-search-input');
-  if (searchInput) {
-    searchInput.addEventListener('input', (e) => {
-      ui.searchQuery = e.target.value;
-      const pos = e.target.selectionStart;
-      if (ui.view === 'overview' && ui.searchQuery.trim().length > 1) {
-        ui.view = canEditEverything(user) ? 'admissions' : 'toolkit';
-      }
-      renderApp();
-      const nextInput = document.getElementById('global-search-input');
-      if (nextInput) {
-        nextInput.focus();
-        nextInput.setSelectionRange(pos, pos);
-      }
-    });
-  }
-
-  // Sync & Offline controls
-  const syncBtn = document.getElementById('btn-sync-now');
-  if (syncBtn) {
-    syncBtn.addEventListener('click', async () => {
-      const res = await syncWithServer({ simulateOffline: sessionState.simulateOffline });
-      if (res.vault) vaultState = res.vault;
-      showToast(res.status === 'synced' ? 'Synced with cloud database!' : 'Offline mode active — data stored locally.');
-    });
-  }
-
-  ['btn-toggle-offline', 'top-offline-pill'].forEach((id) => {
-    const el = document.getElementById(id);
-    if (el) {
-      el.addEventListener('click', async () => {
-        sessionState.simulateOffline = !sessionState.simulateOffline;
-        saveSession(sessionState);
-        if (!sessionState.simulateOffline) {
-          const res = await syncWithServer({ simulateOffline: false });
-          if (res.vault) vaultState = res.vault;
-          showToast('Back Online! Queued offline edits synced automatically.');
-        } else {
-          showToast('Offline Mode ON: All edits & approvals queue locally.');
+  // Global search (desktop + mobile expandable search bar)
+  ['global-search-input', 'mobile-search-input'].forEach((inputId) => {
+    const searchInput = document.getElementById(inputId);
+    if (searchInput) {
+      searchInput.addEventListener('input', (e) => {
+        ui.searchQuery = e.target.value;
+        const pos = e.target.selectionStart;
+        if (ui.view === 'overview' && ui.searchQuery.trim().length > 1) {
+          ui.view = canEditEverything(user) ? 'admissions' : 'toolkit';
+        }
+        renderApp({ preserveScroll: true });
+        const nextInput = document.getElementById(inputId);
+        if (nextInput) {
+          nextInput.focus();
+          nextInput.setSelectionRange(pos, pos);
         }
       });
     }
   });
 
-  const nightBtn = document.getElementById('btn-night-mode');
-  if (nightBtn) {
+  // Sync & Offline controls (desktop rail + mobile drawer + topbar)
+  document.querySelectorAll('[data-action-sync]').forEach((syncBtn) => {
+    syncBtn.addEventListener('click', async () => {
+      ui.mobileDrawerOpen = false;
+      const res = await syncWithServer({ simulateOffline: sessionState.simulateOffline });
+      if (res.vault) vaultState = res.vault;
+      renderApp({ preserveScroll: true });
+      showToast(res.status === 'synced' ? 'Synced with cloud database!' : 'Offline mode active — data stored locally.');
+    });
+  });
+
+  document.querySelectorAll('[data-action-toggle-offline]').forEach((el) => {
+    el.addEventListener('click', async () => {
+      sessionState.simulateOffline = !sessionState.simulateOffline;
+      saveSession(sessionState);
+      if (!sessionState.simulateOffline) {
+        const res = await syncWithServer({ simulateOffline: false });
+        if (res.vault) vaultState = res.vault;
+        renderApp({ preserveScroll: true });
+        showToast('Back Online! Queued offline edits synced automatically.');
+      } else {
+        renderApp({ preserveScroll: true });
+        showToast('Offline Mode ON: All edits & approvals queue locally.');
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-action-night]').forEach((nightBtn) => {
     nightBtn.addEventListener('click', () => {
       sessionState.theme = sessionState.theme === 'night' ? 'light' : 'night';
       saveSession(sessionState);
-      renderApp();
+      renderApp({ preserveScroll: true });
     });
-  }
+  });
 
-  const replayBtn = document.getElementById('btn-replay-splash');
-  if (replayBtn) {
+  document.querySelectorAll('[data-action-replay]').forEach((replayBtn) => {
     replayBtn.addEventListener('click', () => {
+      ui.mobileDrawerOpen = false;
       const rootEl = document.getElementById('app');
-      runAnimatedSplash(rootEl, () => renderApp());
+      runAnimatedSplash(rootEl, () => renderApp({ preserveScroll: false }));
     });
-  }
+  });
 
-  const exportBtn = document.getElementById('btn-export-vault');
-  if (exportBtn) {
+  document.querySelectorAll('[data-action-export]').forEach((exportBtn) => {
     exportBtn.addEventListener('click', () => {
+      ui.mobileDrawerOpen = false;
       const payload = JSON.stringify({ vault: vaultState, personal: personalState }, null, 2);
       const blob = new Blob([payload], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
@@ -2656,7 +2870,7 @@ function bindWorkspaceEvents(user) {
       URL.revokeObjectURL(url);
       showToast('Offline backup downloaded!');
     });
-  }
+  });
 
   // --- ADMISSIONS & ACCOUNT EVENTS ---
   document.querySelectorAll('[data-role-filter]').forEach((btn) => {
@@ -3298,12 +3512,20 @@ function bindWorkspaceEvents(user) {
     });
   }
 
-  // Flashcards
+  // Flashcards (True 3D in-place flip without destroying DOM mid-animation)
   const flipStage = document.getElementById('flip-card-stage');
   if (flipStage) {
-    flipStage.addEventListener('click', () => {
+    const doFlip = () => {
       ui.cardState.flipped = !ui.cardState.flipped;
-      renderApp();
+      const inner = document.getElementById('flashcard-3d-inner');
+      if (inner) inner.classList.toggle('is-flipped', ui.cardState.flipped);
+    };
+    flipStage.addEventListener('click', doFlip);
+    flipStage.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        doFlip();
+      }
     });
   }
 
@@ -3394,7 +3616,7 @@ function bindWorkspaceEvents(user) {
     });
   }
 
-  // Focus Timer, Checklist & Scratchpad
+  // Focus Timer, Checklist & Scratchpad (Targeted DOM updates every second — zero full-page re-render jank!)
   document.querySelectorAll('[data-timer-action="toggle"]').forEach((btn) => {
     btn.addEventListener('click', () => {
       ui.timerRunning = !ui.timerRunning;
@@ -3402,13 +3624,14 @@ function bindWorkspaceEvents(user) {
         timerHandle = setInterval(() => {
           if (ui.timerSeconds > 0) {
             ui.timerSeconds -= 1;
-            renderApp();
+            updateTimerReadoutsOnly();
           } else {
             ui.timerRunning = false;
             clearInterval(timerHandle);
             timerHandle = null;
             personalState.focusMinutesToday = (personalState.focusMinutesToday || 0) + 25;
             savePersonal(personalState);
+            renderApp({ preserveScroll: true });
             showToast('Focus sprint complete! +25m logged.');
           }
         }, 1000);
@@ -3416,7 +3639,7 @@ function bindWorkspaceEvents(user) {
         clearInterval(timerHandle);
         timerHandle = null;
       }
-      renderApp();
+      renderApp({ preserveScroll: true });
     });
   });
 
