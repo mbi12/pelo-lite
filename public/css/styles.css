@@ -3295,11 +3295,24 @@ a {
   flex-wrap: wrap;
 }
 
+.flyers-top-showcase {
+  border: 1.5px solid rgba(242, 183, 40, 0.5);
+  background:
+    radial-gradient(circle at 92% 10%, rgba(242, 183, 40, 0.14), transparent 48%),
+    var(--surface-ivory);
+}
+
 .flyers-showcase-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 0.95rem;
   min-width: 0;
+}
+
+.flyers-showcase-grid.is-single {
+  max-width: 560px;
+  width: 100%;
+  margin: 0 auto;
 }
 
 .flyer-poster-card {
@@ -3331,14 +3344,14 @@ a {
   display: flex;
   align-items: center;
   justify-content: center;
-  max-height: 390px;
+  max-height: 460px;
   overflow: hidden;
 }
 
 .flyer-poster-img {
   width: 100%;
   height: auto;
-  max-height: 390px;
+  max-height: 460px;
   object-fit: contain;
   display: block;
 }

@@ -3165,10 +3165,128 @@ function buildTuitionContactsStage(user) {
   const firstMonthTotal = ui.feeCalcMonthly + (ui.feeCalcIncludeReg ? regFeeAmount : 0);
 
   return `
-    <!-- HERO HEADER WITH OFFICIAL P100 REGISTRATION SEAL -->
+    <!-- 1. OFFICIAL FLYERS & POSTERS SHOWCASE (RIGHT AT THE VERY TOP) -->
+    ${
+      flyers.length > 0 || superEdit
+        ? `
+      <section class="panel-card flyers-top-showcase">
+        <div class="panel-head">
+          <div>
+            <span class="pill-badge">Official i-tutor Flyers</span>
+            <h2 class="panel-title" style="margin-top:0.2rem;">Official Flyers & Announcements (${flyers.length})</h2>
+            <p class="row-sub">Tap any flyer to open & zoom full-screen inside the built-in viewer.</p>
+          </div>
+          ${
+            superEdit
+              ? `<button type="button" class="gold-cta-btn" data-toggle-flyer-form="1">
+                  ${ICONS.photo} <span>${ui.showFlyerForm || editingFlyer ? 'Close Flyer Form' : '+ Add Flyer'}</span>
+                </button>`
+              : user.role === 'visitor'
+                ? `<div class="action-cluster">
+                    <button type="button" class="gold-cta-btn" data-visitor-join="1">${ICONS.plus} <span>Apply to Join</span></button>
+                    <button type="button" class="outline-btn" data-visitor-signin="1">${ICONS.user} <span>Sign In</span></button>
+                  </div>`
+                : ''
+          }
+        </div>
+
+        ${
+          superEdit && (ui.showFlyerForm || editingFlyer)
+            ? `
+          <form class="worksheet-box form-stack" id="upsert-flyer-form" style="border-left-width:4px;">
+            <div class="panel-head">
+              <h3 class="panel-title">${editingFlyer ? `Edit Flyer · ${esc(editingFlyer.title)}` : 'Upload & Publish New Flyer'}</h3>
+              <button type="button" class="outline-btn" id="cancel-flyer-edit">Cancel</button>
+            </div>
+            <input type="hidden" name="id" value="${esc(editingFlyer?.id || '')}" />
+            <div class="form-grid-2">
+              <input class="field-input" name="title" value="${esc(editingFlyer?.title || '')}" placeholder="Flyer Title (e.g. 2026 Tuition & Registration Flyer)" required />
+              <input class="field-input" name="badge" value="${esc(editingFlyer?.badge || 'Official Flyer')}" placeholder="Badge (e.g. Official Flyer / Exam Promo)" required />
+            </div>
+            <input class="field-input" name="subtitle" value="${esc(editingFlyer?.subtitle || '')}" placeholder="Short caption (e.g. Breakthrough Std 4–6 · JCE · BGCSE · Reg P100)" />
+
+            <div class="media-upload-zone">
+              <div class="media-upload-head">
+                <div>
+                  <strong style="font-size:0.86rem;">Select Flyer Image or PDF Poster</strong>
+                  <p class="row-sub">Upload JPG, PNG, WebP, or PDF — learners & parents can tap to zoom in full-screen.</p>
+                </div>
+                <label class="gold-cta-btn upload-picker-label">
+                  ${ICONS.paperclip}
+                  <span>${ui.uploadingTarget === 'flyer' ? 'Uploading...' : activeFlyerAttachment ? 'Replace File' : 'Choose Flyer'}</span>
+                  <input
+                    type="file"
+                    id="flyer-media-input"
+                    accept="image/*,application/pdf,.pdf"
+                    hidden
+                  />
+                </label>
+              </div>
+              ${activeFlyerAttachment ? renderAttachmentGalleryHTML([activeFlyerAttachment]) : ''}
+            </div>
+
+            <button class="dark-cta-btn" type="submit">${ICONS.check} ${editingFlyer ? 'Update Flyer' : 'Publish Flyer Live'}</button>
+          </form>
+        `
+            : ''
+        }
+
+        ${
+          flyers.length > 0
+            ? `
+          <div class="flyers-showcase-grid ${flyers.length === 1 ? 'is-single' : ''}">
+            ${flyers
+              .map((fl) => {
+                const att = fl.attachment || {};
+                const payloadJson = esc(JSON.stringify(att));
+                const isImg = (att.kind || 'image') === 'image' && (att.thumbUrl || att.url);
+                return `
+                  <article class="flyer-poster-card">
+                    <button
+                      type="button"
+                      class="flyer-poster-preview"
+                      data-open-media="${payloadJson}"
+                      title="Tap to open ${esc(fl.title)} in full-screen viewer"
+                    >
+                      ${
+                        isImg
+                          ? `<img src="${esc(att.url || att.thumbUrl)}" alt="${esc(fl.title)}" class="flyer-poster-img" loading="lazy" />`
+                          : `<div class="flyer-pdf-placeholder">${ICONS.pdf}<span>Tap to Open PDF Flyer</span></div>`
+                      }
+                      <span class="flyer-zoom-hint">${ICONS.zoomIn} Tap to Zoom Full-Screen</span>
+                    </button>
+                    <div class="flyer-poster-foot">
+                      <div style="min-width:0;flex:1;">
+                        <span class="pill-badge">${esc(fl.badge || 'Official Flyer')}</span>
+                        <h3 class="panel-title" style="margin-top:0.3rem;">${esc(fl.title)}</h3>
+                        ${fl.subtitle ? `<p class="row-sub">${esc(fl.subtitle)}</p>` : ''}
+                      </div>
+                      ${
+                        superEdit
+                          ? renderMoreMenu(`
+                              <button type="button" class="more-menu-item" data-edit-flyer="${esc(fl.id)}">${ICONS.edit} Edit Flyer</button>
+                              <button type="button" class="more-menu-item is-danger" data-del-flyer="${esc(fl.id)}">${ICONS.trash} Delete Flyer</button>
+                            `)
+                          : ''
+                      }
+                    </div>
+                  </article>
+                `;
+              })
+              .join('')}
+          </div>
+        `
+            : `<p class="row-sub">No flyers published yet — tap "+ Add Flyer" above to upload a poster or PDF flyer.</p>`
+        }
+      </section>
+    `
+        : ''
+    }
+
+    <!-- 2. HERO HEADER WITH OFFICIAL P100 REGISTRATION SEAL -->
     <section class="tuition-hero-card">
       <div class="tuition-hero-main">
-        <span class="pill-badge">Francistown, Botswana · Official Tuition & Flyers</span>
+        <span class="pill-badge">Francistown, Botswana · Official Tuition Prices</span>
         <h1>${esc(info.headline || 'Students Improve Through Tutoring.')}</h1>
         <p>${esc(info.intro || 'Better understanding. Better results. Brighter future.')}</p>
         <div class="free-lessons-strip">
@@ -3205,7 +3323,7 @@ function buildTuitionContactsStage(user) {
           <p class="row-sub">Upload promotional flyers/posters, add or edit tuition packages & subject rates, or update the registration fee anytime.</p>
         </div>
         <div class="admin-studio-actions">
-          <button type="button" class="gold-cta-btn" id="toggle-flyer-form-btn">
+          <button type="button" class="gold-cta-btn" id="toggle-flyer-form-btn" data-toggle-flyer-form="1">
             ${ICONS.photo} <span>${ui.showFlyerForm || editingFlyer ? 'Close Flyer Form' : '+ Add Flyer'}</span>
           </button>
           <button type="button" class="dark-cta-btn" id="toggle-new-plan-btn">
@@ -3216,48 +3334,6 @@ function buildTuitionContactsStage(user) {
           </button>
         </div>
       </section>
-    `
-        : ''
-    }
-
-    <!-- ADMIN FLYER UPLOADER / EDITOR -->
-    ${
-      superEdit && (ui.showFlyerForm || editingFlyer)
-        ? `
-      <form class="panel-card form-stack" id="upsert-flyer-form">
-        <div class="panel-head">
-          <h2 class="panel-title">${editingFlyer ? `Edit Flyer · ${esc(editingFlyer.title)}` : 'Upload & Publish New Flyer'}</h2>
-          <button type="button" class="outline-btn" id="cancel-flyer-edit">Cancel</button>
-        </div>
-        <input type="hidden" name="id" value="${esc(editingFlyer?.id || '')}" />
-        <div class="form-grid-2">
-          <input class="field-input" name="title" value="${esc(editingFlyer?.title || '')}" placeholder="Flyer Title (e.g. 2026 Tuition & Registration Flyer)" required />
-          <input class="field-input" name="badge" value="${esc(editingFlyer?.badge || 'Official Flyer')}" placeholder="Badge (e.g. Official Flyer / Exam Promo)" required />
-        </div>
-        <input class="field-input" name="subtitle" value="${esc(editingFlyer?.subtitle || '')}" placeholder="Short caption (e.g. Breakthrough Std 4–6 · JCE · BGCSE · Reg P100)" />
-
-        <div class="media-upload-zone">
-          <div class="media-upload-head">
-            <div>
-              <strong style="font-size:0.86rem;">Select Flyer Image or PDF Poster</strong>
-              <p class="row-sub">Upload JPG, PNG, WebP, or PDF — learners & parents can tap to zoom in full-screen.</p>
-            </div>
-            <label class="gold-cta-btn upload-picker-label">
-              ${ICONS.paperclip}
-              <span>${ui.uploadingTarget === 'flyer' ? 'Uploading...' : activeFlyerAttachment ? 'Replace File' : 'Choose Flyer'}</span>
-              <input
-                type="file"
-                id="flyer-media-input"
-                accept="image/*,application/pdf,.pdf"
-                hidden
-              />
-            </label>
-          </div>
-          ${activeFlyerAttachment ? renderAttachmentGalleryHTML([activeFlyerAttachment]) : ''}
-        </div>
-
-        <button class="dark-cta-btn" type="submit">${ICONS.check} ${editingFlyer ? 'Update Flyer' : 'Publish Flyer Live'}</button>
-      </form>
     `
         : ''
     }
@@ -3319,7 +3395,7 @@ function buildTuitionContactsStage(user) {
         : ''
     }
 
-    <!-- REAL BOTSWANA PULA TUITION PACKAGES & SUBJECT PRICES (FRONT & CENTER WHEN OPENING APP) -->
+    <!-- 3. REAL BOTSWANA PULA TUITION PACKAGES & SUBJECT PRICES (DIRECTLY BELOW FLYERS) -->
     <div class="pricing-cards-grid">
       ${plans
         .map(
@@ -3353,64 +3429,6 @@ function buildTuitionContactsStage(user) {
         )
         .join('')}
     </div>
-
-    <!-- OFFICIAL FLYERS & POSTERS GALLERY -->
-    ${
-      flyers.length > 0
-        ? `
-      <section class="panel-card">
-        <div class="panel-head">
-          <div>
-            <h2 class="panel-title">Official Flyers & Announcements (${flyers.length})</h2>
-            <p class="row-sub">Tap any flyer to open & zoom full-screen inside the built-in viewer.</p>
-          </div>
-        </div>
-
-        <div class="flyers-showcase-grid">
-          ${flyers
-            .map((fl) => {
-              const att = fl.attachment || {};
-              const payloadJson = esc(JSON.stringify(att));
-              const isImg = (att.kind || 'image') === 'image' && (att.thumbUrl || att.url);
-              return `
-                <article class="flyer-poster-card">
-                  <button
-                    type="button"
-                    class="flyer-poster-preview"
-                    data-open-media="${payloadJson}"
-                    title="Tap to open ${esc(fl.title)} in full-screen viewer"
-                  >
-                    ${
-                      isImg
-                        ? `<img src="${esc(att.url || att.thumbUrl)}" alt="${esc(fl.title)}" class="flyer-poster-img" loading="lazy" />`
-                        : `<div class="flyer-pdf-placeholder">${ICONS.pdf}<span>Tap to Open PDF Flyer</span></div>`
-                    }
-                    <span class="flyer-zoom-hint">${ICONS.zoomIn} Tap to Zoom Full-Screen</span>
-                  </button>
-                  <div class="flyer-poster-foot">
-                    <div style="min-width:0;flex:1;">
-                      <span class="pill-badge">${esc(fl.badge || 'Official Flyer')}</span>
-                      <h3 class="panel-title" style="margin-top:0.3rem;">${esc(fl.title)}</h3>
-                      ${fl.subtitle ? `<p class="row-sub">${esc(fl.subtitle)}</p>` : ''}
-                    </div>
-                    ${
-                      superEdit
-                        ? renderMoreMenu(`
-                            <button type="button" class="more-menu-item" data-edit-flyer="${esc(fl.id)}">${ICONS.edit} Edit Flyer</button>
-                            <button type="button" class="more-menu-item is-danger" data-del-flyer="${esc(fl.id)}">${ICONS.trash} Delete Flyer</button>
-                          `)
-                        : ''
-                    }
-                  </div>
-                </article>
-              `;
-            })
-            .join('')}
-        </div>
-      </section>
-    `
-        : ''
-    }
 
     <!-- BOTSWANA PULA FEE ESTIMATOR & FRANCISTOWN CONTACTS -->
     <div class="two-col-grid">
@@ -5651,19 +5669,29 @@ function bindWorkspaceEvents(user) {
     renderApp({ preserveScroll: true });
   });
 
+  document.querySelectorAll('[data-visitor-signin]').forEach((el) => {
+    el.addEventListener('click', () => signOutToPortal('signin'));
+  });
+  document.querySelectorAll('[data-visitor-join]').forEach((el) => {
+    el.addEventListener('click', () => signOutToPortal('join'));
+  });
+
   // Flyer Upload / Edit / Delete (Admin & Admissions)
-  document.getElementById('toggle-flyer-form-btn')?.addEventListener('click', () => {
-    if (ui.editingFlyerId || ui.showFlyerForm) {
-      ui.editingFlyerId = null;
-      ui.showFlyerForm = false;
-      ui.stagedFlyerAttachment = null;
-    } else {
-      ui.showFlyerForm = true;
-      ui.showNewPlanForm = false;
-      ui.showTuitionEditor = false;
-      ui.stagedFlyerAttachment = null;
-    }
-    renderApp({ preserveScroll: true });
+  document.querySelectorAll('[data-toggle-flyer-form]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (ui.editingFlyerId || ui.showFlyerForm) {
+        ui.editingFlyerId = null;
+        ui.showFlyerForm = false;
+        ui.stagedFlyerAttachment = null;
+      } else {
+        ui.showFlyerForm = true;
+        ui.showNewPlanForm = false;
+        ui.showTuitionEditor = false;
+        ui.stagedFlyerAttachment = null;
+      }
+      renderApp({ preserveScroll: false });
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
   });
 
   document.getElementById('cancel-flyer-edit')?.addEventListener('click', () => {
@@ -5909,7 +5937,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
     navigator.serviceWorker
-      .register('/sw.js?v=17', { updateViaCache: 'none' })
+      .register('/sw.js?v=18', { updateViaCache: 'none' })
       .then((reg) => reg.update().catch(() => {}))
       .catch(() => {});
   }
