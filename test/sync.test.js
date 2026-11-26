@@ -21,6 +21,8 @@ test('i-tutor v5: accounts, admissions, homework & chat media uploads (PDF/Photo
     assert.equal(samplePdfRes.status, 200);
     const sampleDiagRes = await fetch(`${baseUrl}/samples/newton-pulley-diagram.svg`);
     assert.equal(sampleDiagRes.status, 200);
+    const officialFlyerRes = await fetch(`${baseUrl}/assets/itutor-official-flyer.jpg`);
+    assert.equal(officialFlyerRes.status, 200);
 
     // 2. Test binary media upload endpoint (/api/upload) & signed upload endpoint (/api/upload-sign)
     const signRes = await fetch(`${baseUrl}/api/upload-sign`, {
@@ -43,13 +45,79 @@ test('i-tutor v5: accounts, admissions, homework & chat media uploads (PDF/Photo
     assert.equal(upJson.ok, true);
     assert.ok(upJson.url);
 
-    // 3. Initial GET /api/sync
+    // 3. Initial GET /api/sync — verify official Botswana Pula prices, P100 Registration Fee, Francistown contacts & Flyer
     const res1 = await fetch(`${baseUrl}/api/sync`);
     assert.equal(res1.status, 200);
     const snap1 = await res1.json();
     assert.ok(snap1.profiles.some((p) => p.role === 'admissions'));
     assert.ok(snap1.profiles.some((p) => p.role === 'admin'));
     assert.ok(snap1.assignments.length >= 3);
+    assert.equal(snap1.tuitionInfo.registration_fee, 'P100');
+    assert.ok(snap1.tuitionInfo.contacts.address.includes('Francistown, Minestone Plot No. 1589'));
+    assert.equal(snap1.tuitionInfo.contacts.phone, '77 329 788');
+    assert.equal(snap1.tuitionInfo.contacts.email, 'i-tutor@gmail.com');
+    assert.ok(snap1.tuitionInfo.plans.some((pl) => pl.name.includes('Breakthrough Classes') && pl.price.includes('P500')));
+    assert.ok(snap1.tuitionInfo.plans.some((pl) => pl.name.includes('JCE Level')));
+    assert.ok(snap1.tuitionInfo.plans.some((pl) => pl.name.includes('Form 4') && pl.price.includes('P750')));
+    assert.ok(Array.isArray(snap1.tuitionInfo.flyers) && snap1.tuitionInfo.flyers.length >= 1);
+
+    // 3b. Test Admin adding a temporary flyer & price package and restoring original state
+    const origFlyers = snap1.tuitionInfo.flyers;
+    const origPlans = snap1.tuitionInfo.plans;
+    const testFlyer = {
+      id: 'flyer-test-admin',
+      title: 'Test Exam Revision Flyer',
+      badge: 'Holiday Camp',
+      subtitle: 'JCE & BGCSE Intensive Revision',
+      attachment: {
+        id: 'att-flyer-test',
+        name: 'itutor-official-flyer.jpg',
+        kind: 'image',
+        mime: 'image/jpeg',
+        url: '/assets/itutor-official-flyer.jpg'
+      }
+    };
+    const testPlan = {
+      id: 'plan-test-admin',
+      name: 'BGCSE Holiday Bootcamp',
+      price: 'P350 / week',
+      numericRate: 350,
+      badge: 'Holiday Special',
+      features: ['Past paper drills', 'Free extra lessons included']
+    };
+    const resFlyerUpdate = await fetch(`${baseUrl}/api/sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        actions: [
+          {
+            type: 'UPDATE_TUITION_INFO',
+            payload: {
+              flyers: [testFlyer, ...origFlyers],
+              plans: [...origPlans, testPlan]
+            }
+          }
+        ]
+      })
+    });
+    assert.equal(resFlyerUpdate.status, 200);
+    const snapAfterFlyer = await resFlyerUpdate.json();
+    assert.ok(snapAfterFlyer.tuitionInfo.flyers.some((f) => f.id === 'flyer-test-admin'));
+    assert.ok(snapAfterFlyer.tuitionInfo.plans.some((p) => p.id === 'plan-test-admin'));
+
+    // Restore original flyers & plans cleanly
+    await fetch(`${baseUrl}/api/sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        actions: [
+          {
+            type: 'UPDATE_TUITION_INFO',
+            payload: { flyers: origFlyers, plans: origPlans }
+          }
+        ]
+      })
+    });
 
     // 4. Test Admin Homework PDF+Photo upload AND Chat PDF+Video+Photo message sync
     const testAssignId = 'asg-test-media-pack';

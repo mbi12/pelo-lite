@@ -1,4 +1,4 @@
-const CACHE_NAME = 'itutor-standalone-v12';
+const CACHE_NAME = 'itutor-standalone-v13';
 const OFFLINE_ASSETS = [
   '/',
   '/index.html',
@@ -12,6 +12,7 @@ const OFFLINE_ASSETS = [
   '/vendor/pdfjs/pdf.worker.min.js',
   '/samples/trig-identities-worksheet.pdf',
   '/samples/newton-pulley-diagram.svg',
+  '/assets/itutor-official-flyer.jpg',
   '/icon.svg',
   '/manifest.webmanifest',
   '/assets/itutor-logo.jpg'

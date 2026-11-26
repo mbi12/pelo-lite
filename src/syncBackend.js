@@ -5,7 +5,7 @@ import { createDefaultSnapshot } from '../public/js/defaultSeed.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const LOCAL_DB_PATH = path.join(__dirname, '..', 'data', 'itutor-v2-local.json');
+const LOCAL_DB_PATH = path.join(__dirname, '..', 'data', 'itutor-v3-local.json');
 
 let resolvedMode = null; // 'supabase' | 'local'
 
@@ -75,7 +75,14 @@ function readLocalDb() {
     if (fs.existsSync(LOCAL_DB_PATH)) {
       const parsed = JSON.parse(fs.readFileSync(LOCAL_DB_PATH, 'utf8'));
       const fallback = createDefaultSnapshot();
-      return { ...fallback, ...parsed };
+      return {
+        ...fallback,
+        ...parsed,
+        tuitionInfo: {
+          ...fallback.tuitionInfo,
+          ...(parsed.tuitionInfo || {})
+        }
+      };
     }
   } catch {
     // Recreate on parse failure
@@ -161,7 +168,10 @@ export async function getFullSnapshot() {
           ? {
               headline: tuitionRow.headline || fallback.tuitionInfo.headline,
               intro: tuitionRow.intro || fallback.tuitionInfo.intro,
+              registration_fee: tuitionRow.registration_fee || fallback.tuitionInfo.registration_fee || 'P100',
+              promo_banner: tuitionRow.promo_banner || fallback.tuitionInfo.promo_banner || '',
               plans: tuitionRow.plans || fallback.tuitionInfo.plans,
+              flyers: Array.isArray(tuitionRow.flyers) ? tuitionRow.flyers : fallback.tuitionInfo.flyers,
               contacts: tuitionRow.contacts || fallback.tuitionInfo.contacts
             }
           : fallback.tuitionInfo,
@@ -543,7 +553,10 @@ export async function applyOutboxActions(actions = []) {
           const patchBody = { updated_at: new Date().toISOString() };
           if (p.headline !== undefined) patchBody.headline = p.headline;
           if (p.intro !== undefined) patchBody.intro = p.intro;
+          if (p.registration_fee !== undefined) patchBody.registration_fee = p.registration_fee;
+          if (p.promo_banner !== undefined) patchBody.promo_banner = p.promo_banner;
           if (p.plans !== undefined) patchBody.plans = p.plans;
+          if (p.flyers !== undefined) patchBody.flyers = p.flyers;
           if (p.contacts !== undefined) patchBody.contacts = p.contacts;
           await sbFetch('itutor_v2_tuition_info?id=eq.default', {
             method: 'PATCH',
@@ -669,7 +682,10 @@ export async function applyOutboxActions(actions = []) {
           ...db.tuitionInfo,
           ...(p.headline !== undefined ? { headline: p.headline } : {}),
           ...(p.intro !== undefined ? { intro: p.intro } : {}),
+          ...(p.registration_fee !== undefined ? { registration_fee: p.registration_fee } : {}),
+          ...(p.promo_banner !== undefined ? { promo_banner: p.promo_banner } : {}),
           ...(p.plans !== undefined ? { plans: p.plans } : {}),
+          ...(p.flyers !== undefined ? { flyers: p.flyers } : {}),
           ...(p.contacts !== undefined ? { contacts: p.contacts } : {})
         };
         break;

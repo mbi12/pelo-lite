@@ -1835,7 +1835,7 @@ a {
   -webkit-backdrop-filter: blur(12px);
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   padding: 0.38rem 0.25rem calc(0.38rem + env(safe-area-inset-bottom));
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .mob-tab-btn {
@@ -3136,4 +3136,237 @@ a {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* ==========================================================================
+   OFFICIAL FLYERS SHOWCASE, REGISTRATION FEE P100 SEAL & ADMIN STUDIO
+   ========================================================================== */
+
+.tuition-hero-card {
+  background: linear-gradient(135deg, #171816 0%, #242522 100%);
+  color: #FAF6F0;
+  border: 1px solid rgba(242, 183, 40, 0.36);
+  border-radius: 22px;
+  padding: 1.25rem 1.35rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.15rem;
+  flex-wrap: wrap;
+  box-shadow: 0 14px 34px rgba(18, 18, 16, 0.14);
+}
+
+.tuition-hero-main {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.48rem;
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.tuition-hero-main h1 {
+  font-size: clamp(1.32rem, 3.2vw, 1.85rem);
+  font-weight: 850;
+  letter-spacing: -0.025em;
+  line-height: 1.18;
+  color: #FFFFFF;
+}
+
+.tuition-hero-main p {
+  font-size: 0.88rem;
+  line-height: 1.48;
+  color: rgba(250, 246, 240, 0.8);
+}
+
+.free-lessons-strip {
+  background: rgba(242, 183, 40, 0.16);
+  border: 1px solid rgba(242, 183, 40, 0.45);
+  color: var(--gold);
+  border-radius: 12px;
+  padding: 0.45rem 0.75rem;
+  font-size: 0.78rem;
+  line-height: 1.42;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.reg-fee-seal {
+  width: 118px;
+  height: 118px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 25%, #242522, #0E0F0D);
+  border: 2.5px solid var(--gold);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.38), inset 0 0 0 3px rgba(242, 183, 40, 0.14);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 0.45rem;
+  flex-shrink: 0;
+}
+
+.reg-fee-kicker {
+  font-size: 0.68rem;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  color: #FFFFFF;
+}
+
+.reg-fee-amount {
+  font-size: 1.55rem;
+  font-weight: 900;
+  line-height: 1.05;
+  color: var(--gold);
+  letter-spacing: -0.02em;
+}
+
+.reg-fee-sub {
+  font-size: 0.56rem;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  color: rgba(255, 255, 255, 0.82);
+  margin-top: 0.14rem;
+  border-top: 1px dashed rgba(242, 183, 40, 0.45);
+  padding-top: 0.14rem;
+}
+
+.reg-fee-stars {
+  font-size: 0.62rem;
+  color: var(--gold);
+  margin-top: 0.08rem;
+  letter-spacing: 0.06em;
+}
+
+.admin-studio-bar {
+  border: 1.5px solid rgba(242, 183, 40, 0.52);
+  background: linear-gradient(135deg, rgba(242, 183, 40, 0.13), var(--surface-ivory));
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.9rem;
+  flex-wrap: wrap;
+}
+
+.admin-studio-copy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.22rem;
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+.admin-studio-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.48rem;
+  flex-wrap: wrap;
+}
+
+.flyers-showcase-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 0.95rem;
+  min-width: 0;
+}
+
+.flyer-poster-card {
+  background: var(--surface-recessed);
+  border: 1px solid var(--border-warm);
+  border-radius: 18px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  transition: transform 0.2s var(--ease-spring), border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.flyer-poster-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--gold);
+  box-shadow: 0 12px 28px rgba(24, 24, 21, 0.12);
+}
+
+.flyer-poster-preview {
+  appearance: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  width: 100%;
+  background: #141513;
+  position: relative;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  max-height: 390px;
+  overflow: hidden;
+}
+
+.flyer-poster-img {
+  width: 100%;
+  height: auto;
+  max-height: 390px;
+  object-fit: contain;
+  display: block;
+}
+
+.flyer-pdf-placeholder {
+  height: 220px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  color: var(--gold);
+  font-size: 0.84rem;
+  font-weight: 800;
+}
+
+.flyer-zoom-hint {
+  position: absolute;
+  right: 0.65rem;
+  bottom: 0.65rem;
+  background: rgba(20, 21, 19, 0.88);
+  color: var(--gold);
+  border: 1px solid rgba(242, 183, 40, 0.45);
+  border-radius: 999px;
+  padding: 0.28rem 0.62rem;
+  font-size: 0.7rem;
+  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.flyer-poster-foot {
+  padding: 0.82rem 0.92rem;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+@media (max-width: 540px) {
+  .tuition-hero-card {
+    padding: 1rem;
+  }
+
+  .reg-fee-seal {
+    width: 98px;
+    height: 98px;
+  }
+
+  .reg-fee-amount {
+    font-size: 1.32rem;
+  }
+
+  .flyers-showcase-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 

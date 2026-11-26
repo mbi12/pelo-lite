@@ -91,12 +91,15 @@ const ui = {
   showAttendanceCreator: false,
   editingAttendanceId: null,
 
-  // Tuition & Package editors
-  feeCalcSessions: 2,
-  feeCalcRate: 220,
+  // Flyers, Tuition & Package editors
+  feeCalcMonthly: 750,
+  feeCalcIncludeReg: true,
   showTuitionEditor: false,
   editingPlanId: null,
   showNewPlanForm: false,
+  showFlyerForm: false,
+  editingFlyerId: null,
+  stagedFlyerAttachment: null,
 
   // Mobile responsive shell state
   mobileDrawerOpen: false,
@@ -413,12 +416,12 @@ function renderAuthPortal(rootEl, { animateCard = true } = {}) {
           </p>
 
           <div class="auth-visitor-box">
-            <span class="auth-visitor-kicker">Exploring Tuition?</span>
+            <span class="auth-visitor-kicker">Exploring Tuition & Flyers?</span>
             <p class="auth-visitor-copy">
-              View transparent monthly rates, estimate session fees, and reach Admissions without signing in.
+              View official Botswana Pula rates (Breakthrough Std 4–6, JCE, BGCSE / IGCSE + P100 registration), browse flyers, and contact us in Francistown.
             </p>
             <button class="gold-cta-btn auth-visitor-btn" id="btn-enter-visitor">
-              ${ICONS.tuition} <span>Tuition & Contacts</span>
+              ${ICONS.tuition} <span>Flyers, Prices & Contacts</span>
             </button>
           </div>
         </section>
@@ -964,9 +967,9 @@ function buildOverviewStage(user) {
   if (canEditEverything(user)) {
     kpis = [
       { label: 'Admissions', value: `${pendingAdmissions} Pending`, foot: '1-click approvals', go: 'admissions' },
+      { label: 'Flyers & Prices', value: `${(vaultState.tuitionInfo.flyers || []).length} Flyer · ${(vaultState.tuitionInfo.plans || []).length} Plans`, foot: 'Add flyers & prices at will', go: 'tuition' },
       { label: 'Homework Packs', value: `${vaultState.assignments.length} Active`, foot: 'Upload PDFs, Photos & Videos', go: 'assignments' },
-      { label: 'Chats & Groups', value: `${visibleRooms.length} Rooms`, foot: 'Share media & messages', go: 'messages' },
-      { label: 'Accounts', value: `${(vaultState.profiles || []).filter((p) => p.status === 'active').length} Active`, foot: 'Directory & roles', go: 'admissions' }
+      { label: 'Chats & Groups', value: `${visibleRooms.length} Rooms`, foot: 'Share media & messages', go: 'messages' }
     ];
   } else if (user.role === 'teacher') {
     kpis = [
@@ -2289,91 +2292,258 @@ function buildBroadcastsAttendanceStage(user) {
 }
 
 /* ==========================================================================
-   11. TUITION PACKAGES & CONTACTS (DE-CLUTTERED)
+   11. OFFICIAL FLYERS, REAL BOTSWANA PULA PRICES & ADMIN STUDIO
    ========================================================================== */
 
+const BOTSWANA_CALC_OPTIONS = [
+  { label: 'Breakthrough Classes (Standard 4–6) — P500 / mo', rate: 500 },
+  { label: 'Breakthrough All Subjects (Standard 4–6) — P600 / mo', rate: 600 },
+  { label: 'JCE Level — 1 Subject — P200 / mo', rate: 200 },
+  { label: 'JCE Level — Science or Mathematics (1 Subject) — P250 / mo', rate: 250 },
+  { label: 'JCE Level — Science & Mathematics Combo — P400 / mo', rate: 400 },
+  { label: 'JCE Level — Core Subjects (5) — P600 / mo', rate: 600 },
+  { label: 'JCE Level — Core + 1 Optional + 2 Practicals — P1,300 / mo', rate: 1300 },
+  { label: 'BGCSE / IGCSE — Form 4 (Best 6 Package) — P750 / mo', rate: 750 },
+  { label: 'BGCSE / IGCSE — Double Science (Part-Time) — P400 / mo', rate: 400 },
+  { label: 'BGCSE / IGCSE — Double Science (Full-Time) — P450 / mo', rate: 450 },
+  { label: 'BGCSE / IGCSE — Mathematics (Part-Time) — P250 / mo', rate: 250 },
+  { label: 'BGCSE / IGCSE — Mathematics (Full-Time) — P300 / mo', rate: 300 },
+  { label: 'BGCSE / IGCSE — Other Subject (Part-Time) — P200 / mo', rate: 200 },
+  { label: 'BGCSE / IGCSE — Other Subject (Full-Time) — P250 / mo', rate: 250 }
+];
+
+function parseRegFeeNumeric(regFeeStr = 'P100') {
+  const m = String(regFeeStr).match(/(\d+(?:\.\d+)?)/);
+  return m ? Number(m[1]) : 100;
+}
+
 function buildTuitionContactsStage(user) {
-  const info = vaultState.tuitionInfo;
+  const info = vaultState.tuitionInfo || {};
   const contacts = info.contacts || {};
   const plans = info.plans || [];
-  const monthlyEst = ui.feeCalcSessions * 4 * ui.feeCalcRate;
+  const flyers = Array.isArray(info.flyers) ? info.flyers : [];
+  const regFeeLabel = info.registration_fee || 'P100';
+  const regFeeAmount = parseRegFeeNumeric(regFeeLabel);
+  const promoBanner =
+    info.promo_banner ||
+    'WE OFFER FREE EXTRA LESSONS! — Homework assistance included · Experienced & caring tutors · Personalized attention';
+
   const superEdit = canEditEverything(user);
   const editingPlan = ui.editingPlanId ? plans.find((p) => p.id === ui.editingPlanId) : null;
+  const editingFlyer = ui.editingFlyerId ? flyers.find((f) => f.id === ui.editingFlyerId) : null;
+  const activeFlyerAttachment = ui.stagedFlyerAttachment || editingFlyer?.attachment || null;
+
+  const firstMonthTotal = ui.feeCalcMonthly + (ui.feeCalcIncludeReg ? regFeeAmount : 0);
 
   return `
-    <div class="page-header-row">
-      <div>
-        <h1>${esc(info.headline || 'Tuition & Contacts')}</h1>
-        <p>${esc(info.intro || 'Transparent monthly packages, fee estimator & direct academy contacts.')}</p>
-      </div>
-      <div class="action-cluster">
+    <!-- HERO HEADER WITH OFFICIAL P100 REGISTRATION SEAL -->
+    <section class="tuition-hero-card">
+      <div class="tuition-hero-main">
+        <span class="pill-badge">Francistown, Botswana · Official Tuition & Flyers</span>
+        <h1>${esc(info.headline || 'Students Improve Through Tutoring.')}</h1>
+        <p>${esc(info.intro || 'Better understanding. Better results. Brighter future.')}</p>
+        <div class="free-lessons-strip">
+          <strong>★ ${esc(promoBanner)}</strong>
+        </div>
         ${
           user.role === 'visitor'
-            ? `<button class="dark-cta-btn" id="visitor-apply-tuition">${ICONS.plus} Apply to Join</button>`
-            : ''
-        }
-        ${
-          superEdit
-            ? renderMoreMenu(`
-                <button type="button" class="more-menu-item" id="toggle-new-plan-btn">${ICONS.plus} Add Tuition Package</button>
-                <button type="button" class="more-menu-item" id="toggle-tuition-editor">${ICONS.edit} Edit Contacts & Headline</button>
-              `)
+            ? `<div style="margin-top:0.35rem;"><button class="gold-cta-btn" id="visitor-apply-tuition">${ICONS.plus} <span>Apply to Join i-tutor</span></button></div>`
             : ''
         }
       </div>
-    </div>
 
+      <div class="reg-fee-seal" aria-label="Registration Fee ${esc(regFeeLabel)}">
+        <span class="reg-fee-kicker">FEE:</span>
+        <strong class="reg-fee-amount">${esc(regFeeLabel)}</strong>
+        <span class="reg-fee-sub">REGISTRATION</span>
+        <span class="reg-fee-stars" aria-hidden="true">★ ★ ★</span>
+      </div>
+    </section>
+
+    <!-- DEDICATED ADMIN STUDIO: ADD FLYERS & PRICES AT WILL -->
+    ${
+      superEdit
+        ? `
+      <section class="panel-card admin-studio-bar">
+        <div class="admin-studio-copy">
+          <span class="pill-badge">Admin Studio</span>
+          <h2 class="panel-title">Manage Flyers & Prices At Will</h2>
+          <p class="row-sub">Upload promotional flyers/posters, add or edit tuition packages & subject rates, or update the registration fee anytime.</p>
+        </div>
+        <div class="admin-studio-actions">
+          <button type="button" class="gold-cta-btn" id="toggle-flyer-form-btn">
+            ${ICONS.photo} <span>${ui.showFlyerForm || editingFlyer ? 'Close Flyer Form' : '+ Add Flyer'}</span>
+          </button>
+          <button type="button" class="dark-cta-btn" id="toggle-new-plan-btn">
+            ${ICONS.plus} <span>${ui.showNewPlanForm || editingPlan ? 'Close Price Form' : '+ Add Price'}</span>
+          </button>
+          <button type="button" class="outline-btn" id="toggle-tuition-editor">
+            ${ICONS.edit} <span>${ui.showTuitionEditor ? 'Close Settings' : 'Reg Fee & Contacts'}</span>
+          </button>
+        </div>
+      </section>
+    `
+        : ''
+    }
+
+    <!-- ADMIN FLYER UPLOADER / EDITOR -->
+    ${
+      superEdit && (ui.showFlyerForm || editingFlyer)
+        ? `
+      <form class="panel-card form-stack" id="upsert-flyer-form">
+        <div class="panel-head">
+          <h2 class="panel-title">${editingFlyer ? `Edit Flyer · ${esc(editingFlyer.title)}` : 'Upload & Publish New Flyer'}</h2>
+          <button type="button" class="outline-btn" id="cancel-flyer-edit">Cancel</button>
+        </div>
+        <input type="hidden" name="id" value="${esc(editingFlyer?.id || '')}" />
+        <div class="form-grid-2">
+          <input class="field-input" name="title" value="${esc(editingFlyer?.title || '')}" placeholder="Flyer Title (e.g. 2026 Tuition & Registration Flyer)" required />
+          <input class="field-input" name="badge" value="${esc(editingFlyer?.badge || 'Official Flyer')}" placeholder="Badge (e.g. Official Flyer / Exam Promo)" required />
+        </div>
+        <input class="field-input" name="subtitle" value="${esc(editingFlyer?.subtitle || '')}" placeholder="Short caption (e.g. Breakthrough Std 4–6 · JCE · BGCSE · Reg P100)" />
+
+        <div class="media-upload-zone">
+          <div class="media-upload-head">
+            <div>
+              <strong style="font-size:0.86rem;">Select Flyer Image or PDF Poster</strong>
+              <p class="row-sub">Upload JPG, PNG, WebP, or PDF — learners & parents can tap to zoom in full-screen.</p>
+            </div>
+            <label class="gold-cta-btn upload-picker-label">
+              ${ICONS.paperclip}
+              <span>${ui.uploadingTarget === 'flyer' ? 'Uploading...' : activeFlyerAttachment ? 'Replace File' : 'Choose Flyer'}</span>
+              <input
+                type="file"
+                id="flyer-media-input"
+                accept="image/*,application/pdf,.pdf"
+                hidden
+              />
+            </label>
+          </div>
+          ${activeFlyerAttachment ? renderAttachmentGalleryHTML([activeFlyerAttachment]) : ''}
+        </div>
+
+        <button class="dark-cta-btn" type="submit">${ICONS.check} ${editingFlyer ? 'Update Flyer' : 'Publish Flyer Live'}</button>
+      </form>
+    `
+        : ''
+    }
+
+    <!-- ADMIN PRICE PACKAGE CREATOR / EDITOR -->
     ${
       superEdit && (ui.showNewPlanForm || editingPlan)
         ? `
       <form class="panel-card form-stack" id="upsert-plan-form">
         <div class="panel-head">
-          <h2 class="panel-title">${editingPlan ? `Edit Package · ${esc(editingPlan.name)}` : 'Add Tuition Package'}</h2>
+          <h2 class="panel-title">${editingPlan ? `Edit Price Package · ${esc(editingPlan.name)}` : 'Add New Price Package / Subject Rate'}</h2>
           <button type="button" class="outline-btn" id="cancel-plan-edit">Cancel</button>
         </div>
         <input type="hidden" name="id" value="${esc(editingPlan?.id || '')}" />
         <div class="form-grid-2">
-          <input class="field-input" name="name" value="${esc(editingPlan?.name || '')}" placeholder="Package Name" required />
-          <input class="field-input" name="price" value="${esc(editingPlan?.price || '')}" placeholder="Price (e.g. R650 / month)" required />
+          <input class="field-input" name="name" value="${esc(editingPlan?.name || '')}" placeholder="Level / Package Name (e.g. BGCSE Form 4 Best 6)" required />
+          <input class="field-input" name="price" value="${esc(editingPlan?.price || '')}" placeholder="Displayed Price in Pula (e.g. P750.00 / month)" required />
         </div>
         <div class="form-grid-2">
-          <input class="field-input" type="number" name="numericRate" value="${esc(editingPlan?.numericRate || 650)}" placeholder="Numeric Rate" required />
-          <input class="field-input" name="badge" value="${esc(editingPlan?.badge || 'Grades 8 – 12')}" placeholder="Badge" required />
+          <input class="field-input" type="number" name="numericRate" value="${esc(editingPlan?.numericRate || 500)}" placeholder="Numeric Pula Amount (e.g. 500)" required />
+          <input class="field-input" name="badge" value="${esc(editingPlan?.badge || 'Official Rate')}" placeholder="Badge (e.g. Standard 4 – 6 / JCE / Most Popular)" required />
         </div>
-        <textarea class="field-input" name="featuresRaw" rows="3" placeholder="Features (one per line)..." required>${esc(
+        <textarea class="field-input" name="featuresRaw" rows="4" placeholder="Subject prices & package details (one line per bullet)..." required>${esc(
           (editingPlan?.features || []).join('\n')
         )}</textarea>
-        <button class="dark-cta-btn" type="submit">${ICONS.check} Save Package</button>
+        <button class="dark-cta-btn" type="submit">${ICONS.check} Save Price Package</button>
       </form>
     `
         : ''
     }
 
+    <!-- ADMIN REGISTRATION FEE, PROMO BANNER & CONTACTS EDITOR -->
     ${
       superEdit && ui.showTuitionEditor
         ? `
       <form class="panel-card form-stack" id="update-tuition-form">
         <div class="panel-head">
-          <h2 class="panel-title">Edit Headline & Contacts</h2>
+          <h2 class="panel-title">Edit Registration Fee, Banner & Francistown Contacts</h2>
           <button type="button" class="outline-btn" id="cancel-tuition-editor">Cancel</button>
         </div>
-        <input class="field-input" name="headline" value="${esc(info.headline || '')}" placeholder="Headline" required />
-        <textarea class="field-input" name="intro" rows="2" placeholder="Intro..." required>${esc(info.intro || '')}</textarea>
         <div class="form-grid-2">
-          <input class="field-input" name="phone" value="${esc(contacts.phone)}" placeholder="Phone" required />
-          <input class="field-input" name="whatsapp" value="${esc(contacts.whatsapp)}" placeholder="WhatsApp" required />
+          <input class="field-input" name="headline" value="${esc(info.headline || '')}" placeholder="Main Headline" required />
+          <input class="field-input" name="registration_fee" value="${esc(regFeeLabel)}" placeholder="Registration Fee (e.g. P100)" required />
+        </div>
+        <input class="field-input" name="promo_banner" value="${esc(promoBanner)}" placeholder="Highlight Banner (e.g. WE OFFER FREE EXTRA LESSONS!)" required />
+        <textarea class="field-input" name="intro" rows="2" placeholder="Intro description..." required>${esc(info.intro || '')}</textarea>
+        <div class="form-grid-2">
+          <input class="field-input" name="phone" value="${esc(contacts.phone)}" placeholder="Phone (e.g. 77 329 788)" required />
+          <input class="field-input" name="whatsapp" value="${esc(contacts.whatsapp)}" placeholder="WhatsApp (e.g. +267 77 329 788)" required />
         </div>
         <div class="form-grid-2">
-          <input class="field-input" name="email" value="${esc(contacts.email)}" placeholder="Email" required />
-          <input class="field-input" name="hours" value="${esc(contacts.hours)}" placeholder="Hours" required />
+          <input class="field-input" name="email" value="${esc(contacts.email)}" placeholder="Email (e.g. i-tutor@gmail.com)" required />
+          <input class="field-input" name="hours" value="${esc(contacts.hours)}" placeholder="Operating Hours" required />
         </div>
-        <input class="field-input" name="address" value="${esc(contacts.address)}" placeholder="Campus Address" required />
-        <button class="dark-cta-btn" type="submit">${ICONS.check} Save Details</button>
+        <input class="field-input" name="address" value="${esc(contacts.address)}" placeholder="Location (e.g. Francistown, Minestone Plot No. 1589, Botswana)" required />
+        <button class="dark-cta-btn" type="submit">${ICONS.check} Save Settings</button>
       </form>
     `
         : ''
     }
 
+    <!-- OFFICIAL FLYERS & POSTERS GALLERY -->
+    ${
+      flyers.length > 0
+        ? `
+      <section class="panel-card">
+        <div class="panel-head">
+          <div>
+            <h2 class="panel-title">Official Flyers & Announcements (${flyers.length})</h2>
+            <p class="row-sub">Tap any flyer to open & zoom full-screen inside the built-in viewer.</p>
+          </div>
+        </div>
+
+        <div class="flyers-showcase-grid">
+          ${flyers
+            .map((fl) => {
+              const att = fl.attachment || {};
+              const payloadJson = esc(JSON.stringify(att));
+              const isImg = (att.kind || 'image') === 'image' && (att.thumbUrl || att.url);
+              return `
+                <article class="flyer-poster-card">
+                  <button
+                    type="button"
+                    class="flyer-poster-preview"
+                    data-open-media="${payloadJson}"
+                    title="Tap to open ${esc(fl.title)} in full-screen viewer"
+                  >
+                    ${
+                      isImg
+                        ? `<img src="${esc(att.url || att.thumbUrl)}" alt="${esc(fl.title)}" class="flyer-poster-img" loading="lazy" />`
+                        : `<div class="flyer-pdf-placeholder">${ICONS.pdf}<span>Tap to Open PDF Flyer</span></div>`
+                    }
+                    <span class="flyer-zoom-hint">${ICONS.zoomIn} Tap to Zoom Full-Screen</span>
+                  </button>
+                  <div class="flyer-poster-foot">
+                    <div style="min-width:0;flex:1;">
+                      <span class="pill-badge">${esc(fl.badge || 'Official Flyer')}</span>
+                      <h3 class="panel-title" style="margin-top:0.3rem;">${esc(fl.title)}</h3>
+                      ${fl.subtitle ? `<p class="row-sub">${esc(fl.subtitle)}</p>` : ''}
+                    </div>
+                    ${
+                      superEdit
+                        ? renderMoreMenu(`
+                            <button type="button" class="more-menu-item" data-edit-flyer="${esc(fl.id)}">${ICONS.edit} Edit Flyer</button>
+                            <button type="button" class="more-menu-item is-danger" data-del-flyer="${esc(fl.id)}">${ICONS.trash} Delete Flyer</button>
+                          `)
+                        : ''
+                    }
+                  </div>
+                </article>
+              `;
+            })
+            .join('')}
+        </div>
+      </section>
+    `
+        : ''
+    }
+
+    <!-- REAL BOTSWANA PULA TUITION PACKAGES & SUBJECT PRICES -->
     <div class="pricing-cards-grid">
       ${plans
         .map(
@@ -2385,10 +2555,10 @@ function buildTuitionContactsStage(user) {
               ${
                 superEdit
                   ? renderMoreMenu(`
-                      <button type="button" class="more-menu-item" data-edit-plan="${esc(plan.id)}">${ICONS.edit} Edit Plan</button>
+                      <button type="button" class="more-menu-item" data-edit-plan="${esc(plan.id)}">${ICONS.edit} Edit Price</button>
                       ${
                         plans.length > 1
-                          ? `<button type="button" class="more-menu-item is-danger" data-del-plan="${esc(plan.id)}">${ICONS.trash} Remove Plan</button>`
+                          ? `<button type="button" class="more-menu-item is-danger" data-del-plan="${esc(plan.id)}">${ICONS.trash} Remove Price</button>`
                           : ''
                       }
                     `)
@@ -2401,52 +2571,71 @@ function buildTuitionContactsStage(user) {
               ${(plan.features || []).map((f) => `<li>${esc(f)}</li>`).join('')}
             </ul>
           </div>
-          <a href="#enquiry-form-card" class="outline-btn" style="text-decoration:none;">Enquire</a>
+          <a href="#enquiry-form-card" class="outline-btn" style="text-decoration:none;">Enquire · Reg ${esc(regFeeLabel)}</a>
         </article>
       `
         )
         .join('')}
     </div>
 
+    <!-- BOTSWANA PULA FEE ESTIMATOR & FRANCISTOWN CONTACTS -->
     <div class="two-col-grid">
       <section class="panel-card">
         <div class="panel-head">
-          <h2 class="panel-title">Monthly Fee Estimator & Contacts</h2>
+          <h2 class="panel-title">Botswana Pula Fee Calculator & Contacts</h2>
+          <span class="pill-badge">Reg: ${esc(regFeeLabel)}</span>
         </div>
+
+        <label class="row-sub" style="font-weight:750;">Select Level or Subject Package:</label>
         <select class="field-input" id="calc-rate-select">
-          <option value="220" ${ui.feeCalcRate === 220 ? 'selected' : ''}>1-on-1 Private Mentoring (R220 / hr)</option>
-          <option value="120" ${ui.feeCalcRate === 120 ? 'selected' : ''}>Small-Group Subject Pod (R120 / session)</option>
-          <option value="90" ${ui.feeCalcRate === 90 ? 'selected' : ''}>Remote Pack + Check-In (R90 / session)</option>
+          ${BOTSWANA_CALC_OPTIONS.map(
+            (opt, idx) =>
+              `<option value="${opt.rate}" data-opt-idx="${idx}" ${
+                ui.feeCalcMonthly === opt.rate && idx === BOTSWANA_CALC_OPTIONS.findIndex((o) => o.rate === ui.feeCalcMonthly)
+                  ? 'selected'
+                  : ''
+              }>${esc(opt.label)}</option>`
+          ).join('')}
         </select>
 
-        <label style="font-size:0.8rem;font-weight:750;">Sessions per week: <strong>${ui.feeCalcSessions}</strong></label>
-        <input type="range" min="1" max="6" value="${ui.feeCalcSessions}" id="calc-sessions-range" />
+        <label class="checklist-row" style="cursor:pointer;">
+          <input
+            type="checkbox"
+            id="calc-include-reg"
+            ${ui.feeCalcIncludeReg ? 'checked' : ''}
+            style="accent-color:var(--gold-deep);width:16px;height:16px;"
+          />
+          <span>Include once-off Registration Fee (<strong>+${esc(regFeeLabel)}</strong>)</span>
+        </label>
 
-        <div class="worksheet-box" style="display:flex;justify-content:space-between;align-items:center;">
-          <span>4-Week Estimate:</span>
-          <strong style="font-size:1.25rem;">R${monthlyEst.toLocaleString()} / mo</strong>
+        <div class="worksheet-box" style="display:flex;flex-direction:column;gap:0.28rem;">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;">
+            <span>${ui.feeCalcIncludeReg ? `First Month (with ${esc(regFeeLabel)} Registration):` : 'Monthly Tuition:'}</span>
+            <strong style="font-size:1.25rem;">P${firstMonthTotal.toLocaleString()}</strong>
+          </div>
+          <span class="row-sub">Ongoing monthly tuition: <strong>P${ui.feeCalcMonthly.toLocaleString()} / month</strong> · Free extra lessons included!</span>
         </div>
 
-        <div style="border-top:1px solid var(--border-warm);padding-top:0.8rem;display:flex;flex-direction:column;gap:0.34rem;font-size:0.84rem;">
-          <div>📞 <strong>${esc(contacts.phone)}</strong> · WhatsApp <strong>${esc(contacts.whatsapp)}</strong></div>
-          <div>✉️ <strong>${esc(contacts.email)}</strong></div>
-          <div>📍 ${esc(contacts.address)} (${esc(contacts.hours)})</div>
+        <div style="border-top:1px solid var(--border-warm);padding-top:0.8rem;display:flex;flex-direction:column;gap:0.36rem;font-size:0.84rem;">
+          <div>📍 <strong>${esc(contacts.address || 'Francistown, Minestone Plot No. 1589, Botswana')}</strong></div>
+          <div>📞 Contact Us: <strong>${esc(contacts.phone || '77 329 788')}</strong></div>
+          <div>✉️ Email: <strong>${esc(contacts.email || 'i-tutor@gmail.com')}</strong></div>
         </div>
       </section>
 
       <section class="panel-card" id="enquiry-form-card">
-        <h2 class="panel-title">Send Admissions Enquiry</h2>
-        <p class="row-sub">Our team responds swiftly and can enroll learners directly.</p>
+        <h2 class="panel-title">Register / Send Tuition Enquiry</h2>
+        <p class="row-sub">Select your level (Breakthrough Std 4–6, JCE, or BGCSE / IGCSE) — Admissions responds promptly.</p>
         <form class="form-stack" id="public-enquiry-form">
-          <input class="field-input" name="full_name" placeholder="Full Name (Parent or Student)" required />
-          <input class="field-input" name="contact_detail" placeholder="Phone / WhatsApp or Email" required />
+          <input class="field-input" name="full_name" placeholder="Student or Parent Full Name" required />
+          <input class="field-input" name="contact_detail" placeholder="Phone / WhatsApp (e.g. 77 329 788) or Email" required />
           <div class="form-grid-2">
-            <input class="field-input" name="student_grade" placeholder="Grade (e.g. Grade 12)" required />
+            <input class="field-input" name="student_grade" placeholder="Level (e.g. Std 5 / JCE / Form 4)" required />
             <select class="field-input" name="selected_plan">
               ${plans.map((p) => `<option value="${esc(p.name)}">${esc(p.name)} (${esc(p.price)})</option>`).join('')}
             </select>
           </div>
-          <textarea class="field-input" name="message" rows="3" placeholder="Subjects or goals..." required></textarea>
+          <textarea class="field-input" name="message" rows="3" placeholder="Subjects needed (e.g. Mathematics, Double Science, Setswana, English)..." required></textarea>
           <button class="dark-cta-btn" type="submit">${ICONS.send} Send Enquiry</button>
         </form>
       </section>
@@ -2501,7 +2690,7 @@ function renderApp(opts = {}) {
     { id: 'timetable', label: 'Schedule & Exams', icon: ICONS.timetable, badge: '' },
     { id: 'toolkit', label: 'Study Toolkit', icon: ICONS.toolkit, badge: '' },
     { id: 'broadcasts', label: 'Notices & Attendance', icon: ICONS.broadcast, badge: '' },
-    { id: 'tuition', label: 'Tuition & Contacts', icon: ICONS.tuition, badge: '' },
+    { id: 'tuition', label: 'Flyers & Prices', icon: ICONS.tuition, badge: '' },
     { id: 'account', label: user.role === 'visitor' ? 'Join / Sign In' : 'My Account', icon: ICONS.user, badge: '' }
   ];
 
@@ -2718,7 +2907,7 @@ function renderApp(opts = {}) {
       </div>
     </aside>
 
-    <!-- CLEAN 5-TAB MOBILE BOTTOM BAR (HUB · HOMEWORK · CHATS · TOOLKIT · MENU) -->
+    <!-- CLEAN 4-TAB MOBILE BOTTOM BAR (HUB · HOMEWORK · CHATS · PRICES — NO BOTTOM-CORNER MENU BUTTON) -->
     <nav class="mobile-tabbar" aria-label="Mobile bottom navigation">
       <button class="mob-tab-btn ${ui.view === 'overview' ? 'is-active' : ''}" data-nav="overview">
         ${ICONS.home}<span>Hub</span>
@@ -2729,11 +2918,8 @@ function renderApp(opts = {}) {
       <button class="mob-tab-btn ${ui.view === 'messages' ? 'is-active' : ''}" data-nav="messages">
         ${ICONS.messages}<span>Chats</span>
       </button>
-      <button class="mob-tab-btn ${ui.view === 'toolkit' ? 'is-active' : ''}" data-nav="toolkit">
-        ${ICONS.toolkit}<span>Toolkit</span>
-      </button>
-      <button class="mob-tab-btn" id="mob-tab-more">
-        ${ICONS.menu}<span>Menu</span>
+      <button class="mob-tab-btn ${ui.view === 'tuition' ? 'is-active' : ''}" data-nav="tuition">
+        ${ICONS.tuition}<span>Prices</span>
       </button>
     </nav>
 
@@ -2834,7 +3020,6 @@ function bindWorkspaceEvents(user) {
   };
 
   document.getElementById('btn-open-mobile-drawer')?.addEventListener('click', openDrawer);
-  document.getElementById('mob-tab-more')?.addEventListener('click', openDrawer);
   document.getElementById('btn-close-mobile-drawer')?.addEventListener('click', closeDrawer);
   document.getElementById('mobile-drawer-backdrop')?.addEventListener('click', closeDrawer);
 
@@ -4113,43 +4298,148 @@ function bindWorkspaceEvents(user) {
     });
   }
 
-  // --- TUITION PACKAGES & CONTACTS EVENTS ---
+  // --- FLYERS, BOTSWANA PULA PRICES & CONTACTS EVENTS ---
   document.getElementById('calc-rate-select')?.addEventListener('change', (e) => {
-    ui.feeCalcRate = Number(e.target.value);
-    renderApp();
+    ui.feeCalcMonthly = Number(e.target.value) || 500;
+    renderApp({ preserveScroll: true });
   });
 
-  document.getElementById('calc-sessions-range')?.addEventListener('input', (e) => {
-    ui.feeCalcSessions = Number(e.target.value);
-    renderApp();
+  document.getElementById('calc-include-reg')?.addEventListener('change', (e) => {
+    ui.feeCalcIncludeReg = Boolean(e.target.checked);
+    renderApp({ preserveScroll: true });
   });
+
+  // Flyer Upload / Edit / Delete (Admin & Admissions)
+  document.getElementById('toggle-flyer-form-btn')?.addEventListener('click', () => {
+    if (ui.editingFlyerId || ui.showFlyerForm) {
+      ui.editingFlyerId = null;
+      ui.showFlyerForm = false;
+      ui.stagedFlyerAttachment = null;
+    } else {
+      ui.showFlyerForm = true;
+      ui.showNewPlanForm = false;
+      ui.showTuitionEditor = false;
+      ui.stagedFlyerAttachment = null;
+    }
+    renderApp({ preserveScroll: true });
+  });
+
+  document.getElementById('cancel-flyer-edit')?.addEventListener('click', () => {
+    ui.editingFlyerId = null;
+    ui.showFlyerForm = false;
+    ui.stagedFlyerAttachment = null;
+    renderApp({ preserveScroll: true });
+  });
+
+  document.getElementById('flyer-media-input')?.addEventListener('change', async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    ui.uploadingTarget = 'flyer';
+    renderApp({ preserveScroll: true });
+    const uploaded = await uploadAndCacheMediaFile(file, { simulateOffline: isOfflineActive() });
+    ui.uploadingTarget = '';
+    ui.stagedFlyerAttachment = uploaded;
+    renderApp({ preserveScroll: true });
+    showToast('Flyer file ready to publish!');
+  });
+
+  document.querySelectorAll('[data-edit-flyer]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.getAttribute('data-edit-flyer');
+      const target = (vaultState.tuitionInfo.flyers || []).find((f) => f.id === id);
+      ui.editingFlyerId = id;
+      ui.showFlyerForm = false;
+      ui.stagedFlyerAttachment = target?.attachment || null;
+      renderApp();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  });
+
+  document.querySelectorAll('[data-del-flyer]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.getAttribute('data-del-flyer');
+      const nextFlyers = (vaultState.tuitionInfo.flyers || []).filter((f) => f.id !== id);
+      performActionAndSync(
+        'UPDATE_TUITION_INFO',
+        { flyers: nextFlyers },
+        'Flyer removed!'
+      );
+    });
+  });
+
+  const upsertFlyerForm = document.getElementById('upsert-flyer-form');
+  if (upsertFlyerForm) {
+    upsertFlyerForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const fd = new FormData(upsertFlyerForm);
+      const existingId = fd.get('id');
+      const prev = existingId ? (vaultState.tuitionInfo.flyers || []).find((f) => f.id === existingId) : null;
+      const att = ui.stagedFlyerAttachment || prev?.attachment;
+      if (!att) {
+        showToast('Please select a flyer image or PDF first.');
+        return;
+      }
+      const flyerObj = {
+        id: existingId || `flyer-${Date.now()}`,
+        title: fd.get('title'),
+        badge: fd.get('badge') || 'Official Flyer',
+        subtitle: fd.get('subtitle') || '',
+        attachment: att,
+        created_at: prev?.created_at || new Date().toISOString()
+      };
+      const currentFlyers = [...(vaultState.tuitionInfo.flyers || [])];
+      const idx = currentFlyers.findIndex((f) => f.id === flyerObj.id);
+      if (idx >= 0) currentFlyers[idx] = flyerObj;
+      else currentFlyers.unshift(flyerObj);
+
+      ui.editingFlyerId = null;
+      ui.showFlyerForm = false;
+      ui.stagedFlyerAttachment = null;
+      performActionAndSync(
+        'UPDATE_TUITION_INFO',
+        { flyers: currentFlyers },
+        existingId ? 'Flyer updated!' : 'New flyer published live!'
+      );
+    });
+  }
 
   document.getElementById('toggle-tuition-editor')?.addEventListener('click', () => {
     ui.showTuitionEditor = !ui.showTuitionEditor;
-    renderApp();
+    if (ui.showTuitionEditor) {
+      ui.showFlyerForm = false;
+      ui.showNewPlanForm = false;
+    }
+    renderApp({ preserveScroll: true });
   });
 
   document.getElementById('cancel-tuition-editor')?.addEventListener('click', () => {
     ui.showTuitionEditor = false;
-    renderApp();
+    renderApp({ preserveScroll: true });
   });
 
   document.getElementById('toggle-new-plan-btn')?.addEventListener('click', () => {
-    ui.editingPlanId = null;
-    ui.showNewPlanForm = !ui.showNewPlanForm;
-    renderApp();
+    if (ui.editingPlanId || ui.showNewPlanForm) {
+      ui.editingPlanId = null;
+      ui.showNewPlanForm = false;
+    } else {
+      ui.showNewPlanForm = true;
+      ui.showFlyerForm = false;
+      ui.showTuitionEditor = false;
+    }
+    renderApp({ preserveScroll: true });
   });
 
   document.getElementById('cancel-plan-edit')?.addEventListener('click', () => {
     ui.editingPlanId = null;
     ui.showNewPlanForm = false;
-    renderApp();
+    renderApp({ preserveScroll: true });
   });
 
   document.querySelectorAll('[data-edit-plan]').forEach((btn) => {
     btn.addEventListener('click', () => {
       ui.editingPlanId = btn.getAttribute('data-edit-plan');
       ui.showNewPlanForm = false;
+      ui.showFlyerForm = false;
       renderApp();
       window.scrollTo({ top: 0, behavior: 'smooth' });
     });
@@ -4161,13 +4451,8 @@ function bindWorkspaceEvents(user) {
       const nextPlans = (vaultState.tuitionInfo.plans || []).filter((p) => p.id !== id);
       performActionAndSync(
         'UPDATE_TUITION_INFO',
-        {
-          headline: vaultState.tuitionInfo.headline,
-          intro: vaultState.tuitionInfo.intro,
-          plans: nextPlans,
-          contacts: vaultState.tuitionInfo.contacts
-        },
-        'Package removed!'
+        { plans: nextPlans },
+        'Price package removed!'
       );
     });
   });
@@ -4186,7 +4471,7 @@ function bindWorkspaceEvents(user) {
         id: existingId || `plan-${Date.now()}`,
         name: fd.get('name'),
         price: fd.get('price'),
-        numericRate: Number(fd.get('numericRate')) || 450,
+        numericRate: Number(fd.get('numericRate')) || 500,
         badge: fd.get('badge'),
         features
       };
@@ -4199,13 +4484,8 @@ function bindWorkspaceEvents(user) {
       ui.showNewPlanForm = false;
       performActionAndSync(
         'UPDATE_TUITION_INFO',
-        {
-          headline: vaultState.tuitionInfo.headline,
-          intro: vaultState.tuitionInfo.intro,
-          plans: currentPlans,
-          contacts: vaultState.tuitionInfo.contacts
-        },
-        'Tuition package saved!'
+        { plans: currentPlans },
+        existingId ? 'Price package updated!' : 'New price package added!'
       );
     });
   }
@@ -4220,8 +4500,9 @@ function bindWorkspaceEvents(user) {
         'UPDATE_TUITION_INFO',
         {
           headline: fd.get('headline'),
+          registration_fee: fd.get('registration_fee') || 'P100',
+          promo_banner: fd.get('promo_banner') || '',
           intro: fd.get('intro'),
-          plans: vaultState.tuitionInfo.plans,
           contacts: {
             phone: fd.get('phone'),
             whatsapp: fd.get('whatsapp'),
@@ -4230,7 +4511,7 @@ function bindWorkspaceEvents(user) {
             address: fd.get('address')
           }
         },
-        'Public details updated!'
+        'Registration fee & contacts updated!'
       );
     });
   }

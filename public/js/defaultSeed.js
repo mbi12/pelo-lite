@@ -1,9 +1,11 @@
 export const SUBJECT_LIST = [
   'Mathematics',
+  'Double Science',
   'Physical Sciences',
+  'Setswana',
+  'English',
   'Accounting',
-  'Life Sciences',
-  'English'
+  'Life Sciences'
 ];
 
 export function createDefaultSnapshot() {
@@ -134,15 +136,15 @@ export function createDefaultSnapshot() {
         name: 'Kgomotso Dlamini',
         role: 'admin',
         subtitle: 'i-tutor Principal & Super Admin',
-        grade: 'All Grades',
+        grade: 'All Levels',
         pin: '1234',
-        email: 'admin@i-tutor.academy',
-        phone: '+27 11 482 9104',
+        email: 'i-tutor@gmail.com',
+        phone: '77 329 788',
         status: 'active',
         subjects: ['All Subjects'],
         selected_plan: 'Executive Admin',
         linked_student_id: '',
-        notes: 'Full control over admissions, accounts & academy content.'
+        notes: 'Full control over flyers, prices, admissions, accounts & academy content.'
       },
       {
         id: 'app-siphesihle',
@@ -722,65 +724,90 @@ export function createDefaultSnapshot() {
       }
     ],
     tuitionInfo: {
-      headline: 'Confidence in learning — Transparent Tuition & Expert Mentoring',
+      headline: 'Students Improve Through Tutoring.',
       intro:
-        'Explore our flexible monthly and 1-on-1 tuition packages, calculate estimated sessions, or apply for an account directly in the app.',
+        'Better understanding. Better results. Brighter future. Free extra lessons & homework assistance included!',
+      registration_fee: 'P100',
+      promo_banner:
+        'WE OFFER FREE EXTRA LESSONS! — Homework assistance included · Experienced & caring tutors · Personalized attention',
       plans: [
         {
-          id: 'plan-single',
-          name: 'Single Subject Boost',
-          price: 'R450 / month',
-          numericRate: 450,
-          badge: 'Grades 8 – 12',
+          id: 'plan-breakthrough',
+          name: 'Breakthrough Classes (Standard 4 – 6)',
+          price: 'P500 / month',
+          numericRate: 500,
+          badge: 'Standard 4 – 6',
           features: [
-            '2 Afternoon Tuition Classes per week',
-            'Offline Timetable & Remote Teacher Assignments',
-            'Direct Teacher Chat & Student Study Groups'
+            'Setswana | English | Mathematics | Homework Support',
+            'Standard 4 – 6: P500 a month',
+            'All Subjects Package: P600 a month',
+            'P100 at registration · Free extra lessons included'
           ]
         },
         {
-          id: 'plan-bundle',
-          name: '3-Subject Core Package',
-          price: 'R1,100 / month',
-          numericRate: 1100,
+          id: 'plan-jce',
+          name: 'JCE Level (Junior Certificate)',
+          price: 'From P200 / month',
+          numericRate: 600,
+          badge: 'JCE Level',
+          features: [
+            '1 Subject: P200 / month',
+            'Science & Mathematics: P250 each',
+            'Science & Mathematics Combo: P400 / month',
+            'Core Subjects (5): P600 / month',
+            'Core Subjects + 1 Optional + 2 Practicals: P1,300 / month'
+          ]
+        },
+        {
+          id: 'plan-bgcse-best6',
+          name: 'BGCSE / IGCSE — Form 4 (Best 6)',
+          price: 'P750.00 / month',
+          numericRate: 750,
           badge: 'Most Popular',
           features: [
-            'Choose any 3 subjects (Maths, Sciences, Accounting, English)',
-            'Saturday Exam Clinics & Full Offline Study Packs',
-            'Marked Remote Assignments + Parent Broadcast Updates'
+            'Form 4 Students — Best 6 Subjects Package (P750.00)',
+            'Free extra lessons & homework assistance included',
+            'Experienced and caring tutors · Personalized attention',
+            'P100 once-off registration fee'
           ]
         },
         {
-          id: 'plan-unlimited',
-          name: 'Full Exam Mastery (All Subjects)',
-          price: 'R1,550 / month',
-          numericRate: 1550,
-          badge: 'Complete Support',
+          id: 'plan-bgcse-subjects',
+          name: 'BGCSE / IGCSE Subject Rates',
+          price: 'P200 – P450 / month',
+          numericRate: 300,
+          badge: 'Part-Time & Full-Time',
           features: [
-            'Unlimited Subject Classes + Past-Paper Boot Camps',
-            'Priority 1-on-1 Teacher Messaging & Homework Grading',
-            'Dedicated Parent Progress & Attendance Alerts'
-          ]
-        },
-        {
-          id: 'plan-private',
-          name: '1-on-1 Private Mentoring',
-          price: 'R220 / hour',
-          numericRate: 220,
-          badge: 'Flexible',
-          features: [
-            'Personalised individual sessions (In-person or Remote)',
-            'Custom offline worksheets tailored to weak topics',
-            'Flexible weekday or weekend scheduling'
+            'Double Science — Part-time: P400  |  Full-time: P450',
+            'Mathematics — Part-time: P250  |  Full-time: P300',
+            'Other Subjects — Part-time: P200  |  Full-time: P250',
+            'P100 once-off registration fee'
           ]
         }
       ],
+      flyers: [
+        {
+          id: 'flyer-official-2026',
+          title: 'Official i-tutor Tuition & Registration Flyer',
+          subtitle: 'Breakthrough (Std 4–6) · JCE · BGCSE / IGCSE · Registration Fee P100',
+          badge: 'Official Flyer',
+          attachment: {
+            id: 'att-flyer-official-2026',
+            name: 'i-tutor-Official-Prices-Flyer.jpg',
+            kind: 'image',
+            mime: 'image/jpeg',
+            size: 166700,
+            url: '/assets/itutor-official-flyer.jpg'
+          },
+          created_at: '2026-11-26T04:32:00.000Z'
+        }
+      ],
       contacts: {
-        phone: '+27 11 482 9104',
-        whatsapp: '+27 72 640 1189',
-        email: 'admissions@i-tutor.academy',
-        address: 'Suite 14, Sunrise Learning House, 48 Oxford Road',
-        hours: 'Mon – Fri: 13:00 – 18:30  |  Sat: 08:30 – 14:00'
+        phone: '77 329 788',
+        whatsapp: '+267 77 329 788',
+        email: 'i-tutor@gmail.com',
+        address: 'Francistown, Minestone Plot No. 1589, Botswana',
+        hours: 'Mon – Fri: Afternoon & Extra Lessons  |  Sat: Revision Sessions'
       }
     },
     enquiries: []

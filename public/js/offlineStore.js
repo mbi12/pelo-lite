@@ -1,8 +1,8 @@
 import { createDefaultSnapshot, SUBJECT_LIST } from './defaultSeed.js';
 
-const VAULT_KEY = 'itutor_offline_vault_v5';
+const VAULT_KEY = 'itutor_offline_vault_v6';
 const PERSONAL_KEY = 'itutor_personal_study_v4';
-const OUTBOX_KEY = 'itutor_offline_outbox_v5';
+const OUTBOX_KEY = 'itutor_offline_outbox_v6';
 const SESSION_KEY = 'itutor_session_v4';
 
 const IDB_NAME = 'itutor_media_idb_v1';
@@ -585,7 +585,10 @@ export function dispatchOfflineAction(vault, action) {
         ...vault.tuitionInfo,
         ...(p.headline !== undefined ? { headline: p.headline } : {}),
         ...(p.intro !== undefined ? { intro: p.intro } : {}),
+        ...(p.registration_fee !== undefined ? { registration_fee: p.registration_fee } : {}),
+        ...(p.promo_banner !== undefined ? { promo_banner: p.promo_banner } : {}),
         ...(p.plans !== undefined ? { plans: p.plans } : {}),
+        ...(p.flyers !== undefined ? { flyers: p.flyers } : {}),
         ...(p.contacts !== undefined ? { contacts: p.contacts } : {})
       };
       break;
@@ -603,9 +606,16 @@ export function dispatchOfflineAction(vault, action) {
 async function flushQueuedBlobsInOutbox(outbox) {
   let changed = false;
   for (const act of outbox) {
-    const atts = act?.payload?.attachments;
-    if (!Array.isArray(atts) || !atts.length) continue;
-    for (const att of atts) {
+    const attachmentTargets = [];
+    if (Array.isArray(act?.payload?.attachments)) {
+      attachmentTargets.push(...act.payload.attachments);
+    }
+    if (Array.isArray(act?.payload?.flyers)) {
+      for (const fl of act.payload.flyers) {
+        if (fl?.attachment) attachmentTargets.push(fl.attachment);
+      }
+    }
+    for (const att of attachmentTargets) {
       if (!att.pendingUpload) continue;
       const cached = await getLocalMediaBlob(att.id);
       if (!cached?.blob) continue;
