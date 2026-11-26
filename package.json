@@ -2,20 +2,31 @@
   "name": "i-tutor-standalone",
   "version": "2.1.0",
   "type": "module",
-  "description": "i-tutor — Confidence in learning. Offline-first tuition app with media attachments & built-in PDF/Photo/Video opener.",
+  "description": "i-tutor \u2014 Confidence in learning. Offline-first tuition app with media attachments & built-in PDF/Photo/Video opener.",
   "main": "server.js",
   "scripts": {
     "start": "node scripts/prepare-vendor.mjs && node server.js",
     "dev": "node scripts/prepare-vendor.mjs && node server.js",
     "build": "node scripts/prepare-vendor.mjs",
-    "test": "node scripts/prepare-vendor.mjs && node --check server.js && node --check public/js/app.js && node --test test/*.test.js"
+    "test": "node scripts/prepare-vendor.mjs && node --check server.js && node --check public/js/app.js && node --test test/*.test.js",
+    "mobile:build": "node scripts/build-mobile.mjs",
+    "android:sync": "npm run mobile:build && cap sync android",
+    "android:open": "cap open android",
+    "android:apk": "npm run android:sync && cd android && ./gradlew assembleDebug"
   },
   "engines": {
     "node": ">=20.0.0"
   },
   "dependencies": {
+    "@capacitor/android": "^8.6.3",
+    "@capacitor/app": "^8.1.2",
+    "@capacitor/core": "^8.6.3",
     "express": "^4.21.2",
     "pdfjs-dist": "^5.0.0 || ^6.0.0",
     "web-push": "^4.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.6.3",
+    "esbuild": "^0.28.2"
   }
 }

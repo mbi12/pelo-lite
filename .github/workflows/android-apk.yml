@@ -1,0 +1,48 @@
+name: Android APK
+
+on:
+  push:
+    branches: ['arena/5d24545f-pelo-lite']
+    paths:
+      - 'android/**'
+      - 'public/**'
+      - 'scripts/**'
+      - 'package*.json'
+      - 'capacitor.config.json'
+      - '.github/workflows/android-apk.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    name: Build installable Android test APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+      - run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+      - run: npm ci
+      - run: npm test
+      - run: npm run android:sync
+      - name: Compile debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+      - name: Upload installable APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: itutor-android-debug-${{ github.run_number }}
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14

@@ -1,3 +1,4 @@
+import { isNativeApp, initializeNativeApp } from './nativeRuntime.js';
 import { getAlertSettings, saveAlertSettings, createMessageTracker, unlockNotificationAudio, playNotificationSound, showBrowserMessageAlert, getPushDevice, enableClosedAppNotifications, disableClosedAppNotifications } from './notifications.js';
 import { renderEmblemSVG, renderSunriseGaugeSVG, ICONS } from './emblem.js';
 import {
@@ -18,7 +19,7 @@ import {
 } from './offlineStore.js';
 import { openInAppMediaViewer, renderAttachmentGalleryHTML } from './mediaViewer.js';
 
-const SPLASH_DURATION_MS = 10000;
+const SPLASH_DURATION_MS = isNativeApp() ? 1000 : 10000;
 
 const LOADING_CAPTIONS = [
   { threshold: 0, text: 'Initializing i-tutor workspace...' },
@@ -2132,10 +2133,10 @@ function buildMyAccountStage(user) {
 
     <section class="panel-card form-stack" aria-label="Notification preferences">
       <h2 class="panel-title">Notifications & Sounds</h2>
-      <p class="row-sub">Get message alerts even when i-tutor is closed. On iPhone/iPad (iOS 16.4+), add i-tutor to your Home Screen and open it there first.</p>
+      <p class="row-sub">${isNativeApp() ? 'In-app alerts and sounds are available. Closed-app Android push is not configured yet; it requires Firebase setup.' : 'Get message alerts even when i-tutor is closed. On iPhone/iPad (iOS 16.4+), add i-tutor to your Home Screen and open it there first.'}</p>
       <label><input type="checkbox" data-alert-setting="enabled" ${getAlertSettings(user.id).enabled ? 'checked' : ''} /> New-message alerts</label>
       <label><input type="checkbox" data-alert-setting="sound" ${getAlertSettings(user.id).sound ? 'checked' : ''} /> Message sounds</label>
-      <label><input type="checkbox" data-alert-setting="browser" ${getAlertSettings(user.id).browser && getPushDevice()?.userId === user.id ? 'checked' : ''} /> Notify me when the app is closed (permission required)</label>
+      <label><input type="checkbox" ${isNativeApp() ? 'disabled' : ''} data-alert-setting="browser" ${getAlertSettings(user.id).browser && getPushDevice()?.userId === user.id ? 'checked' : ''} /> Notify me when the app is closed (permission required)</label>
       <button class="outline-btn" type="button" id="test-notification-sound">Test sound</button>
       <p class="row-sub">Lock-screen alerts hide message text. Your phone controls notification sounds; Silent Mode, Do Not Disturb, and browser restrictions still apply.</p>
     </section>
@@ -8153,7 +8154,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.addEventListener('pointerdown', unlockNotificationAudio, { passive: true });
   document.addEventListener('keydown', unlockNotificationAudio);
   const device = getPushDevice();
-  if (device && device.userId !== sessionState.currentUserId) {
+  if (!isNativeApp() && device && device.userId !== sessionState.currentUserId) {
     void disableClosedAppNotifications().catch(() => {});
   }
   const trackMessages = createMessageTracker();
@@ -8166,7 +8167,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('message-alert')?.remove();
     renderApp();
   };
-  navigator.serviceWorker?.addEventListener('message', (event) => {
+  if (!isNativeApp()) navigator.serviceWorker?.addEventListener('message', (event) => {
     if (event.data?.type === 'OPEN_MESSAGES') openAlertChat();
   });
   if (new URLSearchParams(location.search).get('view') === 'messages') ui.view = 'messages';
@@ -8212,7 +8213,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const rootEl = document.getElementById('app');
   if (!rootEl) return;
 
-  if ('serviceWorker' in navigator) {
+  if (!isNativeApp() && 'serviceWorker' in navigator) {
     let swRefreshed = false;
     const hadController = Boolean(navigator.serviceWorker.controller);
     navigator.serviceWorker.addEventListener('controllerchange', () => {
@@ -8222,7 +8223,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
     navigator.serviceWorker
-      .register('/sw.js?v=27', { updateViaCache: 'none' })
+      .register('/sw.js?v=28', { updateViaCache: 'none' })
       .then((reg) => reg.update().catch(() => {}))
       .catch(() => {});
   }
@@ -8292,6 +8293,21 @@ document.addEventListener('DOMContentLoaded', () => {
       backgroundSyncRunning = false;
     }
   };
+
+  void initializeNativeApp({
+    onResume: () => runLiveBackgroundSync(true),
+    onBack: (minimize) => {
+      if (ui.mobileChatThreadOpen && ui.view === 'messages') {
+        ui.mobileChatThreadOpen = false;
+        renderApp();
+      } else if (ui.view !== 'overview' && !ui.showAuthPortal) {
+        ui.view = 'overview';
+        renderApp();
+      } else {
+        minimize();
+      }
+    }
+  }).catch(() => {});
 
   window.addEventListener('online', () => {
     runLiveBackgroundSync(true);

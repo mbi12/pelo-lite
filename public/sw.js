@@ -1,15 +1,16 @@
-const CACHE_NAME = 'itutor-standalone-v27';
+const CACHE_NAME = 'itutor-standalone-v28';
 const OFFLINE_ASSETS = [
   '/',
   '/index.html',
-  '/css/styles.css?v=27',
+  '/css/styles.css?v=28',
   '/css/styles.css',
-  '/js/app.js?v=27',
+  '/js/app.js?v=28',
   '/js/app.js',
   '/js/emblem.js',
   '/js/mediaViewer.js',
   '/js/offlineStore.js',
   '/js/notifications.js',
+  '/js/nativeRuntime.js',
   '/js/defaultSeed.js',
   '/vendor/pdfjs/pdf.min.js',
   '/vendor/pdfjs/pdf.worker.min.js',

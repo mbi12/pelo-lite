@@ -1,3 +1,4 @@
+import { apiFetch, resolveApiUrl } from './nativeRuntime.js';
 import { createDefaultSnapshot, SUBJECT_LIST } from './defaultSeed.js';
 
 const VAULT_KEY = 'itutor_offline_vault_v9';
@@ -138,7 +139,7 @@ async function createImageThumbDataUrl(file) {
 
 async function uploadBlobToCloud(blob, fileName, contentType) {
   // 1. Try direct signed upload to Supabase Storage (supports up to 50MB Videos, PDFs & Photos on Vercel!)
-  const signRes = await fetch('/api/upload-sign', {
+  const signRes = await apiFetch('/api/upload-sign', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ fileName, contentType })
@@ -147,7 +148,7 @@ async function uploadBlobToCloud(blob, fileName, contentType) {
   if (signRes.ok) {
     const target = await signRes.json();
     if (target.mode === 'supabase' && target.signedUrl && target.publicUrl) {
-      const putRes = await fetch(target.signedUrl, {
+      const putRes = await apiFetch(target.signedUrl, {
         method: 'PUT',
         headers: { 'Content-Type': contentType, 'x-upsert': 'true' },
         body: blob
@@ -159,7 +160,7 @@ async function uploadBlobToCloud(blob, fileName, contentType) {
   }
 
   // 2. Fallback to direct /api/upload endpoint
-  const upRes = await fetch(`/api/upload?name=${encodeURIComponent(fileName)}`, {
+  const upRes = await apiFetch(`/api/upload?name=${encodeURIComponent(fileName)}`, {
     method: 'POST',
     headers: {
       'Content-Type': contentType,
@@ -235,7 +236,7 @@ export async function resolveAttachmentSource(att) {
   // 2. Fetch from URL (/samples/..., Supabase Storage URL, /api/media/..., or data: URL) and cache in IndexedDB
   if (att.url) {
     try {
-      const res = await fetch(att.url);
+      const res = await apiFetch(att.url);
       if (res.ok) {
         const blob = await res.blob();
         if (att.id) {
@@ -256,7 +257,7 @@ export async function resolveAttachmentSource(att) {
       // Fallback to direct URL if CORS/fetch restricted
     }
     return {
-      objectUrl: att.url,
+      objectUrl: resolveApiUrl(att.url),
       arrayBuffer: null,
       revokeAfterClose: false,
       kind,
@@ -682,10 +683,10 @@ export async function reportPresenceOffline(userId) {
     const payload = JSON.stringify({ userId: cleanId, offline: true });
     if (typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
       const blob = new Blob([payload], { type: 'application/json' });
-      navigator.sendBeacon('/api/presence', blob);
+      navigator.sendBeacon(resolveApiUrl('/api/presence'), blob);
       return;
     }
-    await fetch('/api/presence', {
+    await apiFetch('/api/presence', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: payload,
@@ -722,7 +723,7 @@ async function runSingleSyncPass({ simulateOffline = false, forcePresence = fals
         lastPresenceHeartbeatAt = Date.now();
         lastPresenceHeartbeatUid = activeUid;
       }
-      res = await fetch('/api/sync', {
+      res = await apiFetch('/api/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -745,7 +746,7 @@ async function runSingleSyncPass({ simulateOffline = false, forcePresence = fals
       const syncUrl = shouldSendHeartbeat
         ? `/api/sync?uid=${encodeURIComponent(activeUid)}`
         : '/api/sync';
-      res = await fetch(syncUrl, { method: 'GET', cache: 'no-store', signal: controller.signal });
+      res = await apiFetch(syncUrl, { method: 'GET', cache: 'no-store', signal: controller.signal });
     }
 
     if (!res.ok) throw new Error(`HTTP ${res.status}`);

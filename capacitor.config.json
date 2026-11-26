@@ -1,0 +1,12 @@
+{
+  "appId": "app.itutor.academy",
+  "appName": "i-tutor",
+  "webDir": "mobile-www",
+  "android": {
+    "allowMixedContent": false,
+    "backgroundColor": "#EFE7DC"
+  },
+  "server": {
+    "androidScheme": "https"
+  }
+}

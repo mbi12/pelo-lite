@@ -32,3 +32,12 @@ npm start
 Subscription registration checks the app's current account PIN on the server and never stores it in the push tables. This integrates with the existing custom account system, **not Supabase Auth**; it does not replace a broader authentication/security review of the legacy sync API.
 
 Run `npm test` for sync/retry, recipient filtering, duplicate prevention, endpoint validation, preference, and closed-window service-worker regression tests. Push-provider/network behaviour is mocked in automated tests; real phone delivery still needs the acceptance test above.
+
+## Android app
+
+The native Android project is in `android/`, with bundled offline web assets and live HTTPS API sync. See **[Android build and installation guide](docs/ANDROID.md)** for APK downloads, local builds, device checks, and native-push/Play Store limitations.
+
+```sh
+npm run android:sync  # build and copy mobile web assets
+npm run android:open  # open Android Studio
+```

@@ -1,3 +1,4 @@
+import { isNativeApp } from './nativeRuntime.js';
 const KEY = 'itutor_message_alerts_v1';
 
 export function getAlertSettings(userId) {
@@ -91,6 +92,7 @@ async function pushRequest(path, body) {
 
 export async function disableClosedAppNotifications() {
   const device = getPushDevice();
+  if (isNativeApp()) return;
   if (!('serviceWorker' in navigator)) return;
   const registration = await navigator.serviceWorker.getRegistration();
   const subscription = await registration?.pushManager?.getSubscription();
@@ -105,6 +107,7 @@ export async function disableClosedAppNotifications() {
 }
 
 export async function enableClosedAppNotifications(user, { sound = true } = {}) {
+  if (isNativeApp()) throw new Error('Android push needs Firebase configuration. Browser push is available on the website.');
   if (!window.isSecureContext || !('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
     throw new Error('Push is not supported here. On iPhone/iPad, add i-tutor to the Home Screen and open it there (iOS 16.4+).');
   }
