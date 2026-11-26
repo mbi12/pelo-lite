@@ -1546,12 +1546,25 @@ a {
 
 .chat-messages-scroll {
   flex: 1;
-  max-height: 330px;
+  min-height: 240px;
+  max-height: 420px;
   overflow-y: auto;
+  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
   padding-right: 0.2rem;
+}
+
+.mobile-chat-back-btn {
+  display: none;
+}
+
+.msg-time {
+  font-size: 0.65rem;
+  color: var(--charcoal-muted);
+  font-weight: 650;
+  margin-left: auto;
 }
 
 .msg-bubble {
@@ -2275,6 +2288,24 @@ a {
   .pricing-cards-grid,
   .auth-portal-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+  .messenger-split {
+    min-height: 0;
+  }
+  .messenger-split.has-multiple-rooms:not(.is-mobile-thread-open) .chat-stage-pane {
+    display: none;
+  }
+  .messenger-split.has-multiple-rooms.is-mobile-thread-open .room-list-pane {
+    display: none;
+  }
+  .messenger-split.has-multiple-rooms .mobile-chat-back-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+  }
+  .chat-messages-scroll {
+    min-height: 230px;
+    max-height: calc(100dvh - 300px);
   }
   .auth-portal-shell {
     padding: 0.65rem;

@@ -475,7 +475,7 @@ export function authenticateAccount(vault, identifier, secret) {
   return { ok: true, profile: match };
 }
 
-export function dispatchOfflineAction(vault, action) {
+export function applyActionToVault(vault, action) {
   const p = action.payload || {};
 
   switch (action.type) {
@@ -488,21 +488,24 @@ export function dispatchOfflineAction(vault, action) {
       break;
     case 'ADD_TIMETABLE':
     case 'UPSERT_TIMETABLE':
+      vault.timetables = vault.timetables || [];
       upsertInArray(vault.timetables, p, false);
       break;
     case 'DELETE_TIMETABLE':
-      vault.timetables = vault.timetables.filter((t) => t.id !== p.id);
+      vault.timetables = (vault.timetables || []).filter((t) => t.id !== p.id);
       break;
     case 'CREATE_ASSIGNMENT':
     case 'UPSERT_ASSIGNMENT':
+      vault.assignments = vault.assignments || [];
       upsertInArray(vault.assignments, p, true);
       break;
     case 'DELETE_ASSIGNMENT':
-      vault.assignments = vault.assignments.filter((a) => a.id !== p.id);
-      vault.submissions = vault.submissions.filter((s) => s.assignment_id !== p.id);
+      vault.assignments = (vault.assignments || []).filter((a) => a.id !== p.id);
+      vault.submissions = (vault.submissions || []).filter((s) => s.assignment_id !== p.id);
       break;
     case 'SUBMIT_ASSIGNMENT':
     case 'UPSERT_SUBMISSION': {
+      vault.submissions = vault.submissions || [];
       const idx = vault.submissions.findIndex(
         (s) => s.id === p.id || (s.assignment_id === p.assignment_id && s.student_id === p.student_id)
       );
@@ -511,7 +514,7 @@ export function dispatchOfflineAction(vault, action) {
       break;
     }
     case 'GRADE_SUBMISSION': {
-      const sub = vault.submissions.find((s) => s.id === p.id);
+      const sub = (vault.submissions || []).find((s) => s.id === p.id);
       if (sub) {
         sub.status = 'graded';
         sub.marks_awarded = Number(p.marks_awarded ?? 0);
@@ -520,7 +523,7 @@ export function dispatchOfflineAction(vault, action) {
       break;
     }
     case 'DELETE_SUBMISSION':
-      vault.submissions = vault.submissions.filter((s) => s.id !== p.id);
+      vault.submissions = (vault.submissions || []).filter((s) => s.id !== p.id);
       break;
     case 'LOG_ATTENDANCE':
     case 'UPSERT_ATTENDANCE':
@@ -554,25 +557,28 @@ export function dispatchOfflineAction(vault, action) {
       break;
     case 'CREATE_STUDY_GROUP':
     case 'UPSERT_ROOM':
+      vault.rooms = vault.rooms || [];
       upsertInArray(vault.rooms, p, true);
       break;
     case 'DELETE_ROOM':
-      vault.rooms = vault.rooms.filter((r) => r.id !== p.id);
-      vault.messages = vault.messages.filter((m) => m.room_id !== p.id);
+      vault.rooms = (vault.rooms || []).filter((r) => r.id !== p.id);
+      vault.messages = (vault.messages || []).filter((m) => m.room_id !== p.id);
       break;
     case 'SEND_MESSAGE':
     case 'UPSERT_MESSAGE':
+      vault.messages = vault.messages || [];
       upsertInArray(vault.messages, p, false);
       break;
     case 'DELETE_MESSAGE':
-      vault.messages = vault.messages.filter((m) => m.id !== p.id);
+      vault.messages = (vault.messages || []).filter((m) => m.id !== p.id);
       break;
     case 'SEND_BROADCAST':
     case 'UPSERT_BROADCAST':
+      vault.broadcasts = vault.broadcasts || [];
       upsertInArray(vault.broadcasts, p, true);
       break;
     case 'DELETE_BROADCAST':
-      vault.broadcasts = vault.broadcasts.filter((b) => b.id !== p.id);
+      vault.broadcasts = (vault.broadcasts || []).filter((b) => b.id !== p.id);
       break;
     case 'SUBMIT_ENQUIRY':
     case 'UPSERT_ENQUIRY':
@@ -598,11 +604,15 @@ export function dispatchOfflineAction(vault, action) {
     default:
       break;
   }
+}
 
+export function dispatchOfflineAction(vault, action) {
+  applyActionToVault(vault, action);
   saveVault(vault);
 
   const outbox = loadOutbox();
-  outbox.push({ ...action, queuedAt: new Date().toISOString() });
+  const qid = `q-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  outbox.push({ ...action, _qid: qid, queuedAt: new Date().toISOString() });
   saveOutbox(outbox);
 }
 
@@ -654,30 +664,38 @@ async function flushQueuedBlobsInOutbox(outbox) {
   if (changed) saveOutbox(outbox);
 }
 
-export async function syncWithServer({ simulateOffline = false } = {}) {
+let activeSyncPromise = null;
+
+async function runSingleSyncPass({ simulateOffline = false } = {}) {
   if (simulateOffline || (typeof navigator !== 'undefined' && navigator.onLine === false)) {
     return { status: 'offline', vault: loadVault(), pendingCount: loadOutbox().length };
   }
 
-  const outbox = loadOutbox();
+  const outboxBatch = loadOutbox();
   try {
-    if (outbox.length > 0) {
-      await flushQueuedBlobsInOutbox(outbox);
+    if (outboxBatch.length > 0) {
+      await flushQueuedBlobsInOutbox(outboxBatch);
     }
 
     const res =
-      outbox.length > 0
+      outboxBatch.length > 0
         ? await fetch('/api/sync', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ actions: outbox })
+            body: JSON.stringify({ actions: outboxBatch }),
+            cache: 'no-store'
           })
-        : await fetch('/api/sync', { method: 'GET' });
+        : await fetch('/api/sync', { method: 'GET', cache: 'no-store' });
 
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const remoteSnap = await res.json();
 
-    if (outbox.length > 0) saveOutbox([]);
+    let remainingOutbox = loadOutbox();
+    if (outboxBatch.length > 0) {
+      const sentQids = new Set(outboxBatch.map((item) => item._qid).filter(Boolean));
+      remainingOutbox = remainingOutbox.filter((item) => item._qid && !sentQids.has(item._qid));
+      saveOutbox(remainingOutbox);
+    }
 
     const seed = createDefaultSnapshot();
     const updatedVault = {
@@ -700,9 +718,35 @@ export async function syncWithServer({ simulateOffline = false } = {}) {
       lastDownloadedAt: remoteSnap.syncedAt || new Date().toISOString()
     };
 
+    // Preserve any actions typed/sent while the network call was in flight!
+    for (const pendingAct of remainingOutbox) {
+      applyActionToVault(updatedVault, pendingAct);
+    }
+
     saveVault(updatedVault);
+
+    if (remainingOutbox.length > 0) {
+      return runSingleSyncPass({ simulateOffline });
+    }
+
     return { status: 'synced', vault: updatedVault, pendingCount: 0 };
   } catch {
     return { status: 'offline', vault: loadVault(), pendingCount: loadOutbox().length };
+  }
+}
+
+export async function syncWithServer(opts = {}) {
+  if (activeSyncPromise) {
+    activeSyncPromise = activeSyncPromise.then(
+      () => runSingleSyncPass(opts),
+      () => runSingleSyncPass(opts)
+    );
+  } else {
+    activeSyncPromise = runSingleSyncPass(opts);
+  }
+  try {
+    return await activeSyncPromise;
+  } finally {
+    activeSyncPromise = null;
   }
 }

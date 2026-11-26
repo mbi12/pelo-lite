@@ -200,7 +200,8 @@ export async function applyOutboxActions(actions = []) {
   if (mode === 'supabase') {
     for (const act of actions) {
       const p = act?.payload || {};
-      switch (act?.type) {
+      try {
+        switch (act?.type) {
         case 'UPSERT_ACCOUNT':
           await sbFetch('itutor_v2_profiles', {
             method: 'POST',
@@ -468,21 +469,50 @@ export async function applyOutboxActions(actions = []) {
           break;
 
         case 'SEND_MESSAGE':
-        case 'UPSERT_MESSAGE':
-          await sbFetch('itutor_v2_messages', {
-            method: 'POST',
-            prefer: 'resolution=merge-duplicates,return=minimal',
-            body: {
-              id: p.id,
-              room_id: p.room_id,
-              sender_id: p.sender_id,
-              sender_name: p.sender_name,
-              sender_role: p.sender_role || 'student',
-              body: p.body || '',
-              attachments: Array.isArray(p.attachments) ? p.attachments : [],
-              created_at: p.created_at || new Date().toISOString()
+        case 'UPSERT_MESSAGE': {
+          const msgBody = {
+            id: p.id,
+            room_id: p.room_id,
+            sender_id: p.sender_id,
+            sender_name: p.sender_name,
+            sender_role: p.sender_role || 'student',
+            body: p.body || '',
+            attachments: Array.isArray(p.attachments) ? p.attachments : [],
+            created_at: p.created_at || new Date().toISOString()
+          };
+          try {
+            await sbFetch('itutor_v2_messages', {
+              method: 'POST',
+              prefer: 'resolution=merge-duplicates,return=minimal',
+              body: msgBody
+            });
+          } catch (msgErr) {
+            if (p.room_id && String(msgErr?.message || '').includes('23503')) {
+              await sbFetch('itutor_v2_rooms', {
+                method: 'POST',
+                prefer: 'resolution=merge-duplicates,return=minimal',
+                body: {
+                  id: p.room_id,
+                  room_type: 'direct',
+                  name: `Direct Chat · ${p.sender_name || 'Member'}`,
+                  subject: 'Direct Conversation',
+                  participant_ids: Array.from(
+                    new Set([p.sender_id, 'adm-lerato', 'admin-1', 'admin-itutor'].filter(Boolean))
+                  ),
+                  members_label: 'Direct Channel',
+                  created_by_name: p.sender_name || 'i-tutor',
+                  updated_at: new Date().toISOString()
+                }
+              });
+              await sbFetch('itutor_v2_messages', {
+                method: 'POST',
+                prefer: 'resolution=merge-duplicates,return=minimal',
+                body: msgBody
+              });
+            } else {
+              throw msgErr;
             }
-          });
+          }
           if (p.room_id) {
             await sbFetch(`itutor_v2_rooms?id=eq.${encodeURIComponent(p.room_id)}`, {
               method: 'PATCH',
@@ -491,6 +521,7 @@ export async function applyOutboxActions(actions = []) {
             });
           }
           break;
+        }
 
         case 'DELETE_MESSAGE':
           if (p.id) {
@@ -577,6 +608,9 @@ export async function applyOutboxActions(actions = []) {
 
         default:
           break;
+        }
+      } catch (actErr) {
+        console.error(`Supabase action failed (${act?.type}):`, actErr?.message || actErr);
       }
     }
 

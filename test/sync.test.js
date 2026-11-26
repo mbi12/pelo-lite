@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { createApp } from '../server.js';
-import { authenticateAccount } from '../public/js/offlineStore.js';
+import { authenticateAccount, applyActionToVault } from '../public/js/offlineStore.js';
 
 test('i-tutor v5: accounts, admissions, homework & chat media uploads (PDF/Photo/Video), and built-in viewer assets', async () => {
   const app = createApp();
@@ -278,7 +278,92 @@ test('i-tutor v5: accounts, admissions, homework & chat media uploads (PDF/Photo
     assert.equal(savedMsg.attachments[0].kind, 'pdf');
     assert.equal(savedMsg.attachments[1].kind, 'video');
 
-    // 5. Clean up temporary test entities
+    // 5. Test Direct 1:1 Room Creation, Multi-Message Send, Message Edit, and In-Flight Replay
+    const testRoomId = `room-dir-test-${Date.now()}`;
+    const testDirectMsgId = `msg-dir-test-${Date.now()}`;
+    const resDirectChat = await fetch(`${baseUrl}/api/sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        actions: [
+          {
+            type: 'UPSERT_ROOM',
+            payload: {
+              id: testRoomId,
+              room_type: 'direct',
+              name: 'Ms. Naledi Khumalo · Thabo Mokoena',
+              subject: 'Mathematics Progress Check-In',
+              participant_ids: ['par-grace', 'tch-naledi', 'admin-itutor'],
+              members_label: 'Direct 1:1 · Mrs. Grace Mokoena & Ms. Naledi Khumalo',
+              created_by_name: 'Mrs. Grace Mokoena'
+            }
+          },
+          {
+            type: 'SEND_MESSAGE',
+            payload: {
+              id: testDirectMsgId,
+              room_id: testRoomId,
+              sender_id: 'par-grace',
+              sender_name: 'Mrs. Grace Mokoena',
+              sender_role: 'parent',
+              body: 'Good afternoon Ms. Naledi, how is Thabo doing in Trigonometry?',
+              attachments: [],
+              created_at: new Date().toISOString()
+            }
+          }
+        ]
+      })
+    });
+    assert.equal(resDirectChat.status, 200);
+    const snapDirect = await resDirectChat.json();
+    assert.ok(snapDirect.rooms.some((r) => r.id === testRoomId && r.room_type === 'direct'));
+    assert.ok(snapDirect.messages.some((m) => m.id === testDirectMsgId));
+
+    // Edit the sent message
+    const resEditMsg = await fetch(`${baseUrl}/api/sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        actions: [
+          {
+            type: 'UPSERT_MESSAGE',
+            payload: {
+              id: testDirectMsgId,
+              room_id: testRoomId,
+              sender_id: 'par-grace',
+              sender_name: 'Mrs. Grace Mokoena',
+              sender_role: 'parent',
+              body: 'Good afternoon Ms. Naledi, how is Thabo doing in Trigonometry this week?',
+              attachments: [],
+              created_at: new Date().toISOString()
+            }
+          }
+        ]
+      })
+    });
+    assert.equal(resEditMsg.status, 200);
+    const snapEdited = await resEditMsg.json();
+    const editedMsg = snapEdited.messages.find((m) => m.id === testDirectMsgId);
+    assert.ok(editedMsg && editedMsg.body.includes('this week?'));
+
+    // Verify applyActionToVault replays in-flight pending messages without loss
+    const clonedVault = JSON.parse(JSON.stringify(snapEdited));
+    applyActionToVault(clonedVault, {
+      type: 'SEND_MESSAGE',
+      payload: {
+        id: 'msg-inflight-1',
+        room_id: testRoomId,
+        sender_id: 'tch-naledi',
+        sender_name: 'Ms. Naledi Khumalo',
+        sender_role: 'teacher',
+        body: 'He scored 88% on the practice drill!',
+        attachments: [],
+        created_at: new Date().toISOString()
+      }
+    });
+    assert.ok(clonedVault.messages.some((m) => m.id === 'msg-inflight-1'));
+
+    // 6. Clean up temporary test entities
     await fetch(`${baseUrl}/api/sync`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -286,6 +371,8 @@ test('i-tutor v5: accounts, admissions, homework & chat media uploads (PDF/Photo
         actions: [
           { type: 'DELETE_ASSIGNMENT', payload: { id: testAssignId } },
           { type: 'DELETE_MESSAGE', payload: { id: testMsgId } },
+          { type: 'DELETE_MESSAGE', payload: { id: testDirectMsgId } },
+          { type: 'DELETE_ROOM', payload: { id: testRoomId } },
           { type: 'DELETE_ACCOUNT', payload: { id: testAccId } },
           { type: 'DELETE_STUDY_NOTE', payload: { id: testNoteId } }
         ]

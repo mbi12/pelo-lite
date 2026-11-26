@@ -83,6 +83,8 @@ const ui = {
 
   // Messenger editors & media staging
   selectedRoomId: null,
+  mobileChatThreadOpen: false,
+  newChatKind: 'direct', // 'direct' | 'group'
   showGroupCreator: false,
   editingRoomId: null,
   editingMessageId: null,
@@ -797,15 +799,16 @@ function getVisibleRooms(user) {
   if (!user || user.role === 'visitor') return [];
   if (canEditEverything(user)) return vaultState.rooms || [];
   return (vaultState.rooms || []).filter((r) => {
-    if (!(r.participant_ids || []).includes(user.id)) return false;
+    const isMember = (r.participant_ids || []).includes(user.id);
     if (user.role === 'parent') {
       // Parents only see direct 1:1 teacher & academy channels, never student peer study groups
-      return r.room_type !== 'group';
+      return isMember && r.room_type !== 'group';
     }
-    if (user.role === 'student' && r.room_type === 'group' && r.subject) {
+    if (r.room_type === 'group' && r.subject) {
+      // Subject study groups automatically include any student or teacher assigned to that subject
       return matchesUserSubject(user, r.subject);
     }
-    return true;
+    return isMember;
   });
 }
 
@@ -815,14 +818,154 @@ function getActiveRoom(user) {
   return rooms.find((r) => r.id === ui.selectedRoomId) || rooms[0];
 }
 
+function formatMessageTime(isoStr) {
+  if (!isoStr) return '';
+  try {
+    const d = new Date(isoStr);
+    if (Number.isNaN(d.getTime())) return '';
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  } catch {
+    return '';
+  }
+}
+
+function getRoomDisplayMeta(room, currentUser) {
+  if (!room) return { title: 'Chat', subtitle: '', peerProfile: null };
+  if (room.room_type === 'group') {
+    return {
+      title: room.name || 'Study Group',
+      subtitle: room.members_label || room.subject || 'Study Group',
+      peerProfile: null
+    };
+  }
+
+  const allProfiles = vaultState.profiles || [];
+  const otherIds = (room.participant_ids || []).filter((pid) => pid !== currentUser?.id);
+  const nonAdminOthers = otherIds.filter((pid) => pid !== 'admin-itutor' && pid !== 'admin-1');
+  const candidateIds = nonAdminOthers.length > 0 ? nonAdminOthers : otherIds;
+  const peerProfile =
+    candidateIds.length === 1 ? allProfiles.find((p) => p.id === candidateIds[0]) || null : null;
+
+  let title = room.name || 'Direct Chat';
+  if (peerProfile && currentUser && title.toLowerCase().startsWith(currentUser.name.toLowerCase())) {
+    title = `${peerProfile.name} (${formatRoleLabel(peerProfile.role)})`;
+  }
+
+  return {
+    title,
+    subtitle: room.members_label || room.subject || 'Direct Message',
+    peerProfile
+  };
+}
+
+function scrollChatToBottom() {
+  const scrollEl = document.getElementById('chat-messages-scroll');
+  if (scrollEl) {
+    scrollEl.scrollTop = scrollEl.scrollHeight;
+  }
+}
+
+function getVaultSyncSignature(v) {
+  if (!v) return '';
+  const msgs = v.messages || [];
+  const lastMsg = msgs[msgs.length - 1];
+  const rooms = v.rooms || [];
+  const profiles = v.profiles || [];
+  const asgs = v.assignments || [];
+  const subs = v.submissions || [];
+  const att = v.attendance || [];
+  const bcs = v.broadcasts || [];
+  return [
+    msgs.length,
+    lastMsg ? `${lastMsg.id}:${lastMsg.body?.length || 0}` : '',
+    rooms.length,
+    rooms[0]?.id || '',
+    profiles.length,
+    profiles.map((p) => `${p.id}:${p.status}`).join(','),
+    asgs.length,
+    subs.map((s) => `${s.id}:${s.status}:${s.marks_awarded ?? ''}`).join(','),
+    att.length,
+    bcs.length
+  ].join('|');
+}
+
+function renderChatMessagesInnerHTML(roomMessages, user, superEdit) {
+  if (!roomMessages.length) {
+    return `
+      <div class="worksheet-box" style="margin:auto 0;text-align:center;">
+        <strong style="display:block;margin-bottom:0.2rem;">Conversation Ready</strong>
+        <span class="row-sub">Send a message below or attach a PDF, photo, or video.</span>
+      </div>
+    `;
+  }
+  return roomMessages
+    .map((m) => {
+      const mine = m.sender_id === user.id;
+      const canModMsg = superEdit || mine;
+      const msgAtts = Array.isArray(m.attachments) ? m.attachments : [];
+      const timeStr = formatMessageTime(m.created_at);
+
+      if (ui.editingMessageId === m.id) {
+        return `
+          <form class="form-stack edit-msg-form" data-msg-id="${esc(m.id)}">
+            <input class="field-input" name="body" value="${esc(m.body)}" />
+            <div class="action-cluster">
+              <button class="dark-cta-btn" type="submit">Save</button>
+              <button class="outline-btn" type="button" data-cancel-msg-edit>Cancel</button>
+            </div>
+          </form>
+        `;
+      }
+      return `
+        <div class="msg-bubble ${mine ? 'mine' : ''}">
+          <div class="msg-head-row" style="gap:0.45rem;">
+            <span class="msg-author">${esc(mine ? 'You' : m.sender_name)}</span>
+            ${timeStr ? `<span class="msg-time">${esc(timeStr)}</span>` : ''}
+            ${
+              canModMsg
+                ? renderMoreMenu(`
+                    <button type="button" class="more-menu-item" data-edit-msg="${esc(m.id)}">${ICONS.edit} Edit</button>
+                    <button type="button" class="more-menu-item is-danger" data-del-msg="${esc(m.id)}">${ICONS.trash} Delete</button>
+                  `)
+                : ''
+            }
+          </div>
+          ${m.body ? `<div class="msg-body">${esc(m.body)}</div>` : ''}
+          ${renderAttachmentGalleryHTML(msgAtts, { compact: true })}
+        </div>
+      `;
+    })
+    .join('');
+}
+
+function updateActiveViewWithoutDroppingInput() {
+  const activeEl = document.activeElement;
+  if (ui.view === 'messages' && activeEl && activeEl.id === 'chat-text-input' && !ui.editingMessageId) {
+    const user = getActiveUser();
+    const activeRoom = user ? getActiveRoom(user) : null;
+    const scrollEl = document.getElementById('chat-messages-scroll');
+    if (user && activeRoom && scrollEl) {
+      const roomMessages = (vaultState.messages || []).filter((m) => m.room_id === activeRoom.id);
+      scrollEl.innerHTML = renderChatMessagesInnerHTML(roomMessages, user, canEditEverything(user));
+      scrollChatToBottom();
+      bindChatBubbleEventsOnly();
+      return;
+    }
+  }
+  renderApp({ preserveScroll: true });
+}
+
 async function performActionAndSync(type, payload, toastMessage) {
   dispatchOfflineAction(vaultState, { type, payload });
   vaultState = loadVault();
-  renderApp();
+  renderApp({ preserveScroll: true });
+  if (type === 'SEND_MESSAGE' || type === 'UPSERT_ROOM') {
+    scrollChatToBottom();
+  }
   if (!isOfflineActive()) {
     const res = await syncWithServer({ simulateOffline: false });
     if (res.vault) vaultState = res.vault;
-    renderApp();
+    updateActiveViewWithoutDroppingInput();
   }
   if (toastMessage) showToast(toastMessage);
 }
@@ -3624,17 +3767,91 @@ function buildMessagesStage(user) {
   }
 
   const superEdit = canEditEverything(user);
+  const staffMember = isStaff(user);
   const isParent = user.role === 'parent';
   const parentChild = isParent ? getParentLinkedChild(user) : null;
   const rooms = getVisibleRooms(user);
   const activeRoom = getActiveRoom(user);
+  const activeMeta = activeRoom ? getRoomDisplayMeta(activeRoom, user) : null;
   const roomMessages = activeRoom ? (vaultState.messages || []).filter((m) => m.room_id === activeRoom.id) : [];
   const editingRoom = ui.editingRoomId ? rooms.find((r) => r.id === ui.editingRoomId) : null;
-  const staffContacts = isParent
-    ? (vaultState.profiles || []).filter(
-        (p) => (p.role === 'teacher' || p.role === 'admissions' || p.role === 'admin') && p.status === 'active'
-      )
-    : [];
+
+  const activeProfiles = (vaultState.profiles || []).filter(
+    (p) => p.id !== user.id && p.role !== 'visitor' && p.status === 'active'
+  );
+  const directRecipients = staffMember
+    ? activeProfiles
+    : activeProfiles.filter((p) => p.role === 'teacher' || p.role === 'admissions' || p.role === 'admin');
+
+  const knownSubjects = getAllKnownSubjects();
+  const effectiveNewKind = staffMember ? ui.newChatKind || 'direct' : 'direct';
+  const splitClasses = [
+    'messenger-split',
+    rooms.length > 1 ? 'has-multiple-rooms' : '',
+    ui.mobileChatThreadOpen || rooms.length <= 1 ? 'is-mobile-thread-open' : ''
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  const renderDirectRecipientOptions = () => {
+    if (!staffMember) {
+      return directRecipients
+        .map(
+          (st) =>
+            `<option value="${esc(st.id)}">${esc(st.name)} — ${esc(
+              st.role === 'teacher'
+                ? (st.subjects || []).join(', ') || 'Teacher'
+                : st.role === 'admissions'
+                ? 'Admissions'
+                : 'Academy Admin'
+            )}</option>`
+        )
+        .join('');
+    }
+    const studentList = directRecipients.filter((p) => p.role === 'student');
+    const parentList = directRecipients.filter((p) => p.role === 'parent');
+    const staffList = directRecipients.filter(
+      (p) => p.role === 'teacher' || p.role === 'admissions' || p.role === 'admin'
+    );
+    return `
+      ${
+        studentList.length
+          ? `<optgroup label="Students">${studentList
+              .map(
+                (s) =>
+                  `<option value="${esc(s.id)}">${esc(s.name)} — Student (${esc(
+                    s.grade || (s.subjects || []).join(', ') || 'Enrolled'
+                  )})</option>`
+              )
+              .join('')}</optgroup>`
+          : ''
+      }
+      ${
+        parentList.length
+          ? `<optgroup label="Parents & Guardians">${parentList
+              .map((p) => {
+                const linked = getParentLinkedChild(p);
+                return `<option value="${esc(p.id)}">${esc(p.name)} — Parent${
+                  linked ? ` of ${esc(linked.name)}` : ''
+                }</option>`;
+              })
+              .join('')}</optgroup>`
+          : ''
+      }
+      ${
+        staffList.length
+          ? `<optgroup label="Teachers & Staff">${staffList
+              .map(
+                (t) =>
+                  `<option value="${esc(t.id)}">${esc(t.name)} — ${esc(formatRoleLabel(t.role))}${
+                    (t.subjects || []).length ? ` (${esc(t.subjects.join(', '))})` : ''
+                  }</option>`
+              )
+              .join('')}</optgroup>`
+          : ''
+      }
+    `;
+  };
 
   return `
     <div class="page-header-row">
@@ -3645,87 +3862,188 @@ function buildMessagesStage(user) {
             ? `Direct private communication with ${
                 parentChild ? `${parentChild.name}'s teachers` : "your child's teachers"
               } and Admissions.`
-            : 'Share messages, PDFs, photos & videos — tap any file to open it right inside i-tutor.'
+            : 'Real-time messages, PDFs, photos & videos across devices.'
         }</p>
       </div>
       <button class="dark-cta-btn" id="toggle-group-creator">${ICONS.plus} ${
-    ui.showGroupCreator || editingRoom ? 'Close' : isParent ? 'Message Teacher' : 'New Group'
+    ui.showGroupCreator || editingRoom
+      ? 'Close'
+      : staffMember
+      ? 'New Chat'
+      : 'Message Teacher'
   }</button>
     </div>
 
     ${
       ui.showGroupCreator || editingRoom
-        ? isParent && !editingRoom
+        ? editingRoom
           ? `
       <form class="panel-card form-stack" id="upsert-room-form">
         <div class="panel-head">
-          <h3 class="panel-title">Start Direct Chat with Teacher or Admissions</h3>
+          <h3 class="panel-title">Edit Channel · ${esc(editingRoom.name)}</h3>
           <button type="button" class="outline-btn" id="cancel-room-edit">Cancel</button>
         </div>
-        <select class="field-input" name="target_staff_id" required>
-          ${staffContacts
-            .map(
-              (st) =>
-                `<option value="${esc(st.id)}">${esc(st.name)} — ${esc(
-                  st.role === 'teacher' ? (st.subjects || []).join(', ') || 'Teacher' : 'Admissions / Admin'
-                )}</option>`
-            )
-            .join('')}
-        </select>
-        <input class="field-input" name="initial_note" placeholder="Optional topic (e.g. Homework check-in for ${esc(
-          parentChild ? parentChild.name : 'my child'
-        )})" />
-        <button class="dark-cta-btn" type="submit">${ICONS.messages} Open Direct Chat</button>
+        <input type="hidden" name="id" value="${esc(editingRoom.id)}" />
+        <input type="hidden" name="chat_kind" value="${esc(editingRoom.room_type || 'group')}" />
+        <div class="form-grid-2">
+          <input class="field-input" name="name" value="${esc(editingRoom.name || '')}" placeholder="Channel Name" required />
+          <input class="field-input" name="subject" value="${esc(editingRoom.subject || 'Mathematics')}" placeholder="Subject / Topic" required />
+        </div>
+        <input class="field-input" name="members_label" value="${esc(
+          editingRoom.members_label || ''
+        )}" placeholder="Subtitle / members" />
+        <button class="dark-cta-btn" type="submit">${ICONS.check} Save Changes</button>
       </form>
     `
           : `
       <form class="panel-card form-stack" id="upsert-room-form">
-        <div class="panel-head">
-          <h3 class="panel-title">${editingRoom ? `Edit Channel · ${esc(editingRoom.name)}` : 'Create Study Group'}</h3>
-          <button type="button" class="outline-btn" id="cancel-room-edit">Cancel</button>
+        <div class="panel-head" style="flex-wrap:wrap;gap:0.5rem;">
+          <h3 class="panel-title">${
+            staffMember ? 'Start a Conversation or Study Group' : 'Message a Teacher or Admissions'
+          }</h3>
+          <div style="display:flex;align-items:center;gap:0.45rem;flex-wrap:wrap;">
+            ${
+              staffMember
+                ? `
+              <div class="subtab-bar">
+                <button type="button" class="subtab-btn ${
+                  effectiveNewKind === 'direct' ? 'is-active' : ''
+                }" data-chat-kind="direct">1:1 Direct Chat</button>
+                <button type="button" class="subtab-btn ${
+                  effectiveNewKind === 'group' ? 'is-active' : ''
+                }" data-chat-kind="group">Subject Group</button>
+              </div>
+            `
+                : ''
+            }
+            <button type="button" class="outline-btn" id="cancel-room-edit">Cancel</button>
+          </div>
         </div>
-        <input type="hidden" name="id" value="${esc(editingRoom?.id || '')}" />
-        <div class="form-grid-2">
-          <input class="field-input" name="name" value="${esc(editingRoom?.name || '')}" placeholder="Group / Channel Name" required />
-          <input class="field-input" name="subject" value="${esc(editingRoom?.subject || 'Mathematics')}" placeholder="Subject" required />
-        </div>
-        <input class="field-input" name="members_label" value="${esc(
-          editingRoom?.members_label || `Created by ${user.name}`
-        )}" placeholder="Subtitle / members" />
-        <button class="dark-cta-btn" type="submit">${ICONS.check} Save Group</button>
+        <input type="hidden" name="chat_kind" value="${esc(effectiveNewKind)}" />
+        ${
+          effectiveNewKind === 'direct'
+            ? `
+          <div class="form-grid-2">
+            <label class="form-stack" style="gap:0.28rem;">
+              <span class="row-sub" style="font-weight:700;">Choose Recipient</span>
+              <select class="field-input" name="target_user_id" required>
+                ${renderDirectRecipientOptions()}
+              </select>
+            </label>
+            <label class="form-stack" style="gap:0.28rem;">
+              <span class="row-sub" style="font-weight:700;">Topic (optional)</span>
+              <input class="field-input" name="initial_note" placeholder="${esc(
+                isParent && parentChild
+                  ? `Update on ${parentChild.name}`
+                  : 'e.g. Homework question / Progress check-in'
+              )}" />
+            </label>
+          </div>
+          <input class="field-input" name="opening_message" placeholder="Write your first message (optional — opens chat immediately)..." />
+          <button class="dark-cta-btn" type="submit">${ICONS.messages} Open Direct Chat</button>
+        `
+            : `
+          <div class="form-grid-2">
+            <label class="form-stack" style="gap:0.28rem;">
+              <span class="row-sub" style="font-weight:700;">Subject</span>
+              <select class="field-input" name="subject" required>
+                ${knownSubjects
+                  .map((subj) => `<option value="${esc(subj)}">${esc(subj)}</option>`)
+                  .join('')}
+              </select>
+            </label>
+            <label class="form-stack" style="gap:0.28rem;">
+              <span class="row-sub" style="font-weight:700;">Group Name</span>
+              <input class="field-input" name="name" placeholder="e.g. Mathematics Exam Prep Hub" required />
+            </label>
+          </div>
+          <input class="field-input" name="members_label" value="Students & Educators · ${esc(
+            user.name
+          )}" placeholder="Subtitle / members" />
+          <button class="dark-cta-btn" type="submit">${ICONS.check} Create Subject Study Group</button>
+        `
+        }
       </form>
     `
         : ''
     }
 
-    <div class="messenger-split">
+    <div class="${splitClasses}">
       <aside class="room-list-pane">
         <span class="row-sub" style="font-weight:800;padding:0.2rem 0.35rem;">${
-          isParent ? `DIRECT CHATS (${rooms.length})` : `CHANNELS (${rooms.length})`
+          isParent ? `CONVERSATIONS (${rooms.length})` : `CONVERSATIONS (${rooms.length})`
         }</span>
-        ${rooms
-          .map(
-            (r) => `
-          <button class="room-btn ${activeRoom && activeRoom.id === r.id ? 'is-active' : ''}" data-room-id="${esc(r.id)}">
-            <div class="avatar-badge">${r.room_type === 'group' ? 'SG' : '1:1'}</div>
-            <div style="min-width:0;flex:1;">
-              <div class="row-title" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(r.name)}</div>
-              <div class="row-sub">${esc(r.members_label || r.subject)}</div>
-            </div>
-          </button>
+        ${
+          rooms.length
+            ? rooms
+                .map((r) => {
+                  const meta = getRoomDisplayMeta(r, user);
+                  const rMsgs = (vaultState.messages || []).filter((m) => m.room_id === r.id);
+                  const lastMsg = rMsgs[rMsgs.length - 1];
+                  const lastTime = lastMsg ? formatMessageTime(lastMsg.created_at) : '';
+                  const previewLine = lastMsg
+                    ? `${lastMsg.sender_id === user.id ? 'You: ' : `${lastMsg.sender_name.split(' ')[0]}: `}${
+                        lastMsg.body || (lastMsg.attachments?.length ? '📎 Attachment' : '')
+                      }`
+                    : meta.subtitle;
+
+                  return `
+                <button type="button" class="room-btn ${
+                  activeRoom && activeRoom.id === r.id ? 'is-active' : ''
+                }" data-room-id="${esc(r.id)}">
+                  ${
+                    meta.peerProfile
+                      ? renderAvatarHTML(meta.peerProfile, { size: 36 })
+                      : `<div class="avatar-badge">${r.room_type === 'group' ? 'SG' : '1:1'}</div>`
+                  }
+                  <div style="min-width:0;flex:1;">
+                    <div style="display:flex;align-items:baseline;justify-content:space-between;gap:0.35rem;">
+                      <div class="row-title" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(
+                        meta.title
+                      )}</div>
+                      ${lastTime ? `<span class="msg-time">${esc(lastTime)}</span>` : ''}
+                    </div>
+                    <div class="row-sub" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(
+                      previewLine
+                    )}</div>
+                  </div>
+                </button>
+              `;
+                })
+                .join('')
+            : `
+          <div class="worksheet-box" style="text-align:center;">
+            <p class="row-sub" style="margin-bottom:0.5rem;">No conversations open yet.</p>
+            <button type="button" class="dark-cta-btn" id="empty-start-chat-btn" style="width:100%;">${ICONS.plus} Start a Chat</button>
+          </div>
         `
-          )
-          .join('')}
+        }
       </aside>
 
       <section class="chat-stage-pane">
         ${
           activeRoom
             ? `
-          <div class="panel-head" style="border-bottom:1px solid var(--border-warm);padding-bottom:0.65rem;">
-            <div>
-              <h2 class="panel-title">${esc(activeRoom.name)}</h2>
-              <span class="row-sub">${esc(activeRoom.members_label || activeRoom.subject)}</span>
+          <div class="panel-head" style="border-bottom:1px solid var(--border-warm);padding-bottom:0.65rem;gap:0.55rem;">
+            <div style="display:flex;align-items:center;gap:0.55rem;min-width:0;flex:1;">
+              ${
+                rooms.length > 1
+                  ? `<button type="button" class="mobile-chat-back-btn" id="mobile-chat-back-btn" aria-label="Back to chats">← Chats</button>`
+                  : ''
+              }
+              ${
+                activeMeta?.peerProfile
+                  ? renderAvatarHTML(activeMeta.peerProfile, { size: 36 })
+                  : `<div class="avatar-badge">${activeRoom.room_type === 'group' ? 'SG' : '1:1'}</div>`
+              }
+              <div style="min-width:0;">
+                <h2 class="panel-title" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(
+                  activeMeta ? activeMeta.title : activeRoom.name
+                )}</h2>
+                <span class="row-sub" style="display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(
+                  activeMeta ? activeMeta.subtitle : activeRoom.members_label || activeRoom.subject
+                )}</span>
+              </div>
             </div>
             ${
               superEdit
@@ -3738,42 +4056,7 @@ function buildMessagesStage(user) {
           </div>
 
           <div class="chat-messages-scroll" id="chat-messages-scroll">
-            ${roomMessages
-              .map((m) => {
-                const mine = m.sender_id === user.id;
-                const canModMsg = superEdit || mine;
-                const msgAtts = Array.isArray(m.attachments) ? m.attachments : [];
-
-                if (ui.editingMessageId === m.id) {
-                  return `
-                    <form class="form-stack edit-msg-form" data-msg-id="${esc(m.id)}">
-                      <input class="field-input" name="body" value="${esc(m.body)}" />
-                      <div class="action-cluster">
-                        <button class="dark-cta-btn" type="submit">Save</button>
-                        <button class="outline-btn" type="button" data-cancel-msg-edit>Cancel</button>
-                      </div>
-                    </form>
-                  `;
-                }
-                return `
-                  <div class="msg-bubble ${mine ? 'mine' : ''}">
-                    <div class="msg-head-row">
-                      <span class="msg-author">${esc(m.sender_name)}</span>
-                      ${
-                        canModMsg
-                          ? renderMoreMenu(`
-                              <button type="button" class="more-menu-item" data-edit-msg="${esc(m.id)}">${ICONS.edit} Edit</button>
-                              <button type="button" class="more-menu-item is-danger" data-del-msg="${esc(m.id)}">${ICONS.trash} Delete</button>
-                            `)
-                          : ''
-                      }
-                    </div>
-                    ${m.body ? `<div class="msg-body">${esc(m.body)}</div>` : ''}
-                    ${renderAttachmentGalleryHTML(msgAtts, { compact: true })}
-                  </div>
-                `;
-              })
-              .join('')}
+            ${renderChatMessagesInnerHTML(roomMessages, user, superEdit)}
           </div>
 
           ${
@@ -3801,17 +4084,25 @@ function buildMessagesStage(user) {
               class="field-input chat-text-field"
               id="chat-text-input"
               name="body"
+              autocomplete="off"
               value="${esc(ui.chatDraftText)}"
               placeholder="${
                 ui.uploadingTarget === 'chat'
                   ? 'Uploading attachment...'
-                  : 'Message or attach PDF, photo or video...'
+                  : 'Write a message or attach PDF, photo or video...'
               }"
             />
             <button class="dark-cta-btn chat-send-btn" type="submit" aria-label="Send message">${ICONS.send}</button>
           </form>
         `
-            : `<p class="row-sub">Select a conversation on the left.</p>`
+            : `
+          <div class="worksheet-box" style="margin:auto 0;text-align:center;">
+            <strong style="display:block;margin-bottom:0.35rem;">Start Messaging</strong>
+            <p class="row-sub" style="margin-bottom:0.65rem;">Tap <strong>${
+              staffMember ? '+ New Chat' : '+ Message Teacher'
+            }</strong> above to open a conversation.</p>
+          </div>
+        `
         }
       </section>
     </div>
@@ -4832,6 +5123,10 @@ function renderApp(opts = {}) {
   bindWorkspaceEvents(user);
   enhanceInAppControls(rootEl);
 
+  if (ui.view === 'messages' && !ui.editingMessageId) {
+    scrollChatToBottom();
+  }
+
   if (opts.preserveScroll !== false && !shouldAnimateStage && prevScrollY > 0) {
     window.scrollTo(0, prevScrollY);
   }
@@ -4863,6 +5158,78 @@ async function handleFileSelection(fileList, targetKey, getExistingList, setNext
   setNextList([...getExistingList(), ...uploaded]);
   renderApp({ preserveScroll: true });
   showToast(`${uploaded.length} ${uploaded.length === 1 ? 'file' : 'files'} attached & ready!`);
+}
+
+function bindChatBubbleEventsOnly() {
+  const scrollHost = document.getElementById('chat-messages-scroll');
+  if (!scrollHost) return;
+
+  scrollHost.querySelectorAll('.row-more-menu').forEach((menuEl) => {
+    if (menuEl.dataset.boundChatMenu === '1') return;
+    menuEl.dataset.boundChatMenu = '1';
+    menuEl.addEventListener('toggle', () => {
+      if (menuEl.open) {
+        document.querySelectorAll('.row-more-menu[open]').forEach((other) => {
+          if (other !== menuEl) other.open = false;
+        });
+      }
+    });
+  });
+
+  scrollHost.querySelectorAll('[data-open-media]').forEach((btn) => {
+    if (btn.dataset.boundChatMedia === '1') return;
+    btn.dataset.boundChatMedia = '1';
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      try {
+        const att = JSON.parse(btn.getAttribute('data-open-media') || '{}');
+        openInAppMediaViewer(att);
+      } catch {
+        showToast('Could not open attachment.');
+      }
+    });
+  });
+
+  scrollHost.querySelectorAll('[data-edit-msg]').forEach((btn) => {
+    if (btn.dataset.boundChatEdit === '1') return;
+    btn.dataset.boundChatEdit = '1';
+    btn.addEventListener('click', () => {
+      ui.editingMessageId = btn.getAttribute('data-edit-msg');
+      renderApp({ preserveScroll: true });
+    });
+  });
+
+  scrollHost.querySelectorAll('[data-cancel-msg-edit]').forEach((btn) => {
+    if (btn.dataset.boundChatCancel === '1') return;
+    btn.dataset.boundChatCancel = '1';
+    btn.addEventListener('click', () => {
+      ui.editingMessageId = null;
+      renderApp({ preserveScroll: true });
+    });
+  });
+
+  scrollHost.querySelectorAll('.edit-msg-form').forEach((form) => {
+    if (form.dataset.boundChatForm === '1') return;
+    form.dataset.boundChatForm = '1';
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const id = form.getAttribute('data-msg-id');
+      const prev = (vaultState.messages || []).find((m) => m.id === id);
+      const fd = new FormData(form);
+      ui.editingMessageId = null;
+      if (prev) {
+        performActionAndSync('UPSERT_MESSAGE', { ...prev, body: fd.get('body') }, 'Message updated!');
+      }
+    });
+  });
+
+  scrollHost.querySelectorAll('[data-del-msg]').forEach((btn) => {
+    if (btn.dataset.boundChatDel === '1') return;
+    btn.dataset.boundChatDel = '1';
+    btn.addEventListener('click', () => {
+      performActionAndSync('DELETE_MESSAGE', { id: btn.getAttribute('data-del-msg') }, 'Message deleted.');
+    });
+  });
 }
 
 function bindWorkspaceEvents(user) {
@@ -6511,6 +6878,27 @@ function bindWorkspaceEvents(user) {
   document.querySelectorAll('.room-btn[data-room-id]').forEach((btn) => {
     btn.addEventListener('click', () => {
       ui.selectedRoomId = btn.getAttribute('data-room-id');
+      ui.mobileChatThreadOpen = true;
+      ui.editingMessageId = null;
+      renderApp({ preserveScroll: false });
+      scrollChatToBottom();
+    });
+  });
+
+  document.getElementById('mobile-chat-back-btn')?.addEventListener('click', () => {
+    ui.mobileChatThreadOpen = false;
+    renderApp({ preserveScroll: false });
+  });
+
+  document.getElementById('empty-start-chat-btn')?.addEventListener('click', () => {
+    ui.showGroupCreator = true;
+    ui.newChatKind = 'direct';
+    renderApp();
+  });
+
+  document.querySelectorAll('[data-chat-kind]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      ui.newChatKind = btn.getAttribute('data-chat-kind') || 'direct';
       renderApp();
     });
   });
@@ -6521,6 +6909,7 @@ function bindWorkspaceEvents(user) {
       ui.showGroupCreator = false;
     } else {
       ui.showGroupCreator = true;
+      if (!isStaff(user)) ui.newChatKind = 'direct';
     }
     renderApp();
   });
@@ -6542,57 +6931,120 @@ function bindWorkspaceEvents(user) {
   document.querySelectorAll('[data-del-room]').forEach((btn) => {
     btn.addEventListener('click', () => {
       ui.selectedRoomId = null;
+      ui.mobileChatThreadOpen = false;
       performActionAndSync('DELETE_ROOM', { id: btn.getAttribute('data-del-room') }, 'Channel deleted.');
     });
   });
 
   const upsertRoomForm = document.getElementById('upsert-room-form');
   if (upsertRoomForm) {
-    upsertRoomForm.addEventListener('submit', (e) => {
+    upsertRoomForm.addEventListener('submit', async (e) => {
       e.preventDefault();
       const fd = new FormData(upsertRoomForm);
-      if (user.role === 'parent' && fd.get('target_staff_id')) {
-        const staffId = String(fd.get('target_staff_id'));
-        const staffProfile = (vaultState.profiles || []).find((p) => p.id === staffId);
-        const existingDirect = (vaultState.rooms || []).find(
-          (r) =>
-            r.room_type !== 'group' &&
-            (r.participant_ids || []).includes(user.id) &&
-            (r.participant_ids || []).includes(staffId)
-        );
-        if (existingDirect) {
-          ui.selectedRoomId = existingDirect.id;
-          ui.showGroupCreator = false;
-          renderApp();
-          showToast(`Opened direct chat with ${staffProfile?.name || 'Teacher'}`);
+      const existingId = String(fd.get('id') || '').trim();
+      const chatKind = String(fd.get('chat_kind') || 'direct');
+
+      // Direct 1:1 conversation creation (all roles: Parent, Student, Teacher, Admissions, Admin)
+      if (!existingId && chatKind === 'direct') {
+        const targetId = String(fd.get('target_user_id') || fd.get('target_staff_id') || '').trim();
+        if (!targetId) {
+          showToast('Please select who you want to message.');
           return;
         }
-        const child = getParentLinkedChild(user);
-        const newDirectId = `room-dir-${Date.now()}`;
-        const noteTopic = String(fd.get('initial_note') || '').trim();
-        ui.selectedRoomId = newDirectId;
+        const targetProfile = (vaultState.profiles || []).find((p) => p.id === targetId);
+        const openingMsg = String(fd.get('opening_message') || '').trim();
+
+        // Check for an existing dedicated 1:1 direct room between user.id and targetId
+        const existingDirect = (vaultState.rooms || []).find((r) => {
+          if (r.room_type === 'group') return false;
+          const pids = r.participant_ids || [];
+          if (!pids.includes(user.id) || !pids.includes(targetId)) return false;
+          const extraMembers = pids.filter(
+            (pid) => pid !== user.id && pid !== targetId && pid !== 'admin-itutor' && pid !== 'admin-1'
+          );
+          return extraMembers.length === 0;
+        });
+
+        const roomId = existingDirect
+          ? existingDirect.id
+          : `room-dir-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+
+        ui.selectedRoomId = roomId;
+        ui.mobileChatThreadOpen = true;
         ui.editingRoomId = null;
         ui.showGroupCreator = false;
-        performActionAndSync(
-          'UPSERT_ROOM',
-          {
-            id: newDirectId,
-            room_type: 'direct',
-            name: `${staffProfile?.name || 'Educator'} · ${child ? child.name : user.name}`,
-            subject: noteTopic || (child ? `${child.name} (${child.grade || 'Student'})` : 'Parent–Teacher Direct'),
-            participant_ids: Array.from(new Set([user.id, staffId, 'admin-itutor'])),
-            members_label: `Direct 1:1 · ${user.name} & ${staffProfile?.name || 'Educator'}`,
-            created_by_name: user.name
-          },
-          'Direct teacher chat ready!'
-        );
+
+        if (!existingDirect) {
+          const child = user.role === 'parent' ? getParentLinkedChild(user) : null;
+          const noteTopic = String(fd.get('initial_note') || '').trim();
+          const roomName =
+            user.role === 'parent' && child
+              ? `${targetProfile?.name || 'Educator'} · ${child.name}`
+              : `${user.name} & ${targetProfile?.name || 'Member'}`;
+
+          await performActionAndSync(
+            'UPSERT_ROOM',
+            {
+              id: roomId,
+              room_type: 'direct',
+              name: roomName,
+              subject:
+                noteTopic ||
+                (child
+                  ? `${child.name} (${child.grade || 'Student'})`
+                  : `${formatRoleLabel(user.role)}–${formatRoleLabel(targetProfile?.role || 'teacher')} Direct`),
+              participant_ids: Array.from(new Set([user.id, targetId, 'admin-itutor'])),
+              members_label: `Direct 1:1 · ${user.name} & ${targetProfile?.name || 'Member'}`,
+              created_by_name: user.name
+            },
+            openingMsg ? '' : `Direct chat open with ${targetProfile?.name || 'member'}!`
+          );
+        } else if (!openingMsg) {
+          renderApp({ preserveScroll: false });
+          scrollChatToBottom();
+          showToast(`Opened chat with ${targetProfile?.name || 'member'}`);
+        }
+
+        if (openingMsg) {
+          await performActionAndSync(
+            'SEND_MESSAGE',
+            {
+              id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+              room_id: roomId,
+              sender_id: user.id,
+              sender_name: user.name,
+              sender_role: user.role,
+              body: openingMsg,
+              attachments: [],
+              created_at: new Date().toISOString()
+            },
+            'Message sent!'
+          );
+        }
         return;
       }
 
-      const existingId = fd.get('id');
+      // Subject Study Group creation or Room editing
       const prev = existingId ? (vaultState.rooms || []).find((r) => r.id === existingId) : null;
-      const newId = existingId || `room-grp-${Date.now()}`;
+      const newId = existingId || `room-grp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      const subj = String(fd.get('subject') || 'Mathematics').trim();
+      const roomName = String(fd.get('name') || `${subj} Study Group`).trim();
+
+      let participantIds = prev?.participant_ids;
+      if (!participantIds) {
+        const subjectMembers = (vaultState.profiles || [])
+          .filter(
+            (p) =>
+              p.status === 'active' &&
+              (p.role === 'student' || p.role === 'teacher') &&
+              matchesUserSubject(p, subj)
+          )
+          .map((p) => p.id);
+        participantIds = Array.from(new Set([...subjectMembers, user.id, 'admin-itutor']));
+      }
+
       ui.selectedRoomId = newId;
+      ui.mobileChatThreadOpen = true;
       ui.editingRoomId = null;
       ui.showGroupCreator = false;
       performActionAndSync(
@@ -6600,49 +7052,18 @@ function bindWorkspaceEvents(user) {
         {
           id: newId,
           room_type: prev?.room_type || 'group',
-          name: fd.get('name'),
-          subject: fd.get('subject'),
-          participant_ids: prev?.participant_ids || ['stu-thabo', 'stu-amahle', 'stu-liam', 'tch-naledi', user.id],
-          members_label: fd.get('members_label') || `Created by ${user.name}`,
+          name: roomName,
+          subject: subj,
+          participant_ids: participantIds,
+          members_label: String(fd.get('members_label') || '').trim() || `${subj} · Created by ${user.name}`,
           created_by_name: prev?.created_by_name || user.name
         },
-        existingId ? 'Channel updated!' : 'Study group created!'
+        existingId ? 'Channel updated!' : `${roomName} created!`
       );
     });
   }
 
-  document.querySelectorAll('[data-edit-msg]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      ui.editingMessageId = btn.getAttribute('data-edit-msg');
-      renderApp();
-    });
-  });
-
-  document.querySelectorAll('[data-cancel-msg-edit]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      ui.editingMessageId = null;
-      renderApp();
-    });
-  });
-
-  document.querySelectorAll('.edit-msg-form').forEach((form) => {
-    form.addEventListener('submit', (e) => {
-      e.preventDefault();
-      const id = form.getAttribute('data-msg-id');
-      const prev = (vaultState.messages || []).find((m) => m.id === id);
-      const fd = new FormData(form);
-      ui.editingMessageId = null;
-      if (prev) {
-        performActionAndSync('UPSERT_MESSAGE', { ...prev, body: fd.get('body') }, 'Message updated!');
-      }
-    });
-  });
-
-  document.querySelectorAll('[data-del-msg]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      performActionAndSync('DELETE_MESSAGE', { id: btn.getAttribute('data-del-msg') }, 'Message deleted.');
-    });
-  });
+  bindChatBubbleEventsOnly();
 
   // Preserve chat draft text while attaching Photos/PDFs/Videos
   document.getElementById('chat-text-input')?.addEventListener('input', (e) => {
@@ -6663,7 +7084,7 @@ function bindWorkspaceEvents(user) {
 
   const sendMsgForm = document.getElementById('send-msg-form');
   if (sendMsgForm) {
-    sendMsgForm.addEventListener('submit', (e) => {
+    sendMsgForm.addEventListener('submit', async (e) => {
       e.preventDefault();
       const fd = new FormData(sendMsgForm);
       const text = String(fd.get('body') || '').trim();
@@ -6675,8 +7096,8 @@ function bindWorkspaceEvents(user) {
       const roomId = sendMsgForm.getAttribute('data-room-id');
       ui.stagedChatAttachments = [];
       ui.chatDraftText = '';
-      performActionAndSync('SEND_MESSAGE', {
-        id: `msg-${Date.now()}`,
+      const msgPayload = {
+        id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         room_id: roomId,
         sender_id: user.id,
         sender_name: user.name,
@@ -6684,7 +7105,20 @@ function bindWorkspaceEvents(user) {
         body: text,
         attachments,
         created_at: new Date().toISOString()
-      });
+      };
+      dispatchOfflineAction(vaultState, { type: 'SEND_MESSAGE', payload: msgPayload });
+      vaultState = loadVault();
+      renderApp({ preserveScroll: true });
+      scrollChatToBottom();
+      // Keep desktop focus ready for rapid back-to-back messages
+      if (window.innerWidth > 920) {
+        document.getElementById('chat-text-input')?.focus();
+      }
+      if (!isOfflineActive()) {
+        const res = await syncWithServer({ simulateOffline: false });
+        if (res.vault) vaultState = res.vault;
+        updateActiveViewWithoutDroppingInput();
+      }
     });
   }
 
@@ -7448,20 +7882,55 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
     navigator.serviceWorker
-      .register('/sw.js?v=22', { updateViaCache: 'none' })
+      .register('/sw.js?v=23', { updateViaCache: 'none' })
       .then((reg) => reg.update().catch(() => {}))
       .catch(() => {});
   }
 
-  window.addEventListener('online', async () => {
-    if (!sessionState.simulateOffline) {
-      const res = await syncWithServer({ simulateOffline: false });
-      if (res.vault) {
-        vaultState = res.vault;
-        if (!document.getElementById('splash-screen')) renderApp();
-      }
+  const runLiveBackgroundSync = async () => {
+    if (isOfflineActive() || document.hidden || document.getElementById('splash-screen')) return;
+    const prevSig = getVaultSyncSignature(vaultState);
+    const res = await syncWithServer({ simulateOffline: false });
+    if (!res.vault) return;
+    const nextSig = getVaultSyncSignature(res.vault);
+    if (nextSig === prevSig) return;
+
+    vaultState = res.vault;
+    if (ui.showAuthPortal) return;
+
+    const activeEl = document.activeElement;
+    const isTypingInField =
+      activeEl &&
+      (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'SELECT');
+
+    if (ui.view === 'messages' && activeEl && activeEl.id === 'chat-text-input') {
+      updateActiveViewWithoutDroppingInput();
+    } else if (!isTypingInField && !activeFloatingPopover && !ui.editingMessageId) {
+      renderApp({ preserveScroll: true });
     }
+  };
+
+  window.addEventListener('online', () => {
+    runLiveBackgroundSync();
   });
+
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) runLiveBackgroundSync();
+  });
+
+  window.addEventListener('focus', () => {
+    runLiveBackgroundSync();
+  });
+
+  // Poll every 4.5s while in Messages for near-instant multi-device chat, or every 18s elsewhere
+  let lastBgPollAt = Date.now();
+  setInterval(() => {
+    const intervalMs = ui.view === 'messages' ? 4500 : 18000;
+    if (Date.now() - lastBgPollAt >= intervalMs) {
+      lastBgPollAt = Date.now();
+      runLiveBackgroundSync();
+    }
+  }, 1500);
 
   runAnimatedSplash(rootEl, () => {
     renderApp();
