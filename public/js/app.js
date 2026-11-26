@@ -11,15 +11,17 @@ import {
   saveSession,
   authenticateAccount,
   dispatchOfflineAction,
-  syncWithServer
+  syncWithServer,
+  uploadAndCacheMediaFile
 } from './offlineStore.js';
+import { openInAppMediaViewer, renderAttachmentGalleryHTML } from './mediaViewer.js';
 
 const SPLASH_DURATION_MS = 10000;
 
 const LOADING_CAPTIONS = [
   { threshold: 0, text: 'Initializing i-tutor workspace...' },
   { threshold: 22, text: 'Downloading accounts, timetables & study notes...' },
-  { threshold: 50, text: 'Caching remote assignments & offline packs...' },
+  { threshold: 50, text: 'Caching homework PDFs, diagrams & offline packs...' },
   { threshold: 78, text: 'Syncing admissions, chats & tuition packages...' },
   { threshold: 95, text: 'Ready — Confidence in learning.' }
 ];
@@ -37,6 +39,7 @@ const ui = {
   authTab: 'signin', // signin | join
   authError: '',
   authSuccess: '',
+  demoAccountsOpen: false,
   view: 'overview', // overview | admissions | timetable | assignments | toolkit | messages | broadcasts | tuition | account
   searchQuery: '',
   roleFilter: 'all',
@@ -48,13 +51,18 @@ const ui = {
 
   // Timetable & Exam editors
   timetableDay: 'All',
+  showSlotCreator: false,
   editingTimetableId: null,
+  showExamCreator: false,
   editingExamId: null,
 
-  // Assignments editors
-  expandedAssignmentId: 'asg-1',
+  // Homework / Assignments editors & media staging
+  expandedAssignmentId: null,
   showAssignCreator: false,
   editingAssignmentId: null,
+  stagedAssignAttachments: [],
+  stagedSubmissionAttachments: {}, // { [assignId]: Attachment[] }
+  uploadingTarget: '', // 'assign' | 'chat' | `sub:${id}` | ''
 
   // Study Toolkit tabs & editors
   toolkitTab: 'notes', // notes | quiz | flashcards | focus
@@ -68,15 +76,19 @@ const ui = {
   showCardModal: false,
   editingCardId: null,
 
-  // Messenger editors
+  // Messenger editors & media staging
   selectedRoomId: null,
   showGroupCreator: false,
   editingRoomId: null,
   editingMessageId: null,
+  stagedChatAttachments: [],
+  chatDraftText: '',
 
   // Broadcasts & Attendance editors
   broadcastSubtab: 'announcements', // announcements | attendance
+  showBroadcastCreator: false,
   editingBroadcastId: null,
+  showAttendanceCreator: false,
   editingAttendanceId: null,
 
   // Tuition & Package editors
@@ -119,6 +131,18 @@ function initials(name = 'IT') {
     .slice(0, 2)
     .map((w) => w[0].toUpperCase())
     .join('');
+}
+
+/* Quiet single-button ⋯ action menu — replaces cluttered side-by-side Edit/Delete button pairs */
+function renderMoreMenu(itemsHtml) {
+  return `
+    <details class="row-more-menu">
+      <summary class="row-more-trigger" aria-label="More actions" title="Options">${ICONS.dots}</summary>
+      <div class="row-more-popover">
+        ${itemsHtml}
+      </div>
+    </details>
+  `;
 }
 
 function getActiveUser() {
@@ -249,7 +273,8 @@ async function enrollAcceptedUserInRooms(profile) {
         sender_id: 'adm-lerato',
         sender_name: 'Lerato Sithole (Admissions)',
         sender_role: 'admissions',
-        body: `Welcome to i-tutor, ${profile.name}! Your account has been accepted and activated. Your timetables & offline study packs are ready.`,
+        body: `Welcome to i-tutor, ${profile.name}! Your account has been accepted and activated. Your timetables & offline homework packs are ready.`,
+        attachments: [],
         created_at: new Date().toISOString()
       }
     });
@@ -353,15 +378,15 @@ function runAnimatedSplash(rootEl, onDone) {
 }
 
 /* ==========================================================================
-   2. ACCOUNT PORTAL (SIGN IN / APPLY TO JOIN / NOT-JOINED VISITOR ACCESS)
+   2. CLEAN ACCOUNT PORTAL (DE-CLUTTERED SIGN IN / JOIN / VISITOR ACCESS)
    ========================================================================== */
 
 function renderAuthPortal(rootEl, { animateCard = true } = {}) {
   const plans = vaultState.tuitionInfo?.plans || [];
   const pendingTotal = getPendingAdmissionsCount();
   const quickAccounts = [
-    { id: 'adm-lerato', tag: `Admissions (${pendingTotal} Pending)`, label: 'Lerato Sithole' },
     { id: 'admin-1', tag: 'Super Admin', label: 'Kgomotso Dlamini' },
+    { id: 'adm-lerato', tag: `Admissions (${pendingTotal} Pending)`, label: 'Lerato Sithole' },
     { id: 'stu-thabo', tag: 'Student · Grade 12', label: 'Thabo Mokoena' },
     { id: 'tch-naledi', tag: 'Teacher · Maths', label: 'Ms. Naledi Khumalo' },
     { id: 'par-grace', tag: 'Parent Account', label: 'Mrs. Grace Mokoena' }
@@ -377,23 +402,23 @@ function renderAuthPortal(rootEl, { animateCard = true } = {}) {
             </div>
             <div>
               <h1 class="auth-hero-title">
-                <span style="color:var(--gold);">i</span>-tutor Accounts
+                <span style="color:var(--gold);">i</span>-tutor
               </h1>
               <p class="auth-hero-sub">Confidence in learning</p>
             </div>
           </div>
 
           <p class="auth-hero-copy">
-            Personal accounts for Students, Parents, Educators, and Admissions — with saved offline timetables, remote assignments, study toolkits, and full in-app Admissions management.
+            Offline-ready learning workspace with PDF, Photo & Video homework packs, direct teacher chats, and built-in media readers.
           </p>
 
           <div class="auth-visitor-box">
-            <span class="auth-visitor-kicker">Haven't Joined Yet?</span>
+            <span class="auth-visitor-kicker">Exploring Tuition?</span>
             <p class="auth-visitor-copy">
-              Browse transparent tuition packages, use the monthly fee calculator, view academy contacts, or try a sample quiz before creating an account.
+              View transparent monthly rates, estimate session fees, and reach Admissions without signing in.
             </p>
             <button class="gold-cta-btn auth-visitor-btn" id="btn-enter-visitor">
-              ${ICONS.tuition} <span>View Tuition Prices & Contacts</span>
+              ${ICONS.tuition} <span>Tuition & Contacts</span>
             </button>
           </div>
         </section>
@@ -426,19 +451,22 @@ function renderAuthPortal(rootEl, { animateCard = true } = {}) {
               ? `
             <form class="form-stack animated-drop" id="account-signin-form">
               <label style="font-size:0.79rem;font-weight:750;">Email, Phone Number, or Full Name</label>
-              <input class="field-input" name="identifier" placeholder="e.g. admissions@i-tutor.academy" required />
+              <input class="field-input" name="identifier" placeholder="e.g. admin@i-tutor.academy" required />
               <label style="font-size:0.79rem;font-weight:750;">Password / Account PIN</label>
               <input class="field-input" type="password" name="pin" placeholder="Enter PIN (Demo PIN: 1234)" required />
-              <button class="dark-cta-btn" type="submit" style="padding:0.72rem;width:100%;">Sign In to Workspace →</button>
+              <button class="dark-cta-btn" type="submit" style="padding:0.72rem;width:100%;">Sign In →</button>
             </form>
 
-            <div style="border-top:1px solid var(--border-warm);padding-top:0.85rem;display:flex;flex-direction:column;gap:0.55rem;">
-              <span class="row-sub" style="font-weight:800;">INSTANT 1-TAP DEMO ACCOUNTS:</span>
-              <div class="demo-accounts-grid">
+            <details class="quiet-disclosure" id="demo-accounts-disclosure" ${ui.demoAccountsOpen ? 'open' : ''}>
+              <summary class="quiet-disclosure-summary">
+                <span>Quick Demo Sign-In (Admin, Student, Teacher, Parent)</span>
+                <span class="muted-pill">5 Roles</span>
+              </summary>
+              <div class="demo-accounts-grid" style="margin-top:0.65rem;">
                 ${quickAccounts
                   .map(
                     (qa) => `
-                  <button class="demo-acc-btn" data-quick-login="${esc(qa.id)}">
+                  <button class="demo-acc-btn" type="button" data-quick-login="${esc(qa.id)}">
                     <span class="demo-acc-role">${esc(qa.tag)}</span>
                     <span class="demo-acc-name">${esc(qa.label)}</span>
                   </button>
@@ -446,11 +474,11 @@ function renderAuthPortal(rootEl, { animateCard = true } = {}) {
                   )
                   .join('')}
               </div>
-            </div>
+            </details>
           `
               : `
             <form class="form-stack animated-drop" id="account-join-form">
-              <p class="row-sub">Create your account application below. Admissions will review & accept your account in 1 click (works offline too!).</p>
+              <p class="row-sub">Submit your details below — Admissions activates accounts in 1 click.</p>
               <div class="form-grid-2">
                 <input class="field-input" name="name" placeholder="Full Name" required />
                 <select class="field-input" name="role" required>
@@ -475,7 +503,7 @@ function renderAuthPortal(rootEl, { animateCard = true } = {}) {
                 </select>
               </div>
               <input class="field-input" name="notes" placeholder="Goals or message for Admissions..." />
-              <button class="dark-cta-btn" type="submit" style="padding:0.72rem;width:100%;">Submit Join Application →</button>
+              <button class="dark-cta-btn" type="submit" style="padding:0.72rem;width:100%;">Submit Application →</button>
             </form>
           `
           }
@@ -486,6 +514,13 @@ function renderAuthPortal(rootEl, { animateCard = true } = {}) {
       </div>
     </div>
   `;
+
+  const disc = document.getElementById('demo-accounts-disclosure');
+  if (disc) {
+    disc.addEventListener('toggle', () => {
+      ui.demoAccountsOpen = disc.open;
+    });
+  }
 
   document.querySelectorAll('[data-auth-tab]').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -567,7 +602,7 @@ function renderAuthPortal(rootEl, { animateCard = true } = {}) {
         notes: fd.get('notes') || 'Applied via in-app registration.'
       };
       ui.authError = '';
-      ui.authSuccess = `Application received for ${newProfile.name}! Status: Pending Admissions Approval. Sign in as Admissions (Lerato Sithole) below to accept in 1 click!`;
+      ui.authSuccess = `Application received for ${newProfile.name}! Status: Pending Admissions Approval.`;
       ui.authTab = 'signin';
       await performActionAndSync('UPSERT_ACCOUNT', newProfile, 'Join application sent to Admissions!');
     });
@@ -575,7 +610,7 @@ function renderAuthPortal(rootEl, { animateCard = true } = {}) {
 }
 
 /* ==========================================================================
-   3. ADMISSIONS & FULL ACCOUNT MANAGEMENT VIEW ("ACCEPT ANYONE & EDIT ALL")
+   3. ADMISSIONS & ACCOUNT MANAGEMENT (CLEAN 1-CLICK APPROVAL + ⋯ MENUS)
    ========================================================================== */
 
 function buildAdmissionsStage(user) {
@@ -604,11 +639,11 @@ function buildAdmissionsStage(user) {
   return `
     <div class="page-header-row">
       <div>
-        <h1>Admissions Queue & Full Account Management</h1>
-        <p>Accept anyone joining i-tutor in 1 click, convert enquiries into active accounts, or create & edit any Student, Parent, Teacher, Admissions, or Admin account.</p>
+        <h1>Admissions & Accounts</h1>
+        <p>Approve applicants in 1 click or manage any Student, Parent, Teacher, or Staff account.</p>
       </div>
       <button class="dark-cta-btn" id="btn-toggle-new-account">
-        ${ICONS.plus} ${ui.showNewAccountForm ? 'Close Creator' : 'Create Account Directly'}
+        ${ICONS.plus} ${ui.showNewAccountForm || editingAcc ? 'Close' : 'New Account'}
       </button>
     </div>
 
@@ -617,7 +652,7 @@ function buildAdmissionsStage(user) {
         ? `
       <form class="panel-card form-stack" id="upsert-account-form">
         <div class="panel-head">
-          <h2 class="panel-title">${editingAcc ? `Edit Account · ${esc(editingAcc.name)}` : 'Create New Active Account'}</h2>
+          <h2 class="panel-title">${editingAcc ? `Edit Account · ${esc(editingAcc.name)}` : 'Create Active Account'}</h2>
           <button type="button" class="outline-btn" id="btn-cancel-account-edit">Cancel</button>
         </div>
         <input type="hidden" name="id" value="${esc(editingAcc?.id || '')}" />
@@ -649,7 +684,7 @@ function buildAdmissionsStage(user) {
         </div>
         <div class="form-grid-2">
           <input class="field-input" name="grade" value="${esc(editingAcc?.grade || 'Grade 12')}" placeholder="Grade / Department" />
-          <input class="field-input" name="subtitle" value="${esc(editingAcc?.subtitle || '')}" placeholder="Profile Subtitle / Stream" />
+          <input class="field-input" name="subtitle" value="${esc(editingAcc?.subtitle || '')}" placeholder="Profile Subtitle" />
         </div>
         <div class="form-grid-2">
           <input class="field-input" name="subjectsRaw" value="${esc((editingAcc?.subjects || []).join(', '))}" placeholder="Subjects (comma-separated)" />
@@ -662,39 +697,40 @@ function buildAdmissionsStage(user) {
           </select>
         </div>
         <input class="field-input" name="notes" value="${esc(editingAcc?.notes || '')}" placeholder="Admissions / Learner Notes" />
-        <button class="dark-cta-btn" type="submit">${ICONS.check} Save Account & Sync Everywhere</button>
+        <button class="dark-cta-btn" type="submit">${ICONS.check} Save Account</button>
       </form>
     `
         : ''
     }
 
-    <!-- PENDING JOIN APPLICATIONS -->
     <section class="panel-card">
       <div class="panel-head">
-        <h2 class="panel-title">Pending Join Applications (${pendingApplicants.length})</h2>
-        <span class="pill-badge">1-Click Admissions Approval</span>
+        <h2 class="panel-title">Pending Applications (${pendingApplicants.length})</h2>
+        <span class="pill-badge">1-Click Approval</span>
       </div>
       ${
         pendingApplicants.length === 0
-          ? `<p class="row-sub">All account applications have been reviewed! Anyone who applies on the Join screen appears right here.</p>`
+          ? `<p class="row-sub">All applications have been reviewed.</p>`
           : pendingApplicants
               .map(
                 (app) => `
-            <div class="list-row" style="flex-wrap:wrap;">
+            <div class="list-row">
               <div class="list-row-col">
                 <span class="row-title">
                   ${esc(app.name)}
-                  <span class="status-chip pending">Pending ${esc(app.role)}</span>
+                  <span class="status-chip pending">${esc(app.role)}</span>
                 </span>
-                <span class="row-sub">${esc(app.grade)} · Plan: <strong>${esc(app.selected_plan || 'Standard')}</strong> · Subjects: ${esc(
+                <span class="row-sub">${esc(app.grade)} · ${esc(app.selected_plan || 'Standard')} · ${esc(
                   (app.subjects || []).join(', ') || 'General'
                 )}</span>
-                <span class="row-sub">Email: ${esc(app.email)} · Phone: ${esc(app.phone)} · Note: "${esc(app.notes || '')}"</span>
+                <span class="row-sub">${esc(app.email)} · ${esc(app.phone)}</span>
               </div>
               <div class="action-cluster">
-                <button class="approve-btn" data-approve-acc="${esc(app.id)}">✓ Accept & Activate</button>
-                <button class="icon-action-btn" data-edit-acc="${esc(app.id)}">${ICONS.edit} Edit</button>
-                <button class="icon-action-btn danger" data-decline-acc="${esc(app.id)}">${ICONS.trash} Decline</button>
+                <button class="approve-btn" data-approve-acc="${esc(app.id)}">✓ Accept</button>
+                ${renderMoreMenu(`
+                  <button type="button" class="more-menu-item" data-edit-acc="${esc(app.id)}">${ICONS.edit} Edit Details</button>
+                  <button type="button" class="more-menu-item is-danger" data-decline-acc="${esc(app.id)}">${ICONS.trash} Decline</button>
+                `)}
               </div>
             </div>
           `
@@ -703,20 +739,17 @@ function buildAdmissionsStage(user) {
       }
     </section>
 
-    <!-- PUBLIC TUITION ENQUIRIES -->
-    <section class="panel-card">
-      <div class="panel-head">
-        <h2 class="panel-title">Public Tuition Enquiries (${enquiries.length})</h2>
-        <span class="muted-pill">Convert Leads Directly into Active Accounts</span>
-      </div>
-      ${
-        enquiries.length === 0
-          ? `<p class="row-sub">No public enquiries waiting right now.</p>`
-          : enquiries
-              .map((eq) => {
-                const isEditingEq = ui.editingEnquiryId === eq.id;
-                return isEditingEq
-                  ? `
+    ${
+      enquiries.length > 0
+        ? `
+      <section class="panel-card">
+        <div class="panel-head">
+          <h2 class="panel-title">Tuition Enquiries (${enquiries.length})</h2>
+        </div>
+        ${enquiries
+          .map((eq) => {
+            if (ui.editingEnquiryId === eq.id) {
+              return `
                 <form class="list-row form-stack edit-enquiry-form" data-eq-id="${esc(eq.id)}" style="align-items:stretch;">
                   <div class="form-grid-2">
                     <input class="field-input" name="full_name" value="${esc(eq.full_name)}" required />
@@ -728,71 +761,66 @@ function buildAdmissionsStage(user) {
                   </div>
                   <input class="field-input" name="message" value="${esc(eq.message)}" />
                   <div class="action-cluster">
-                    <button class="dark-cta-btn" type="submit">Save Enquiry</button>
+                    <button class="dark-cta-btn" type="submit">Save</button>
                     <button class="outline-btn" type="button" data-cancel-eq>Cancel</button>
                   </div>
                 </form>
-              `
-                  : `
-                <div class="list-row" style="flex-wrap:wrap;">
-                  <div class="list-row-col">
-                    <span class="row-title">${esc(eq.full_name)} · ${esc(eq.student_grade)} (${esc(eq.selected_plan)})</span>
-                    <span class="row-sub">Contact: ${esc(eq.contact_detail)} — "${esc(eq.message)}"</span>
-                  </div>
-                  <div class="action-cluster">
-                    ${
-                      eq.status === 'accepted'
-                        ? `<span class="status-chip active">Enrolled ✓</span>`
-                        : `<button class="approve-btn" data-convert-eq="${esc(eq.id)}">✓ Accept & Create Account</button>`
-                    }
-                    <button class="icon-action-btn" data-edit-eq="${esc(eq.id)}">${ICONS.edit} Edit</button>
-                    <button class="icon-action-btn danger" data-del-eq="${esc(eq.id)}">${ICONS.trash}</button>
-                  </div>
-                </div>
               `;
-              })
-              .join('')
-      }
-    </section>
+            }
+            return `
+              <div class="list-row">
+                <div class="list-row-col">
+                  <span class="row-title">${esc(eq.full_name)} · ${esc(eq.student_grade)} (${esc(eq.selected_plan)})</span>
+                  <span class="row-sub">${esc(eq.contact_detail)} — "${esc(eq.message)}"</span>
+                </div>
+                <div class="action-cluster">
+                  ${
+                    eq.status === 'accepted'
+                      ? `<span class="status-chip active">Enrolled ✓</span>`
+                      : `<button class="approve-btn" data-convert-eq="${esc(eq.id)}">✓ Enroll</button>`
+                  }
+                  ${renderMoreMenu(`
+                    <button type="button" class="more-menu-item" data-edit-eq="${esc(eq.id)}">${ICONS.edit} Edit</button>
+                    <button type="button" class="more-menu-item is-danger" data-del-eq="${esc(eq.id)}">${ICONS.trash} Delete</button>
+                  `)}
+                </div>
+              </div>
+            `;
+          })
+          .join('')}
+      </section>
+    `
+        : ''
+    }
 
-    <!-- ALL ACCOUNTS DIRECTORY -->
     <section class="panel-card">
       <div class="panel-head">
-        <h2 class="panel-title">All Academy Accounts Directory (${filteredAccounts.length})</h2>
-        <div class="subtab-bar">
+        <h2 class="panel-title">Directory (${filteredAccounts.length})</h2>
+        <select class="field-input compact-select" id="role-filter-select" aria-label="Filter accounts by role">
           ${['all', 'student', 'parent', 'teacher', 'admissions', 'admin']
             .map(
-              (r) => `
-            <button class="subtab-btn ${ui.roleFilter === r ? 'is-active' : ''}" data-role-filter="${r}">
-              ${r.toUpperCase()}
-            </button>
-          `
+              (r) => `<option value="${r}" ${ui.roleFilter === r ? 'selected' : ''}>${
+                r === 'all' ? 'All Roles' : r.toUpperCase()
+              }</option>`
             )
             .join('')}
-        </div>
+        </select>
       </div>
 
       <div class="form-stack">
         ${filteredAccounts
           .map(
             (acc) => `
-          <div class="list-row" style="flex-wrap:wrap;">
+          <div class="list-row">
             <div class="list-row-col">
               <span class="row-title">
                 ${esc(acc.name)}
                 <span class="muted-pill">${esc(acc.role.toUpperCase())}</span>
                 <span class="status-chip ${esc(acc.status || 'active')}">${esc(acc.status || 'active')}</span>
               </span>
-              <span class="row-sub">${esc(acc.subtitle || acc.grade)} · Email: ${esc(acc.email || '—')} · Phone: ${esc(
-              acc.phone || '—'
-            )} · PIN: <code>${esc(acc.pin || '1234')}</code></span>
-              ${
-                acc.selected_plan
-                  ? `<span class="row-sub">Plan: ${esc(acc.selected_plan)} · Subjects: ${esc(
-                      (acc.subjects || []).join(', ')
-                    )}</span>`
-                  : ''
-              }
+              <span class="row-sub">${esc(acc.subtitle || acc.grade)} · ${esc(acc.email || '—')} · PIN: <code>${esc(
+              acc.pin || '1234'
+            )}</code></span>
             </div>
             <div class="action-cluster">
               ${
@@ -800,12 +828,14 @@ function buildAdmissionsStage(user) {
                   ? `<button class="approve-btn" data-approve-acc="${esc(acc.id)}">✓ Activate</button>`
                   : ''
               }
-              <button class="icon-action-btn" data-edit-acc="${esc(acc.id)}">${ICONS.edit} Edit</button>
-              ${
-                acc.id !== user.id
-                  ? `<button class="icon-action-btn danger" data-del-acc="${esc(acc.id)}">${ICONS.trash} Delete</button>`
-                  : ''
-              }
+              ${renderMoreMenu(`
+                <button type="button" class="more-menu-item" data-edit-acc="${esc(acc.id)}">${ICONS.edit} Edit Account</button>
+                ${
+                  acc.id !== user.id
+                    ? `<button type="button" class="more-menu-item is-danger" data-del-acc="${esc(acc.id)}">${ICONS.trash} Delete Account</button>`
+                    : ''
+                }
+              `)}
             </div>
           </div>
         `
@@ -817,7 +847,7 @@ function buildAdmissionsStage(user) {
 }
 
 /* ==========================================================================
-   4. MY ACCOUNT SETTINGS VIEW (FOR EVERY LOGGED-IN USER)
+   4. MY ACCOUNT SETTINGS VIEW
    ========================================================================== */
 
 function buildMyAccountStage(user) {
@@ -825,9 +855,9 @@ function buildMyAccountStage(user) {
     return `
       <section class="panel-card">
         <h2 class="panel-title">Create or Sign In to Your i-tutor Account</h2>
-        <p class="row-sub">You are currently browsing as a Visitor. Apply to join i-tutor or sign in to an existing account anytime!</p>
+        <p class="row-sub">You are browsing as a Visitor. Apply to join or sign in anytime.</p>
         <div class="action-cluster">
-          <button class="dark-cta-btn" id="btn-go-join-portal">Apply to Join i-tutor</button>
+          <button class="dark-cta-btn" id="btn-go-join-portal">Apply to Join</button>
           <button class="outline-btn" id="btn-go-signin-portal">Sign In</button>
         </div>
       </section>
@@ -837,19 +867,19 @@ function buildMyAccountStage(user) {
   return `
     <div class="page-header-row">
       <div>
-        <h1>My Account & Profile Settings</h1>
-        <p>Update your personal details, subjects, and password/PIN — saved offline and synced across devices.</p>
+        <h1>My Account</h1>
+        <p>Personal profile, preferences, and account switching.</p>
       </div>
-      <button class="outline-btn" id="btn-signout-main">${ICONS.logout} Sign Out / Switch Account</button>
+      <button class="outline-btn" id="btn-signout-main">${ICONS.logout} Switch Account</button>
     </div>
 
     <form class="panel-card form-stack" id="my-profile-form">
       <div class="panel-head">
         <div style="display:flex;align-items:center;gap:0.75rem;">
-          <div class="account-avatar-gold" style="width:46px;height:46px;font-size:1rem;">${esc(initials(user.name))}</div>
+          <div class="account-avatar-gold" style="width:44px;height:44px;font-size:0.98rem;">${esc(initials(user.name))}</div>
           <div>
             <h2 class="panel-title">${esc(user.name)}</h2>
-            <span class="status-chip active">${esc(user.role.toUpperCase())} ACCOUNT · ACTIVE</span>
+            <span class="status-chip active">${esc(user.role.toUpperCase())}</span>
           </div>
         </div>
       </div>
@@ -892,14 +922,13 @@ function buildMyAccountStage(user) {
         <input class="field-input" name="subjectsRaw" value="${esc((user.subjects || []).join(', '))}" />
       </div>
 
-      <button class="dark-cta-btn" type="submit" style="align-self:flex-start;">${ICONS.check} Save My Account Changes</button>
+      <button class="dark-cta-btn" type="submit" style="align-self:flex-start;">${ICONS.check} Save Changes</button>
     </form>
   `;
 }
 
 /* ==========================================================================
-   5. OVERVIEW, TIMETABLE, ASSIGNMENTS, TOOLKIT, CHATS, BROADCASTS & TUITION
-      (WITH FULL IN-APP EDITING FOR ADMISSIONS & ADMIN!)
+   5. OVERVIEW HUB (CALM, BREATHABLE, ZERO REDUNDANT BUTTONS)
    ========================================================================== */
 
 function buildOverviewStage(user) {
@@ -907,13 +936,12 @@ function buildOverviewStage(user) {
     const info = vaultState.tuitionInfo;
     return `
       <section class="panel-card" style="background:linear-gradient(135deg, rgba(242,183,40,0.22), var(--surface-ivory));">
-        <span class="pill-badge" style="align-self:flex-start;">Visitor Preview · Not Joined Yet</span>
-        <h1 style="font-size:1.62rem;font-weight:850;letter-spacing:-0.03em;">${esc(info.headline)}</h1>
+        <span class="pill-badge" style="align-self:flex-start;">Public Preview</span>
+        <h1 style="font-size:1.55rem;font-weight:850;letter-spacing:-0.03em;">${esc(info.headline)}</h1>
         <p style="font-size:0.9rem;color:var(--charcoal-soft);line-height:1.5;">${esc(info.intro)}</p>
         <div class="action-cluster" style="margin-top:0.25rem;">
-          <button class="dark-cta-btn" id="visitor-apply-cta">${ICONS.plus} Apply to Join i-tutor</button>
-          <button class="outline-btn" data-nav="tuition">${ICONS.tuition} See Tuition Prices & Contacts</button>
-          <button class="outline-btn" data-open-toolkit="quiz">${ICONS.quiz} Try Free Sample Quiz</button>
+          <button class="dark-cta-btn" id="visitor-apply-cta">${ICONS.plus} Apply to Join</button>
+          <button class="outline-btn" data-nav="tuition">Tuition & Contacts</button>
         </div>
       </section>
     `;
@@ -935,54 +963,34 @@ function buildOverviewStage(user) {
   let kpis = [];
   if (canEditEverything(user)) {
     kpis = [
-      {
-        label: 'Admissions Queue',
-        value: `${pendingAdmissions} Pending`,
-        foot: 'Accept applicants in 1 click',
-        go: 'admissions'
-      },
-      {
-        label: 'Active Accounts',
-        value: `${(vaultState.profiles || []).filter((p) => p.status === 'active').length} Users`,
-        foot: 'Edit any account or role',
-        go: 'admissions'
-      },
-      {
-        label: 'Classes & Tasks',
-        value: `${vaultState.timetables.length} / ${vaultState.assignments.length}`,
-        foot: 'Edit schedules & assignments',
-        go: 'timetable'
-      },
-      {
-        label: 'Tuition Packages',
-        value: `${(vaultState.tuitionInfo.plans || []).length} Plans`,
-        foot: 'Edit prices & contacts live',
-        go: 'tuition'
-      }
+      { label: 'Admissions', value: `${pendingAdmissions} Pending`, foot: '1-click approvals', go: 'admissions' },
+      { label: 'Homework Packs', value: `${vaultState.assignments.length} Active`, foot: 'Upload PDFs, Photos & Videos', go: 'assignments' },
+      { label: 'Chats & Groups', value: `${visibleRooms.length} Rooms`, foot: 'Share media & messages', go: 'messages' },
+      { label: 'Accounts', value: `${(vaultState.profiles || []).filter((p) => p.status === 'active').length} Active`, foot: 'Directory & roles', go: 'admissions' }
     ];
   } else if (user.role === 'teacher') {
     kpis = [
-      { label: 'Saved Class Schedule', value: `${vaultState.timetables.length} Slots`, foot: 'Manage timetable', go: 'timetable' },
-      { label: 'Submissions to Mark', value: `${ungradedCount} Waiting`, foot: 'Grade remote work', go: 'assignments' },
-      { label: 'Class Attendance', value: `${presentRatio}%`, foot: 'Log lesson recaps', go: 'broadcasts' },
-      { label: 'Active Chat Rooms', value: `${visibleRooms.length} Open`, foot: '1-on-1s & study groups', go: 'messages' }
+      { label: 'Homework & Media', value: `${ungradedCount} To Mark`, foot: 'Post PDFs, Photos & Videos', go: 'assignments' },
+      { label: 'Class Schedule', value: `${vaultState.timetables.length} Slots`, foot: 'Weekly timetable', go: 'timetable' },
+      { label: 'Attendance', value: `${presentRatio}%`, foot: 'Lesson recaps', go: 'broadcasts' },
+      { label: 'Chats & Groups', value: `${visibleRooms.length} Open`, foot: 'Send media & notes', go: 'messages' }
     ];
   } else if (user.role === 'parent') {
     const childId = user.linked_student_id || 'stu-thabo';
     const childSubs = (vaultState.submissions || []).filter((s) => s.student_id === childId);
     const graded = childSubs.find((s) => s.status === 'graded');
     kpis = [
-      { label: 'Learner Attendance', value: `${presentRatio}%`, foot: 'View tutor recaps', go: 'broadcasts' },
-      { label: 'Latest Graded Task', value: graded ? `${graded.marks_awarded} Marks` : 'In Progress', foot: 'Read teacher feedback', go: 'assignments' },
-      { label: 'Saved Timetable', value: `${vaultState.timetables.length} Classes`, foot: 'Stored offline', go: 'timetable' },
-      { label: 'Teacher Channels', value: `${visibleRooms.length} Open`, foot: 'Message educators', go: 'messages' }
+      { label: 'Attendance', value: `${presentRatio}%`, foot: 'Tutor recaps', go: 'broadcasts' },
+      { label: 'Homework', value: graded ? `${graded.marks_awarded} Marks` : 'Active', foot: 'Open PDFs & feedback', go: 'assignments' },
+      { label: 'Timetable', value: `${vaultState.timetables.length} Classes`, foot: 'Saved offline', go: 'timetable' },
+      { label: 'Teacher Chats', value: `${visibleRooms.length} Open`, foot: 'Direct channels', go: 'messages' }
     ];
   } else {
     kpis = [
-      { label: 'Sunrise Confidence', value: `${avgConf}%`, foot: `Focus next: ${weakest.subject}`, go: 'toolkit' },
-      { label: 'Remote Assignments', value: `${pendingCount} Due`, foot: `${vaultState.assignments.length} packs cached offline`, go: 'assignments' },
-      { label: 'Saved Timetable', value: `${vaultState.timetables.length} Slots`, foot: 'Works with zero data', go: 'timetable' },
-      { label: 'Notes & Flashcards', value: `${vaultState.notes.length + vaultState.flashcards.length} Ready`, foot: 'Formulas, quizzes & cards', go: 'toolkit' }
+      { label: 'Confidence', value: `${avgConf}%`, foot: `Next: ${weakest.subject}`, go: 'toolkit' },
+      { label: 'Homework', value: `${pendingCount} Due`, foot: 'Open PDFs, Photos & Videos', go: 'assignments' },
+      { label: 'Chats & Groups', value: `${visibleRooms.length} Open`, foot: 'Share media & ask tutors', go: 'messages' },
+      { label: 'Study Toolkit', value: `${vaultState.notes.length + vaultState.flashcards.length} Items`, foot: 'Notes, quiz & cards', go: 'toolkit' }
     ];
   }
 
@@ -994,11 +1002,10 @@ function buildOverviewStage(user) {
         <div class="ribbon-left">
           <div class="ribbon-icon">${ICONS.broadcast}</div>
           <div style="min-width:0;">
-            <div class="ribbon-tag">Official Broadcast · ${esc(latestBroadcast.author_name)}</div>
+            <div class="ribbon-tag">Notice · ${esc(latestBroadcast.author_name)}</div>
             <div class="ribbon-headline">${esc(latestBroadcast.title)} — ${esc(latestBroadcast.body)}</div>
           </div>
         </div>
-        <span class="pill-badge">${canEditEverything(user) ? 'Manage' : 'Read'}</span>
       </button>
     `
         : ''
@@ -1006,21 +1013,14 @@ function buildOverviewStage(user) {
 
     <div class="page-header-row">
       <div>
-        <h1>Welcome, ${esc(user.name)}</h1>
-        <p>${esc(user.subtitle || user.grade)} · Signed in as <strong>${esc(user.role.toUpperCase())}</strong>${
-    canEditEverything(user) ? ' (Full In-App Edit Permissions Enabled)' : ''
-  }</p>
+        <h1>Welcome, ${esc(user.name.split(' ')[0])}</h1>
+        <p>${esc(user.subtitle || user.grade)} · ${esc(user.role.toUpperCase())}</p>
       </div>
-      <div class="action-cluster">
-        ${
-          canEditEverything(user)
-            ? `<button class="dark-cta-btn" data-nav="admissions">${ICONS.users} Review Admissions (${pendingAdmissions})</button>`
-            : isStaff(user)
-            ? `<button class="dark-cta-btn" id="quick-new-assign-btn">${ICONS.plus} Post Remote Assignment</button>`
-            : `<button class="dark-cta-btn" data-open-toolkit="quiz">${ICONS.quiz} Quick Offline Quiz</button>`
-        }
-        <button class="outline-btn" data-nav="account">${ICONS.user} My Account</button>
-      </div>
+      ${
+        isStaff(user)
+          ? `<button class="dark-cta-btn" id="quick-new-assign-btn">${ICONS.plus} Post Homework</button>`
+          : `<button class="dark-cta-btn" data-open-toolkit="quiz">${ICONS.quiz} Quick Practice</button>`
+      }
     </div>
 
     <section class="kpi-strip">
@@ -1040,54 +1040,60 @@ function buildOverviewStage(user) {
     <div class="two-col-grid">
       <section class="panel-card">
         <div class="panel-head">
-          <h2 class="panel-title">Upcoming Offline Timetable</h2>
-          <button class="outline-btn" data-nav="timetable">${canEditEverything(user) ? 'Edit Schedule' : 'Full Schedule'}</button>
+          <h2 class="panel-title">Recent Homework & Media Packs</h2>
+          <button class="text-link-btn" data-nav="assignments">See all →</button>
         </div>
-        ${(vaultState.timetables || [])
+        ${(vaultState.assignments || [])
           .slice(0, 3)
-          .map(
-            (slot) => `
-          <div class="list-row">
-            <div class="list-row-col">
-              <span class="row-title">${esc(slot.subject)} · ${esc(slot.day_of_week)}</span>
-              <span class="row-sub">${esc(slot.start_time)}–${esc(slot.end_time)} · ${esc(slot.topic)}</span>
-              <span class="row-sub">${esc(slot.teacher_name)} · ${esc(slot.location_mode)}</span>
-            </div>
-            <span class="pill-badge">Saved</span>
-          </div>
-        `
-          )
+          .map((asg) => {
+            const attCount = Array.isArray(asg.attachments) ? asg.attachments.length : 0;
+            return `
+              <button type="button" class="list-row clickable-list-row" data-jump-assign="${esc(asg.id)}">
+                <div class="list-row-col">
+                  <span class="row-title">${esc(asg.title)}</span>
+                  <span class="row-sub">${esc(asg.subject)} · Due ${esc(asg.due_date)}${
+              attCount ? ` · 📎 ${attCount} ${attCount === 1 ? 'file' : 'files'}` : ''
+            }</span>
+                </div>
+                <span class="pill-badge">Open →</span>
+              </button>
+            `;
+          })
           .join('')}
       </section>
 
       <section class="panel-card">
         <div class="panel-head">
-          <h2 class="panel-title">Remote Assignments & Offline Packs</h2>
-          <button class="outline-btn" data-nav="assignments">${canEditEverything(user) ? 'Manage All' : 'View All'}</button>
+          <h2 class="panel-title">Upcoming Classes</h2>
+          <button class="text-link-btn" data-nav="timetable">Full schedule →</button>
         </div>
-        ${(vaultState.assignments || [])
+        ${(vaultState.timetables || [])
           .slice(0, 3)
-          .map((asg) => `
-            <div class="list-row">
-              <div class="list-row-col">
-                <span class="row-title">${esc(asg.title)}</span>
-                <span class="row-sub">${esc(asg.subject)} · Due ${esc(asg.due_date)}</span>
-              </div>
-              <button class="outline-btn" data-jump-assign="${esc(asg.id)}">Open</button>
+          .map(
+            (slot) => `
+          <button type="button" class="list-row clickable-list-row" data-nav="timetable">
+            <div class="list-row-col">
+              <span class="row-title">${esc(slot.subject)} · ${esc(slot.day_of_week)}</span>
+              <span class="row-sub">${esc(slot.start_time)}–${esc(slot.end_time)} · ${esc(slot.topic)}</span>
             </div>
-          `)
+            <span class="muted-pill">${esc(slot.grade_group)}</span>
+          </button>
+        `
+          )
           .join('')}
       </section>
     </div>
   `;
 }
 
-/* --- TIMETABLE & EXAMS (WITH FULL EDIT & DELETE) --- */
+/* ==========================================================================
+   6. TIMETABLE & EXAMS (CLEAN TOGGLES + QUIET ⋯ MENUS)
+   ========================================================================== */
 
 function buildTimetableStage(user) {
   const days = ['All', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   const q = ui.searchQuery.trim().toLowerCase();
-  const superEdit = canEditEverything(user) || user.role === 'teacher';
+  const superEdit = isStaff(user);
 
   const slots = (vaultState.timetables || []).filter((slot) => {
     const dayOk = ui.timetableDay === 'All' || slot.day_of_week === ui.timetableDay;
@@ -1109,29 +1115,79 @@ function buildTimetableStage(user) {
   return `
     <div class="page-header-row">
       <div>
-        <h1>Saved Offline Timetable & Exam Dates</h1>
-        <p>Automatically stored on every device. ${superEdit ? 'Click Edit on any slot to modify times, rooms, teachers or topics.' : ''}</p>
+        <h1>Schedule & Exam Dates</h1>
+        <p>Saved automatically on this device for offline viewing.</p>
       </div>
-      <span class="pill-badge">${ICONS.check} Auto-Saved Offline</span>
+      ${
+        user.role !== 'visitor'
+          ? `<button class="dark-cta-btn" id="btn-toggle-slot-creator">${ICONS.plus} ${
+              ui.showSlotCreator || editingSlot ? 'Close' : 'Add Slot'
+            }</button>`
+          : ''
+      }
     </div>
 
     <div class="subtab-bar">
       ${days
-        .map((d) => `<button class="subtab-btn ${ui.timetableDay === d ? 'is-active' : ''}" data-tt-day="${d}">${d}</button>`)
+        .map(
+          (d) =>
+            `<button class="subtab-btn ${ui.timetableDay === d ? 'is-active' : ''}" data-tt-day="${d}">${
+              d === 'All' ? 'All Days' : d.slice(0, 3)
+            }</button>`
+        )
         .join('')}
     </div>
+
+    ${
+      ui.showSlotCreator || editingSlot
+        ? `
+      <form class="panel-card form-stack" id="upsert-tt-form">
+        <div class="panel-head">
+          <h2 class="panel-title">${editingSlot ? `Edit Slot · ${esc(editingSlot.subject)}` : 'Add Class / Study Slot'}</h2>
+          <button type="button" class="outline-btn" id="cancel-tt-edit">Cancel</button>
+        </div>
+        <input type="hidden" name="id" value="${esc(editingSlot?.id || '')}" />
+        <div class="form-grid-2">
+          <select class="field-input" name="day_of_week" required>
+            ${['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+              .map((d) => `<option value="${d}" ${editingSlot?.day_of_week === d ? 'selected' : ''}>${d}</option>`)
+              .join('')}
+          </select>
+          <input class="field-input" name="subject" value="${esc(editingSlot?.subject || '')}" placeholder="Subject (e.g. Mathematics)" required />
+        </div>
+        <div class="form-grid-2">
+          <input class="field-input" name="start_time" value="${esc(editingSlot?.start_time || '')}" placeholder="Start (e.g. 15:30)" required />
+          <input class="field-input" name="end_time" value="${esc(editingSlot?.end_time || '')}" placeholder="End (e.g. 17:00)" required />
+        </div>
+        <div class="form-grid-2">
+          <input class="field-input" name="teacher_name" value="${esc(
+            editingSlot?.teacher_name || (superEdit ? user.name : `${user.name} (Self-Study)`)
+          )}" placeholder="Teacher Name" required />
+          <input class="field-input" name="grade_group" value="${esc(
+            editingSlot?.grade_group || user.grade || 'Grade 12'
+          )}" placeholder="Grade Group" required />
+        </div>
+        <input class="field-input" name="topic" value="${esc(editingSlot?.topic || '')}" placeholder="Topic / Focus" required />
+        <input class="field-input" name="location_mode" value="${esc(
+          editingSlot?.location_mode || ''
+        )}" placeholder="Room or Mode (e.g. Studio A / Remote Pack)" required />
+        <button class="dark-cta-btn" type="submit">${ICONS.check} Save Slot</button>
+      </form>
+    `
+        : ''
+    }
 
     <div class="two-col-grid">
       <section class="panel-card">
         <div class="panel-head">
-          <h2 class="panel-title">Weekly Schedule (${slots.length})</h2>
+          <h2 class="panel-title">Weekly Classes (${slots.length})</h2>
         </div>
 
         ${slots
           .map((s) => {
             const canModify = superEdit || s.owner_id === user.id;
             return `
-              <div class="list-row" style="flex-wrap:wrap;">
+              <div class="list-row">
                 <div class="list-row-col">
                   <span class="row-title">${esc(s.subject)} · <span class="muted-pill">${esc(s.grade_group)}</span></span>
                   <span class="row-sub">${esc(s.day_of_week)} · ${esc(s.start_time)}–${esc(s.end_time)} · ${esc(
@@ -1141,99 +1197,69 @@ function buildTimetableStage(user) {
                 </div>
                 ${
                   canModify
-                    ? `
-                  <div class="action-cluster">
-                    <button class="icon-action-btn" data-edit-tt="${esc(s.id)}">${ICONS.edit} Edit</button>
-                    <button class="icon-action-btn danger" data-del-tt="${esc(s.id)}">${ICONS.trash}</button>
-                  </div>
-                `
+                    ? renderMoreMenu(`
+                        <button type="button" class="more-menu-item" data-edit-tt="${esc(s.id)}">${ICONS.edit} Edit Slot</button>
+                        <button type="button" class="more-menu-item is-danger" data-del-tt="${esc(s.id)}">${ICONS.trash} Remove Slot</button>
+                      `)
                     : ''
                 }
               </div>
             `;
           })
           .join('')}
-
-        <form class="form-stack" id="upsert-tt-form" style="margin-top:0.5rem;padding-top:0.85rem;border-top:1px solid var(--border-warm);">
-          <div class="panel-head">
-            <span class="panel-title" style="font-size:0.92rem;">
-              ${editingSlot ? `Editing Slot: ${esc(editingSlot.subject)}` : superEdit ? '+ Add Official Timetable Slot' : '+ Add Personal Study Slot'}
-            </span>
-            ${editingSlot ? `<button type="button" class="outline-btn" id="cancel-tt-edit">Cancel Edit</button>` : ''}
-          </div>
-          <input type="hidden" name="id" value="${esc(editingSlot?.id || '')}" />
-          <div class="form-grid-2">
-            <select class="field-input" name="day_of_week" required>
-              ${['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
-                .map(
-                  (d) => `<option value="${d}" ${editingSlot?.day_of_week === d ? 'selected' : ''}>${d}</option>`
-                )
-                .join('')}
-            </select>
-            <input class="field-input" name="subject" value="${esc(editingSlot?.subject || '')}" placeholder="Subject (e.g. Mathematics)" required />
-          </div>
-          <div class="form-grid-2">
-            <input class="field-input" name="start_time" value="${esc(editingSlot?.start_time || '')}" placeholder="Start (e.g. 15:30)" required />
-            <input class="field-input" name="end_time" value="${esc(editingSlot?.end_time || '')}" placeholder="End (e.g. 17:00)" required />
-          </div>
-          <div class="form-grid-2">
-            <input class="field-input" name="teacher_name" value="${esc(
-              editingSlot?.teacher_name || (superEdit ? user.name : `${user.name} (Self-Study)`)
-            )}" placeholder="Teacher Name" required />
-            <input class="field-input" name="grade_group" value="${esc(
-              editingSlot?.grade_group || user.grade || 'Grade 12'
-            )}" placeholder="Grade Group" required />
-          </div>
-          <input class="field-input" name="topic" value="${esc(editingSlot?.topic || '')}" placeholder="Topic / Focus" required />
-          <input class="field-input" name="location_mode" value="${esc(
-            editingSlot?.location_mode || ''
-          )}" placeholder="Room or Mode (e.g. Studio A / Remote Pack)" required />
-          <button class="dark-cta-btn" type="submit">${ICONS.check} ${
-    editingSlot ? 'Update Timetable Slot' : 'Save Timetable Slot'
-  }</button>
-        </form>
       </section>
 
       <section class="panel-card">
         <div class="panel-head">
           <h2 class="panel-title">Exam Countdowns</h2>
-          <span class="muted-pill">Editable Planner</span>
+          <button class="text-link-btn" id="btn-toggle-exam-creator">${
+            ui.showExamCreator || editingExam ? 'Close' : '+ Add Exam'
+          }</button>
         </div>
+
+        ${
+          ui.showExamCreator || editingExam
+            ? `
+          <form class="form-stack" id="upsert-exam-form" style="padding-bottom:0.85rem;border-bottom:1px solid var(--border-warm);">
+            <input type="hidden" name="id" value="${esc(editingExam?.id || '')}" />
+            <input class="field-input" name="title" value="${esc(editingExam?.title || '')}" placeholder="Exam Paper Title" required />
+            <div class="form-grid-2">
+              <input class="field-input" name="subject" value="${esc(editingExam?.subject || '')}" placeholder="Subject" required />
+              <input class="field-input" type="number" min="1" max="365" name="daysAway" value="${esc(
+                editingExam?.daysAway || ''
+              )}" placeholder="Days left" required />
+            </div>
+            <button class="dark-cta-btn" type="submit">${editingExam ? 'Update Exam' : 'Save Exam'}</button>
+          </form>
+        `
+            : ''
+        }
+
         ${(personalState.exams || [])
           .map(
             (ex) => `
           <div class="list-row">
             <div class="list-row-col">
               <span class="row-title">${esc(ex.title)}</span>
-              <span class="row-sub">${esc(ex.subject)} · ${Number(ex.daysAway)} days away</span>
+              <span class="row-sub">${esc(ex.subject)} · <strong>${Number(ex.daysAway)} days left</strong></span>
             </div>
-            <div class="action-cluster">
-              <button class="icon-action-btn" data-edit-exam="${esc(ex.id)}">${ICONS.edit}</button>
-              <button class="icon-action-btn danger" data-del-exam="${esc(ex.id)}">${ICONS.trash}</button>
-            </div>
+            ${renderMoreMenu(`
+              <button type="button" class="more-menu-item" data-edit-exam="${esc(ex.id)}">${ICONS.edit} Edit</button>
+              <button type="button" class="more-menu-item is-danger" data-del-exam="${esc(ex.id)}">${ICONS.trash} Remove</button>
+            `)}
           </div>
         `
           )
           .join('')}
-
-        <form class="form-stack" id="upsert-exam-form" style="margin-top:0.5rem;padding-top:0.85rem;border-top:1px solid var(--border-warm);">
-          <span class="panel-title" style="font-size:0.9rem;">${editingExam ? 'Edit Exam Countdown' : '+ Add Exam Countdown'}</span>
-          <input type="hidden" name="id" value="${esc(editingExam?.id || '')}" />
-          <input class="field-input" name="title" value="${esc(editingExam?.title || '')}" placeholder="Exam Paper Title" required />
-          <div class="form-grid-2">
-            <input class="field-input" name="subject" value="${esc(editingExam?.subject || '')}" placeholder="Subject" required />
-            <input class="field-input" type="number" min="1" max="365" name="daysAway" value="${esc(
-              editingExam?.daysAway || ''
-            )}" placeholder="Days left" required />
-          </div>
-          <button class="outline-btn" type="submit">${editingExam ? 'Update Countdown' : '+ Add Countdown'}</button>
-        </form>
       </section>
     </div>
   `;
 }
 
-/* --- REMOTE ASSIGNMENTS, OFFLINE PACKS & SUBMISSIONS (WITH FULL EDIT & DELETE) --- */
+/* ==========================================================================
+   7. HOMEWORK & MEDIA PACKS (ADMIN / EDUCATOR PHOTO, PDF & VIDEO UPLOADS +
+      BUILT-IN IN-APP OPENER + STUDENT PHOTO/PDF SUBMISSIONS)
+   ========================================================================== */
 
 function buildAssignmentsStage(user) {
   const canManage = isStaff(user);
@@ -1248,13 +1274,13 @@ function buildAssignmentsStage(user) {
   return `
     <div class="page-header-row">
       <div>
-        <h1>Remote Assignments & Auto-Downloaded Packs</h1>
-        <p>Full offline worksheet packs, auto-saved student drafts, and instant editing/marking for educators & Admissions.</p>
+        <h1>Homework & Media Packs</h1>
+        <p>Tap any PDF, Photo, or Video to open it right inside i-tutor — cached automatically for offline study.</p>
       </div>
       ${
         canManage
           ? `<button class="dark-cta-btn" id="toggle-assign-creator">${ICONS.plus} ${
-              ui.showAssignCreator || editingAsg ? 'Close Editor' : 'Post Remote Assignment'
+              ui.showAssignCreator || editingAsg ? 'Close' : 'Post Homework'
             }</button>`
           : ''
       }
@@ -1265,30 +1291,57 @@ function buildAssignmentsStage(user) {
         ? `
       <form class="panel-card form-stack" id="upsert-assign-form">
         <div class="panel-head">
-          <h2 class="panel-title">${editingAsg ? `Edit Assignment: ${esc(editingAsg.title)}` : 'Publish New Remote Assignment & Offline Pack'}</h2>
+          <h2 class="panel-title">${editingAsg ? `Edit Homework · ${esc(editingAsg.title)}` : 'Post New Homework (Photos, PDFs, Videos or Text)'}</h2>
           <button type="button" class="outline-btn" id="cancel-assign-edit">Cancel</button>
         </div>
         <input type="hidden" name="id" value="${esc(editingAsg?.id || '')}" />
         <div class="form-grid-2">
-          <input class="field-input" name="title" value="${esc(editingAsg?.title || '')}" placeholder="Assignment Title" required />
-          <input class="field-input" name="subject" value="${esc(editingAsg?.subject || 'Mathematics')}" placeholder="Subject" required />
+          <input class="field-input" name="title" value="${esc(editingAsg?.title || '')}" placeholder="Homework Title (e.g. Trig Paper 2 Worksheet)" required />
+          <select class="field-input" name="subject">
+            ${SUBJECT_LIST.map(
+              (s) => `<option value="${esc(s)}" ${editingAsg?.subject === s ? 'selected' : ''}>${esc(s)}</option>`
+            ).join('')}
+          </select>
         </div>
         <div class="form-grid-2">
           <input class="field-input" name="grade_group" value="${esc(editingAsg?.grade_group || 'Grade 12')}" placeholder="Grade Group" required />
-          <input class="field-input" name="teacher_name" value="${esc(editingAsg?.teacher_name || user.name)}" placeholder="Educator Name" required />
+          <input class="field-input" name="teacher_name" value="${esc(editingAsg?.teacher_name || user.name)}" placeholder="Posted By" required />
         </div>
         <div class="form-grid-2">
           <input class="field-input" name="due_date" type="date" value="${esc(editingAsg?.due_date || '2026-12-05')}" required />
           <input class="field-input" name="max_marks" type="number" value="${esc(editingAsg?.max_marks || 30)}" min="5" max="200" required />
         </div>
-        <textarea class="field-input" name="instructions" rows="2" placeholder="Instructions..." required>${esc(
+
+        <!-- PHOTO / PDF / VIDEO UPLOAD ZONE FOR HOMEWORK -->
+        <div class="media-upload-zone">
+          <div class="media-upload-head">
+            <div>
+              <strong style="font-size:0.86rem;">Attach Homework Photos, PDFs or Videos</strong>
+              <p class="row-sub">Upload exam scans, PDF worksheets, diagrams, or walkthrough videos — opens in-app on every device.</p>
+            </div>
+            <label class="gold-cta-btn upload-picker-label">
+              ${ICONS.paperclip}
+              <span>${ui.uploadingTarget === 'assign' ? 'Uploading...' : 'Choose Files'}</span>
+              <input
+                type="file"
+                id="assign-media-input"
+                accept="image/*,application/pdf,.pdf,video/*"
+                multiple
+                hidden
+              />
+            </label>
+          </div>
+          ${renderAttachmentGalleryHTML(ui.stagedAssignAttachments, { removablePrefix: 'assign' })}
+        </div>
+
+        <textarea class="field-input" name="instructions" rows="2" placeholder="Short instructions for learners...">${esc(
           editingAsg?.instructions || ''
         )}</textarea>
-        <textarea class="field-input" name="offline_pack_content" rows="4" placeholder="Offline Worksheet Questions & Formulas..." required>${esc(
+        <textarea class="field-input" name="offline_pack_content" rows="3" placeholder="Optional written questions or formula notes...">${esc(
           editingAsg?.offline_pack_content || ''
         )}</textarea>
-        <button class="dark-cta-btn" type="submit">${ICONS.sync} ${
-            editingAsg ? 'Save Assignment Changes' : 'Publish & Push Offline Pack'
+        <button class="dark-cta-btn" type="submit">${ICONS.check} ${
+            editingAsg ? 'Save Homework Changes' : 'Publish & Send Homework'
           }</button>
       </form>
     `
@@ -1303,39 +1356,46 @@ function buildAssignmentsStage(user) {
           const targetStuId = user.role === 'parent' ? user.linked_student_id || 'stu-thabo' : user.id;
           const mySub = allSubs.find((s) => s.student_id === targetStuId);
           const draft = personalState.assignmentDrafts?.[asg.id] ?? (mySub ? mySub.answer_text : '');
+          const atts = Array.isArray(asg.attachments) ? asg.attachments : [];
+          const stagedSubAtts = ui.stagedSubmissionAttachments[asg.id] ?? (mySub?.attachments || []);
 
           return `
             <article class="panel-card">
               <div class="panel-head">
                 <div>
                   <span class="pill-badge">${esc(asg.subject)} · ${esc(asg.grade_group)} · ${asg.max_marks} Marks</span>
-                  <h2 class="panel-title" style="margin-top:0.35rem;font-size:1.08rem;">${esc(asg.title)}</h2>
-                  <p class="row-sub">${esc(asg.teacher_name)} · Due ${esc(asg.due_date)} · ✓ Cached Offline</p>
+                  <h2 class="panel-title" style="margin-top:0.35rem;font-size:1.06rem;">${esc(asg.title)}</h2>
+                  <p class="row-sub">${esc(asg.teacher_name)} · Due ${esc(asg.due_date)}</p>
                 </div>
                 <div class="action-cluster">
+                  <button class="outline-btn" data-toggle-assign="${esc(asg.id)}">
+                    ${isOpen ? 'Close' : canManage ? `Submissions (${allSubs.length})` : mySub ? 'View Work' : 'Answer / Submit'}
+                  </button>
                   ${
                     canManage
-                      ? `
-                    <button class="icon-action-btn" data-edit-assign="${esc(asg.id)}">${ICONS.edit} Edit</button>
-                    <button class="icon-action-btn danger" data-del-assign="${esc(asg.id)}">${ICONS.trash}</button>
-                  `
+                      ? renderMoreMenu(`
+                          <button type="button" class="more-menu-item" data-edit-assign="${esc(asg.id)}">${ICONS.edit} Edit Homework</button>
+                          <button type="button" class="more-menu-item is-danger" data-del-assign="${esc(asg.id)}">${ICONS.trash} Delete Homework</button>
+                        `)
                       : ''
                   }
-                  <button class="outline-btn" data-toggle-assign="${esc(asg.id)}">
-                    ${isOpen ? 'Hide Pack' : 'Open Offline Pack'}
-                  </button>
                 </div>
               </div>
 
-              <p style="font-size:0.86rem;line-height:1.5;color:var(--charcoal-soft);">${esc(asg.instructions)}</p>
+              ${
+                asg.instructions
+                  ? `<p style="font-size:0.86rem;line-height:1.5;color:var(--charcoal-soft);">${esc(asg.instructions)}</p>`
+                  : ''
+              }
+
+              <!-- HOMEWORK MEDIA ATTACHMENTS (TAP ANY PDF / PHOTO / VIDEO TO OPEN IN-APP!) -->
+              ${renderAttachmentGalleryHTML(atts)}
 
               ${
                 mySub && mySub.status === 'graded'
                   ? `
                 <div class="worksheet-box">
-                  <strong>Graded Result: ${mySub.marks_awarded} / ${asg.max_marks}</strong>\nFeedback: ${esc(
-                      mySub.teacher_feedback
-                    )}
+                  <strong>Graded: ${mySub.marks_awarded} / ${asg.max_marks}</strong> — ${esc(mySub.teacher_feedback)}
                 </div>
               `
                   : ''
@@ -1344,22 +1404,41 @@ function buildAssignmentsStage(user) {
               ${
                 isOpen
                   ? `
-                <div class="worksheet-box">${esc(asg.offline_pack_content)}</div>
+                ${
+                  asg.offline_pack_content
+                    ? `<div class="worksheet-box">${esc(asg.offline_pack_content)}</div>`
+                    : ''
+                }
 
                 ${
                   user.role === 'student'
                     ? `
-                  <form class="form-stack submit-work-form" data-assign-id="${esc(asg.id)}">
-                    <label style="font-size:0.8rem;font-weight:750;">Your Offline-Saved Working & Answer:</label>
+                  <form class="form-stack submit-work-form" data-assign-id="${esc(asg.id)}" style="border-top:1px solid var(--border-warm);padding-top:0.85rem;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+                      <label style="font-size:0.82rem;font-weight:750;">Your Answer & Photo/PDF Working:</label>
+                      <label class="outline-btn upload-picker-label">
+                        ${ICONS.paperclip}
+                        <span>${ui.uploadingTarget === `sub:${asg.id}` ? 'Uploading...' : 'Attach Photo / PDF / Video'}</span>
+                        <input
+                          type="file"
+                          class="sub-media-input"
+                          data-sub-assign-id="${esc(asg.id)}"
+                          accept="image/*,application/pdf,.pdf,video/*"
+                          multiple
+                          hidden
+                        />
+                      </label>
+                    </div>
+                    ${renderAttachmentGalleryHTML(stagedSubAtts, { removablePrefix: `sub:${asg.id}` })}
                     <textarea class="field-input draft-textarea" data-draft-id="${esc(
                       asg.id
-                    )}" name="answer_text" rows="4" placeholder="Write your solution offline..." required>${esc(
+                    )}" name="answer_text" rows="3" placeholder="Write your solution or notes here...">${esc(
                         draft
                       )}</textarea>
                     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem;">
-                      <span class="row-sub">${mySub ? `Status: ${mySub.status.toUpperCase()}` : 'Auto-saved on device'}</span>
+                      <span class="row-sub">${mySub ? `Status: ${mySub.status.toUpperCase()}` : 'Draft saved offline'}</span>
                       <button class="dark-cta-btn" type="submit">${ICONS.check} ${
-                        mySub ? 'Update Submission' : 'Submit Assignment'
+                        mySub ? 'Update Submission' : 'Submit Homework'
                       }</button>
                     </div>
                   </form>
@@ -1374,7 +1453,7 @@ function buildAssignmentsStage(user) {
                     <strong style="font-size:0.86rem;">Student Submissions (${allSubs.length})</strong>
                     ${
                       allSubs.length === 0
-                        ? `<p class="row-sub">No submissions yet.</p>`
+                        ? `<p class="row-sub">No student submissions yet.</p>`
                         : allSubs
                             .map(
                               (sub) => `
@@ -1383,20 +1462,27 @@ function buildAssignmentsStage(user) {
                               <span class="row-title">${esc(sub.student_name)}</span>
                               <div class="action-cluster">
                                 <span class="pill-badge">${
-                                  sub.status === 'graded' ? `${sub.marks_awarded}/${asg.max_marks}` : 'Awaiting Mark'
+                                  sub.status === 'graded' ? `${sub.marks_awarded}/${asg.max_marks}` : 'Needs Marking'
                                 }</span>
-                                <button class="icon-action-btn danger" data-del-sub="${esc(sub.id)}">${ICONS.trash}</button>
+                                ${renderMoreMenu(`
+                                  <button type="button" class="more-menu-item is-danger" data-del-sub="${esc(sub.id)}">${ICONS.trash} Delete Submission</button>
+                                `)}
                               </div>
                             </div>
-                            <p style="font-size:0.83rem;white-space:pre-line;margin:0.35rem 0;">${esc(sub.answer_text)}</p>
-                            <form class="form-grid-2 grade-sub-form" data-sub-id="${esc(sub.id)}">
+                            ${
+                              sub.answer_text
+                                ? `<p style="font-size:0.83rem;white-space:pre-line;margin:0.35rem 0;">${esc(sub.answer_text)}</p>`
+                                : ''
+                            }
+                            ${renderAttachmentGalleryHTML(sub.attachments || [], { compact: true })}
+                            <form class="form-grid-2 grade-sub-form" data-sub-id="${esc(sub.id)}" style="margin-top:0.35rem;">
                               <input class="field-input" name="marks_awarded" type="number" min="0" max="${
                                 asg.max_marks
                               }" placeholder="Marks / ${asg.max_marks}" value="${sub.marks_awarded ?? ''}" required />
                               <input class="field-input" name="teacher_feedback" placeholder="Feedback..." value="${esc(
                                 sub.teacher_feedback || ''
                               )}" required />
-                              <button class="dark-cta-btn" type="submit" style="grid-column:1/-1;">Save Mark & Feedback</button>
+                              <button class="dark-cta-btn" type="submit" style="grid-column:1/-1;">Save Mark</button>
                             </form>
                           </div>
                         `
@@ -1418,21 +1504,23 @@ function buildAssignmentsStage(user) {
   `;
 }
 
-/* --- COMPLETE OFFLINE STUDY TOOLKIT (EDITABLE NOTES, QUIZZES, FLASHCARDS + TIMER/SCRATCHPAD) --- */
+/* ==========================================================================
+   8. OFFLINE STUDY TOOLKIT (CLEAN SUBJECT SELECT + QUIET ⋯ MENUS)
+   ========================================================================== */
 
 function buildToolkitStage(user) {
   const tabs = [
-    { id: 'notes', label: `Notes & Formulas (${(vaultState.notes || []).length})` },
-    { id: 'quiz', label: `Auto-Marked Quizzes (${(vaultState.quizzes || []).length})` },
-    { id: 'flashcards', label: `3D Flashcards (${(vaultState.flashcards || []).length})` },
-    { id: 'focus', label: 'Focus Timer & Scratchpad' }
+    { id: 'notes', label: `Notes (${(vaultState.notes || []).length})` },
+    { id: 'quiz', label: `Quiz (${(vaultState.quizzes || []).length})` },
+    { id: 'flashcards', label: `Cards (${(vaultState.flashcards || []).length})` },
+    { id: 'focus', label: 'Timer & Pad' }
   ];
 
   return `
     <div class="page-header-row">
       <div>
-        <h1>Offline Study Toolkit</h1>
-        <p>Notes & formulas, auto-marked quizzes, 3D flashcards, Pomodoro timer & scratchpad — all synced & editable in-app.</p>
+        <h1>Study Toolkit</h1>
+        <p>Revision notes, instant-marked quizzes, 3D flashcards & focus timer.</p>
       </div>
     </div>
 
@@ -1468,16 +1556,20 @@ function buildNotesSubstage(user) {
   });
 
   return `
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:0.75rem;flex-wrap:wrap;">
-      <div class="subtab-bar">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:0.65rem;flex-wrap:wrap;">
+      <select class="field-input compact-select" id="notes-subj-select" aria-label="Filter notes by subject">
         ${subjects
-          .map((s) => `<button class="subtab-btn ${ui.subjectFilter === s ? 'is-active' : ''}" data-subj-filter="${esc(s)}">${esc(s)}</button>`)
+          .map(
+            (s) => `<option value="${esc(s)}" ${ui.subjectFilter === s ? 'selected' : ''}>${
+              s === 'All' ? 'All Subjects' : esc(s)
+            }</option>`
+          )
           .join('')}
-      </div>
+      </select>
       ${
         user.role !== 'visitor'
           ? `<button class="dark-cta-btn" id="toggle-note-modal">${ICONS.plus} ${
-              ui.showNoteModal || editingNote ? 'Close Editor' : 'Add Study Note'
+              ui.showNoteModal || editingNote ? 'Close' : 'New Note'
             }</button>`
           : ''
       }
@@ -1488,7 +1580,7 @@ function buildNotesSubstage(user) {
         ? `
       <form class="panel-card form-stack" id="upsert-note-form">
         <div class="panel-head">
-          <h2 class="panel-title">${editingNote ? `Edit Note: ${esc(editingNote.title)}` : 'Save Study Note & Formulas'}</h2>
+          <h2 class="panel-title">${editingNote ? `Edit Note · ${esc(editingNote.title)}` : 'Add Study Note'}</h2>
           <button type="button" class="outline-btn" id="cancel-note-edit">Cancel</button>
         </div>
         <input type="hidden" name="id" value="${esc(editingNote?.id || '')}" />
@@ -1500,13 +1592,13 @@ function buildNotesSubstage(user) {
             ).join('')}
           </select>
         </div>
-        <textarea class="field-input" name="summary" rows="3" placeholder="Revision explanation..." required>${esc(
+        <textarea class="field-input" name="summary" rows="3" placeholder="Key explanation..." required>${esc(
           editingNote?.summary || ''
         )}</textarea>
         <textarea class="field-input" name="formulasRaw" rows="3" placeholder="Formulas / key rules (one per line)...">${esc(
           (editingNote?.formulas || []).join('\n')
         )}</textarea>
-        <button class="dark-cta-btn" type="submit">${ICONS.check} Save Note & Sync</button>
+        <button class="dark-cta-btn" type="submit">${ICONS.check} Save Note</button>
       </form>
     `
         : ''
@@ -1521,13 +1613,15 @@ function buildNotesSubstage(user) {
               <div class="panel-head">
                 <span class="pill-badge">${esc(n.subject)}</span>
                 <div class="action-cluster">
-                  <button class="icon-action-btn" data-bookmark-note="${esc(n.id)}">${saved ? '★ Saved' : '☆ Save'}</button>
+                  <button class="icon-action-btn" data-bookmark-note="${esc(n.id)}" title="Bookmark note">${
+            saved ? '★' : '☆'
+          }</button>
                   ${
                     canManage
-                      ? `
-                    <button class="icon-action-btn" data-edit-note="${esc(n.id)}">${ICONS.edit} Edit</button>
-                    <button class="icon-action-btn danger" data-del-note="${esc(n.id)}">${ICONS.trash}</button>
-                  `
+                      ? renderMoreMenu(`
+                          <button type="button" class="more-menu-item" data-edit-note="${esc(n.id)}">${ICONS.edit} Edit Note</button>
+                          <button type="button" class="more-menu-item is-danger" data-del-note="${esc(n.id)}">${ICONS.trash} Delete Note</button>
+                        `)
                       : ''
                   }
                 </div>
@@ -1560,18 +1654,20 @@ function buildQuizSubstage(user) {
   const editingQuiz = ui.editingQuizId ? allQuizzes.find((q) => q.id === ui.editingQuizId) : null;
 
   return `
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:0.75rem;flex-wrap:wrap;">
-      <div class="subtab-bar">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:0.65rem;flex-wrap:wrap;">
+      <select class="field-input compact-select" id="quiz-subj-select" aria-label="Filter quiz by subject">
         ${subjects
           .map(
-            (s) => `<button class="subtab-btn ${ui.quizState.subject === s ? 'is-active' : ''}" data-quiz-subj="${esc(s)}">${esc(s)}</button>`
+            (s) => `<option value="${esc(s)}" ${ui.quizState.subject === s ? 'selected' : ''}>${
+              s === 'All' ? 'All Subjects' : esc(s)
+            }</option>`
           )
           .join('')}
-      </div>
+      </select>
       ${
         canManage
           ? `<button class="dark-cta-btn" id="toggle-quiz-modal">${ICONS.plus} ${
-              ui.showQuizModal || editingQuiz ? 'Close Quiz Editor' : 'Add Quiz Question'
+              ui.showQuizModal || editingQuiz ? 'Close' : 'Add Question'
             }</button>`
           : ''
       }
@@ -1582,7 +1678,7 @@ function buildQuizSubstage(user) {
         ? `
       <form class="panel-card form-stack" id="upsert-quiz-form">
         <div class="panel-head">
-          <h3 class="panel-title">${editingQuiz ? 'Edit Quiz Question' : 'Add New Quiz Question'}</h3>
+          <h3 class="panel-title">${editingQuiz ? 'Edit Question' : 'Add Quiz Question'}</h3>
           <button type="button" class="outline-btn" id="cancel-quiz-edit">Cancel</button>
         </div>
         <input type="hidden" name="id" value="${esc(editingQuiz?.id || '')}" />
@@ -1596,25 +1692,25 @@ function buildQuizSubstage(user) {
         </div>
         <input class="field-input" name="question" value="${esc(editingQuiz?.question || '')}" placeholder="Question prompt" required />
         <div class="form-grid-2">
-          <input class="field-input" name="opt0" value="${esc(editingQuiz?.options?.[0] || '')}" placeholder="Option A (Index 0)" required />
-          <input class="field-input" name="opt1" value="${esc(editingQuiz?.options?.[1] || '')}" placeholder="Option B (Index 1)" required />
-          <input class="field-input" name="opt2" value="${esc(editingQuiz?.options?.[2] || '')}" placeholder="Option C (Index 2)" required />
-          <input class="field-input" name="opt3" value="${esc(editingQuiz?.options?.[3] || '')}" placeholder="Option D (Index 3)" required />
+          <input class="field-input" name="opt0" value="${esc(editingQuiz?.options?.[0] || '')}" placeholder="Option A" required />
+          <input class="field-input" name="opt1" value="${esc(editingQuiz?.options?.[1] || '')}" placeholder="Option B" required />
+          <input class="field-input" name="opt2" value="${esc(editingQuiz?.options?.[2] || '')}" placeholder="Option C" required />
+          <input class="field-input" name="opt3" value="${esc(editingQuiz?.options?.[3] || '')}" placeholder="Option D" required />
         </div>
         <div class="form-grid-2">
           <select class="field-input" name="correct_index">
             ${[0, 1, 2, 3]
               .map(
                 (i) =>
-                  `<option value="${i}" ${Number(editingQuiz?.correct_index ?? 0) === i ? 'selected' : ''}>Correct Option: ${
-                    ['A (0)', 'B (1)', 'C (2)', 'D (3)'][i]
+                  `<option value="${i}" ${Number(editingQuiz?.correct_index ?? 0) === i ? 'selected' : ''}>Correct: ${
+                    ['Option A', 'Option B', 'Option C', 'Option D'][i]
                   }</option>`
               )
               .join('')}
           </select>
-          <input class="field-input" name="explanation" value="${esc(editingQuiz?.explanation || '')}" placeholder="Explanation shown after answering" required />
+          <input class="field-input" name="explanation" value="${esc(editingQuiz?.explanation || '')}" placeholder="Explanation" required />
         </div>
-        <button class="dark-cta-btn" type="submit">${ICONS.check} Save Quiz Question</button>
+        <button class="dark-cta-btn" type="submit">${ICONS.check} Save Question</button>
       </form>
     `
         : ''
@@ -1629,9 +1725,9 @@ function buildQuizSubstage(user) {
           ui.quizState.finished
             ? `
           <div style="text-align:center;padding:1.25rem;display:flex;flex-direction:column;align-items:center;gap:0.75rem;">
-            <span class="pill-badge">Offline Quiz Complete</span>
+            <span class="pill-badge">Quiz Complete</span>
             <h2 style="font-size:1.5rem;font-weight:850;">Score: ${ui.quizState.correctCount} / ${safePool.length}</h2>
-            <p class="row-sub">Your Sunrise Confidence meter has been updated!</p>
+            <p class="row-sub">Your Sunrise Confidence meter has been updated.</p>
             <button class="dark-cta-btn" id="restart-quiz-btn">Practice Again</button>
           </div>
         `
@@ -1639,22 +1735,22 @@ function buildQuizSubstage(user) {
           <div class="panel-head">
             <span class="pill-badge">${esc(current.subject)} · ${esc(current.topic || 'Practice')}</span>
             <div class="action-cluster">
-              <span class="muted-pill">Question ${idx + 1} of ${safePool.length}</span>
+              <span class="muted-pill">${idx + 1} / ${safePool.length}</span>
               ${
                 canManage
-                  ? `
-                <button class="icon-action-btn" data-edit-quiz="${esc(current.id)}">${ICONS.edit} Edit</button>
-                ${
-                  allQuizzes.length > 1
-                    ? `<button class="icon-action-btn danger" data-del-quiz="${esc(current.id)}">${ICONS.trash}</button>`
-                    : ''
-                }
-              `
+                  ? renderMoreMenu(`
+                      <button type="button" class="more-menu-item" data-edit-quiz="${esc(current.id)}">${ICONS.edit} Edit Question</button>
+                      ${
+                        allQuizzes.length > 1
+                          ? `<button type="button" class="more-menu-item is-danger" data-del-quiz="${esc(current.id)}">${ICONS.trash} Delete</button>`
+                          : ''
+                      }
+                    `)
                   : ''
               }
             </div>
           </div>
-          <h2 style="font-size:1.12rem;font-weight:800;line-height:1.45;">${esc(current.question)}</h2>
+          <h2 style="font-size:1.1rem;font-weight:800;line-height:1.45;">${esc(current.question)}</h2>
           <div class="form-stack">
             ${(current.options || [])
               .map((opt, i) => {
@@ -1679,7 +1775,7 @@ function buildQuizSubstage(user) {
               }</strong>\n${esc(current.explanation)}
             </div>
             <button class="dark-cta-btn" id="next-quiz-btn" style="align-self:flex-end;">
-              ${idx + 1 >= safePool.length ? 'Finish & Boost Confidence' : 'Next Question →'}
+              ${idx + 1 >= safePool.length ? 'Finish Quiz' : 'Next →'}
             </button>
           `
               : ''
@@ -1702,21 +1798,25 @@ function buildFlashcardsSubstage(user) {
 
   return `
     <div class="panel-head">
-      <span class="pill-badge">${masteredCount} of ${cards.length} Cards Mastered</span>
+      <span class="pill-badge">${masteredCount} / ${cards.length} Mastered</span>
       <div class="action-cluster">
-        ${
-          card && canManage
-            ? `
-          <button class="icon-action-btn" data-edit-card="${esc(card.id)}">${ICONS.edit} Edit Card</button>
-          ${cards.length > 1 ? `<button class="icon-action-btn danger" data-del-card="${esc(card.id)}">${ICONS.trash}</button>` : ''}
-        `
-            : ''
-        }
         ${
           user.role !== 'visitor'
             ? `<button class="dark-cta-btn" id="toggle-card-modal">${ICONS.plus} ${
-                ui.showCardModal || editingCard ? 'Close Creator' : 'Add Flashcard'
+                ui.showCardModal || editingCard ? 'Close' : 'New Card'
               }</button>`
+            : ''
+        }
+        ${
+          card && canManage
+            ? renderMoreMenu(`
+                <button type="button" class="more-menu-item" data-edit-card="${esc(card.id)}">${ICONS.edit} Edit Card</button>
+                ${
+                  cards.length > 1
+                    ? `<button type="button" class="more-menu-item is-danger" data-del-card="${esc(card.id)}">${ICONS.trash} Delete Card</button>`
+                    : ''
+                }
+              `)
             : ''
         }
       </div>
@@ -1740,7 +1840,7 @@ function buildFlashcardsSubstage(user) {
         <textarea class="field-input" name="back" rows="2" placeholder="Back Answer / Formula" required>${esc(
           editingCard?.back || ''
         )}</textarea>
-        <button class="dark-cta-btn" type="submit">${ICONS.check} Save Flashcard & Sync</button>
+        <button class="dark-cta-btn" type="submit">${ICONS.check} Save Card</button>
       </form>
     `
         : ''
@@ -1752,28 +1852,28 @@ function buildFlashcardsSubstage(user) {
       <div class="flashcard-3d-scene" id="flip-card-stage" role="button" tabindex="0" aria-label="Flip flashcard">
         <div class="flashcard-3d-inner ${ui.cardState.flipped ? 'is-flipped' : ''}" id="flashcard-3d-inner">
           <div class="flashcard-face front">
-            <span class="pill-badge">${esc(card.subject)} · QUESTION (Tap to Flip 3D)</span>
-            <h2 style="font-size:1.18rem;font-weight:800;max-width:560px;line-height:1.45;white-space:pre-line;">
+            <span class="pill-badge">${esc(card.subject)} · QUESTION</span>
+            <h2 style="font-size:1.15rem;font-weight:800;max-width:560px;line-height:1.45;white-space:pre-line;">
               ${esc(card.front)}
             </h2>
-            <span class="row-sub">${masteredIds.includes(card.id) ? '✓ Mastered' : 'Tap card anywhere to flip'}</span>
+            <span class="row-sub">${masteredIds.includes(card.id) ? '✓ Mastered' : 'Tap card to flip'}</span>
           </div>
           <div class="flashcard-face back">
             <span class="pill-badge">${esc(card.subject)} · ANSWER</span>
-            <h2 style="font-size:1.14rem;font-weight:800;max-width:560px;line-height:1.45;white-space:pre-line;">
+            <h2 style="font-size:1.12rem;font-weight:800;max-width:560px;line-height:1.45;white-space:pre-line;">
               ${esc(card.back)}
             </h2>
-            <span class="row-sub">Tap card to flip back</span>
+            <span class="row-sub">Tap to flip back</span>
           </div>
         </div>
       </div>
 
-      <div style="display:flex;justify-content:space-between;gap:0.6rem;flex-wrap:wrap;">
-        <button class="outline-btn" id="prev-card-btn">← Previous</button>
+      <div style="display:flex;justify-content:space-between;gap:0.5rem;align-items:center;">
+        <button class="outline-btn" id="prev-card-btn">← Prev</button>
         <button class="gold-cta-btn" data-master-card="${esc(card.id)}">
-          ${masteredIds.includes(card.id) ? '✓ Mastered (Undo)' : 'Mark Mastered ✓'}
+          ${masteredIds.includes(card.id) ? '✓ Mastered' : 'Mark Mastered'}
         </button>
-        <button class="dark-cta-btn" id="next-card-btn">Next Card →</button>
+        <button class="dark-cta-btn" id="next-card-btn">Next →</button>
       </div>
     `
         : ''
@@ -1786,21 +1886,23 @@ function buildFocusScratchpadSubstage() {
     <div class="two-col-grid">
       <section class="panel-card">
         <div class="panel-head">
-          <h2 class="panel-title">Pomodoro Focus Timer</h2>
-          <span class="pill-badge">${personalState.focusMinutesToday || 25}m Focused Today</span>
+          <h2 class="panel-title">Focus Timer</h2>
+          <span class="pill-badge">${personalState.focusMinutesToday || 25}m Today</span>
         </div>
         <div class="timer-readout-big js-timer-readout ${ui.timerRunning ? 'is-ticking' : ''}">${formatClock(
           ui.timerSeconds
         )}</div>
-        <div style="display:flex;justify-content:center;gap:0.5rem;flex-wrap:wrap;">
+        <div style="display:flex;justify-content:center;align-items:center;gap:0.55rem;flex-wrap:wrap;">
           <button class="dark-cta-btn" data-timer-action="toggle">${ui.timerRunning ? 'Pause' : 'Start Focus'}</button>
-          <button class="outline-btn" data-timer-preset="25">25m Deep</button>
-          <button class="outline-btn" data-timer-preset="15">15m Sprint</button>
-          <button class="outline-btn" data-timer-preset="5">5m Break</button>
+          <select class="field-input compact-select" id="timer-preset-select" aria-label="Timer duration">
+            <option value="25" ${Math.round(ui.timerSeconds / 60) === 25 ? 'selected' : ''}>25m Deep Focus</option>
+            <option value="15" ${Math.round(ui.timerSeconds / 60) === 15 ? 'selected' : ''}>15m Sprint</option>
+            <option value="5" ${Math.round(ui.timerSeconds / 60) === 5 ? 'selected' : ''}>5m Break</option>
+          </select>
         </div>
 
         <div style="border-top:1px solid var(--border-warm);padding-top:0.85rem;margin-top:0.35rem;">
-          <h3 class="panel-title" style="margin-bottom:0.45rem;">Daily Study Checklist</h3>
+          <h3 class="panel-title" style="margin-bottom:0.45rem;">Study Checklist</h3>
           ${(personalState.tasks || [])
             .map(
               (item) => `
@@ -1809,7 +1911,7 @@ function buildFocusScratchpadSubstage() {
                 <span class="check-box-sq">${item.done ? '✓' : ''}</span>
                 <span>${esc(item.title)}</span>
               </div>
-              <button class="icon-action-btn danger" data-del-task="${esc(item.id)}" style="padding:0.2rem 0.4rem;">✕</button>
+              <button class="quiet-x-btn" data-del-task="${esc(item.id)}" aria-label="Remove task">✕</button>
             </div>
           `
             )
@@ -1823,16 +1925,16 @@ function buildFocusScratchpadSubstage() {
 
       <section class="panel-card">
         <div class="panel-head">
-          <h2 class="panel-title">Offline Scratchpad & Math Evaluator</h2>
+          <h2 class="panel-title">Scratchpad & Math Check</h2>
           <span class="muted-pill">Auto-Saved</span>
         </div>
-        <textarea class="field-input" id="scratchpad-area" rows="7" placeholder="Write rough calculations, formulas, or essay outlines offline...">${esc(
+        <textarea class="field-input" id="scratchpad-area" rows="7" placeholder="Write rough calculations, formulas, or outlines offline...">${esc(
           personalState.scratchpad || ''
         )}</textarea>
 
         <form class="chat-input-bar" id="quick-calc-form">
-          <input class="field-input" name="expr" placeholder="Quick Math Check e.g. (15600 / 13) * 12" required />
-          <button class="outline-btn" type="submit">Evaluate</button>
+          <input class="field-input" name="expr" placeholder="Math check e.g. (15600 / 13) * 12" required />
+          <button class="outline-btn" type="submit">=</button>
         </form>
         ${ui.calcOutput ? `<div class="pill-badge" style="align-self:flex-start;">= ${esc(ui.calcOutput)}</div>` : ''}
       </section>
@@ -1840,15 +1942,17 @@ function buildFocusScratchpadSubstage() {
   `;
 }
 
-/* --- 2-PANE SPLIT MESSENGER (WITH ROOM & MESSAGE EDITING) --- */
+/* ==========================================================================
+   9. MESSAGES & STUDY GROUPS (PDF, PHOTO & VIDEO UPLOADS + BUILT-IN OPENER)
+   ========================================================================== */
 
 function buildMessagesStage(user) {
   if (user.role === 'visitor') {
     return `
       <section class="panel-card">
-        <h2 class="panel-title">Direct Teacher Chats & Student Study Groups</h2>
-        <p class="row-sub">Apply to join i-tutor to unlock direct 1-on-1 teacher channels and collaborative peer study groups!</p>
-        <div><button class="dark-cta-btn" id="visitor-apply-chat">Apply to Join i-tutor</button></div>
+        <h2 class="panel-title">Chats & Study Groups</h2>
+        <p class="row-sub">Apply to join i-tutor to message educators and share PDFs, photos & study videos.</p>
+        <div><button class="dark-cta-btn" id="visitor-apply-chat">Apply to Join</button></div>
       </section>
     `;
   }
@@ -1862,11 +1966,11 @@ function buildMessagesStage(user) {
   return `
     <div class="page-header-row">
       <div>
-        <h1>Direct Teacher Chats & Student Study Groups</h1>
-        <p>1-on-1 channels with educators plus peer study groups — queued offline & synced automatically.</p>
+        <h1>Messages & Study Groups</h1>
+        <p>Share messages, PDFs, photos & videos — tap any file to open it right inside i-tutor.</p>
       </div>
       <button class="dark-cta-btn" id="toggle-group-creator">${ICONS.plus} ${
-    ui.showGroupCreator || editingRoom ? 'Close Channel Editor' : 'Form Study Group'
+    ui.showGroupCreator || editingRoom ? 'Close' : 'New Group'
   }</button>
     </div>
 
@@ -1875,7 +1979,7 @@ function buildMessagesStage(user) {
         ? `
       <form class="panel-card form-stack" id="upsert-room-form">
         <div class="panel-head">
-          <h3 class="panel-title">${editingRoom ? `Edit Channel: ${esc(editingRoom.name)}` : 'Create Study Group / Channel'}</h3>
+          <h3 class="panel-title">${editingRoom ? `Edit Channel · ${esc(editingRoom.name)}` : 'Create Study Group'}</h3>
           <button type="button" class="outline-btn" id="cancel-room-edit">Cancel</button>
         </div>
         <input type="hidden" name="id" value="${esc(editingRoom?.id || '')}" />
@@ -1885,8 +1989,8 @@ function buildMessagesStage(user) {
         </div>
         <input class="field-input" name="members_label" value="${esc(
           editingRoom?.members_label || `Created by ${user.name}`
-        )}" placeholder="Channel subtitle / members description" />
-        <button class="dark-cta-btn" type="submit">${ICONS.check} Save Channel</button>
+        )}" placeholder="Subtitle / members" />
+        <button class="dark-cta-btn" type="submit">${ICONS.check} Save Group</button>
       </form>
     `
         : ''
@@ -1919,27 +2023,27 @@ function buildMessagesStage(user) {
               <h2 class="panel-title">${esc(activeRoom.name)}</h2>
               <span class="row-sub">${esc(activeRoom.members_label || activeRoom.subject)}</span>
             </div>
-            <div class="action-cluster">
-              ${
-                superEdit
-                  ? `
-                <button class="icon-action-btn" data-edit-room="${esc(activeRoom.id)}">${ICONS.edit} Edit Room</button>
-                <button class="icon-action-btn danger" data-del-room="${esc(activeRoom.id)}">${ICONS.trash}</button>
-              `
-                  : `<span class="pill-badge">Auto-Sync</span>`
-              }
-            </div>
+            ${
+              superEdit
+                ? renderMoreMenu(`
+                    <button type="button" class="more-menu-item" data-edit-room="${esc(activeRoom.id)}">${ICONS.edit} Edit Channel</button>
+                    <button type="button" class="more-menu-item is-danger" data-del-room="${esc(activeRoom.id)}">${ICONS.trash} Delete Channel</button>
+                  `)
+                : ''
+            }
           </div>
 
-          <div class="chat-messages-scroll">
+          <div class="chat-messages-scroll" id="chat-messages-scroll">
             ${roomMessages
               .map((m) => {
                 const mine = m.sender_id === user.id;
                 const canModMsg = superEdit || mine;
+                const msgAtts = Array.isArray(m.attachments) ? m.attachments : [];
+
                 if (ui.editingMessageId === m.id) {
                   return `
                     <form class="form-stack edit-msg-form" data-msg-id="${esc(m.id)}">
-                      <input class="field-input" name="body" value="${esc(m.body)}" required />
+                      <input class="field-input" name="body" value="${esc(m.body)}" />
                       <div class="action-cluster">
                         <button class="dark-cta-btn" type="submit">Save</button>
                         <button class="outline-btn" type="button" data-cancel-msg-edit>Cancel</button>
@@ -1949,33 +2053,58 @@ function buildMessagesStage(user) {
                 }
                 return `
                   <div class="msg-bubble ${mine ? 'mine' : ''}">
-                    <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;">
-                      <span class="msg-author">${esc(m.sender_name)} (${esc(m.sender_role)})</span>
+                    <div class="msg-head-row">
+                      <span class="msg-author">${esc(m.sender_name)}</span>
                       ${
                         canModMsg
-                          ? `
-                        <span class="action-cluster">
-                          <button class="icon-action-btn" style="padding:0.12rem 0.35rem;font-size:0.66rem;" data-edit-msg="${esc(
-                            m.id
-                          )}">Edit</button>
-                          <button class="icon-action-btn danger" style="padding:0.12rem 0.35rem;font-size:0.66rem;" data-del-msg="${esc(
-                            m.id
-                          )}">✕</button>
-                        </span>
-                      `
+                          ? renderMoreMenu(`
+                              <button type="button" class="more-menu-item" data-edit-msg="${esc(m.id)}">${ICONS.edit} Edit</button>
+                              <button type="button" class="more-menu-item is-danger" data-del-msg="${esc(m.id)}">${ICONS.trash} Delete</button>
+                            `)
                           : ''
                       }
                     </div>
-                    <div class="msg-body">${esc(m.body)}</div>
+                    ${m.body ? `<div class="msg-body">${esc(m.body)}</div>` : ''}
+                    ${renderAttachmentGalleryHTML(msgAtts, { compact: true })}
                   </div>
                 `;
               })
               .join('')}
           </div>
 
-          <form class="chat-input-bar" id="send-msg-form" data-room-id="${esc(activeRoom.id)}">
-            <input class="field-input" name="body" placeholder="Type your message..." required />
-            <button class="dark-cta-btn" type="submit">${ICONS.send} Send</button>
+          ${
+            ui.stagedChatAttachments.length > 0
+              ? `
+            <div class="chat-staged-strip">
+              ${renderAttachmentGalleryHTML(ui.stagedChatAttachments, { compact: true, removablePrefix: 'chat' })}
+            </div>
+          `
+              : ''
+          }
+
+          <form class="chat-composer-bar" id="send-msg-form" data-room-id="${esc(activeRoom.id)}">
+            <label class="chat-attach-btn" title="Attach Photo, PDF, or Video">
+              ${ICONS.paperclip}
+              <input
+                type="file"
+                id="chat-media-input"
+                accept="image/*,application/pdf,.pdf,video/*"
+                multiple
+                hidden
+              />
+            </label>
+            <input
+              class="field-input chat-text-field"
+              id="chat-text-input"
+              name="body"
+              value="${esc(ui.chatDraftText)}"
+              placeholder="${
+                ui.uploadingTarget === 'chat'
+                  ? 'Uploading attachment...'
+                  : 'Message or attach PDF, photo or video...'
+              }"
+            />
+            <button class="dark-cta-btn chat-send-btn" type="submit" aria-label="Send message">${ICONS.send}</button>
           </form>
         `
             : `<p class="row-sub">Select a conversation on the left.</p>`
@@ -1985,7 +2114,9 @@ function buildMessagesStage(user) {
   `;
 }
 
-/* --- BROADCASTS & ATTENDANCE (WITH FULL EDIT & DELETE) --- */
+/* ==========================================================================
+   10. BROADCASTS & ATTENDANCE (CLEAN TOGGLES + QUIET ⋯ MENUS)
+   ========================================================================== */
 
 function buildBroadcastsAttendanceStage(user) {
   const canPost = isStaff(user);
@@ -1997,37 +2128,50 @@ function buildBroadcastsAttendanceStage(user) {
     ? (vaultState.attendance || []).find((a) => a.id === ui.editingAttendanceId)
     : null;
 
+  const isAnnouncements = ui.broadcastSubtab === 'announcements';
+
   return `
     <div class="page-header-row">
       <div>
-        <h1>School Broadcasts & Offline Class Attendance</h1>
-        <p>Official announcements and transparent attendance logs — fully editable by educators & Admissions.</p>
+        <h1>Broadcasts & Attendance</h1>
+        <p>Official academy notices and class attendance logs.</p>
       </div>
+      ${
+        canPost
+          ? isAnnouncements
+            ? `<button class="dark-cta-btn" id="btn-toggle-bc-creator">${ICONS.plus} ${
+                ui.showBroadcastCreator || editingBc ? 'Close' : 'Post Notice'
+              }</button>`
+            : `<button class="dark-cta-btn" id="btn-toggle-att-creator">${ICONS.plus} ${
+                ui.showAttendanceCreator || editingAtt ? 'Close' : 'Log Attendance'
+              }</button>`
+          : ''
+      }
     </div>
 
     <div class="subtab-bar">
-      <button class="subtab-btn ${ui.broadcastSubtab === 'announcements' ? 'is-active' : ''}" data-bc-tab="announcements">
-        Broadcast Notices (${(vaultState.broadcasts || []).length})
+      <button class="subtab-btn ${isAnnouncements ? 'is-active' : ''}" data-bc-tab="announcements">
+        Notices (${(vaultState.broadcasts || []).length})
       </button>
-      <button class="subtab-btn ${ui.broadcastSubtab === 'attendance' ? 'is-active' : ''}" data-bc-tab="attendance">
-        Attendance & Lesson Log (${(vaultState.attendance || []).length})
+      <button class="subtab-btn ${!isAnnouncements ? 'is-active' : ''}" data-bc-tab="attendance">
+        Attendance (${(vaultState.attendance || []).length})
       </button>
     </div>
 
     ${
-      ui.broadcastSubtab === 'announcements'
+      isAnnouncements
         ? `
       ${
-        canPost
+        canPost && (ui.showBroadcastCreator || editingBc)
           ? `
         <form class="panel-card form-stack" id="upsert-broadcast-form">
           <div class="panel-head">
-            <h2 class="panel-title">${editingBc ? 'Edit Broadcast Notice' : 'Publish Official Broadcast'}</h2>
-            ${editingBc ? `<button type="button" class="outline-btn" id="cancel-bc-edit">Cancel</button>` : ''}
+            <h2 class="panel-title">${editingBc ? 'Edit Broadcast' : 'Publish Broadcast'}</h2>
+            <button type="button" class="outline-btn" id="cancel-bc-edit">Cancel</button>
           </div>
           <input type="hidden" name="id" value="${esc(editingBc?.id || '')}" />
           <div class="form-grid-2">
-            <input class="field-input" name="title" value="${esc(editingBc?.title || '')}" placeholder="Broadcast Headline" required />
+            <input class="field-input" name="title" value="${esc(editingBc?.title || '')}" placeholder="Headline" required />
             <select class="field-input" name="audience">
               <option value="students_parents" ${editingBc?.audience === 'students_parents' ? 'selected' : ''}>Students & Parents</option>
               <option value="students" ${editingBc?.audience === 'students' ? 'selected' : ''}>Students Only</option>
@@ -2037,9 +2181,7 @@ function buildBroadcastsAttendanceStage(user) {
           <textarea class="field-input" name="body" rows="2" placeholder="Announcement message..." required>${esc(
             editingBc?.body || ''
           )}</textarea>
-          <button class="dark-cta-btn" type="submit">${ICONS.broadcast} ${
-              editingBc ? 'Update Broadcast' : 'Send Broadcast'
-            }</button>
+          <button class="dark-cta-btn" type="submit">${ICONS.broadcast} ${editingBc ? 'Update' : 'Publish'}</button>
         </form>
       `
           : ''
@@ -2051,15 +2193,13 @@ function buildBroadcastsAttendanceStage(user) {
             (b) => `
           <article class="panel-card">
             <div class="panel-head">
-              <span class="pill-badge">${b.priority === 'important' ? '📌 Priority Broadcast' : 'Notice'} · ${esc(b.author_name)}</span>
+              <span class="pill-badge">${esc(b.author_name)}</span>
               ${
                 canPost
-                  ? `
-                <div class="action-cluster">
-                  <button class="icon-action-btn" data-edit-bc="${esc(b.id)}">${ICONS.edit} Edit</button>
-                  <button class="icon-action-btn danger" data-del-bc="${esc(b.id)}">${ICONS.trash}</button>
-                </div>
-              `
+                  ? renderMoreMenu(`
+                      <button type="button" class="more-menu-item" data-edit-bc="${esc(b.id)}">${ICONS.edit} Edit Notice</button>
+                      <button type="button" class="more-menu-item is-danger" data-del-bc="${esc(b.id)}">${ICONS.trash} Delete Notice</button>
+                    `)
                   : ''
               }
             </div>
@@ -2072,87 +2212,85 @@ function buildBroadcastsAttendanceStage(user) {
       </div>
     `
         : `
-      <div class="two-col-grid">
-        ${
-          canPost
-            ? `
-          <form class="panel-card form-stack" id="upsert-attendance-form">
-            <div class="panel-head">
-              <h2 class="panel-title">${editingAtt ? 'Edit Attendance Record' : 'Log Offline Attendance & Recap'}</h2>
-              ${editingAtt ? `<button type="button" class="outline-btn" id="cancel-att-edit">Cancel</button>` : ''}
-            </div>
-            <input type="hidden" name="id" value="${esc(editingAtt?.id || '')}" />
-            <div class="form-grid-2">
-              <select class="field-input" name="student_id" required>
-                ${students
-                  .map(
-                    (s) =>
-                      `<option value="${esc(s.id)}" ${editingAtt?.student_id === s.id ? 'selected' : ''}>${esc(
-                        s.name
-                      )} (${esc(s.grade)})</option>`
-                  )
-                  .join('')}
-              </select>
-              <select class="field-input" name="status" required>
-                <option value="present" ${editingAtt?.status === 'present' ? 'selected' : ''}>Present ✓</option>
-                <option value="late" ${editingAtt?.status === 'late' ? 'selected' : ''}>Late ⏱</option>
-                <option value="absent" ${editingAtt?.status === 'absent' ? 'selected' : ''}>Absent ✕</option>
-              </select>
-            </div>
-            <div class="form-grid-2">
-              <select class="field-input" name="subject">
-                ${SUBJECT_LIST.map(
-                  (s) => `<option value="${esc(s)}" ${editingAtt?.subject === s ? 'selected' : ''}>${esc(s)}</option>`
-                ).join('')}
-              </select>
-              <input class="field-input" type="date" name="session_date" value="${esc(
-                editingAtt?.session_date || '2026-11-25'
-              )}" required />
-            </div>
-            <input class="field-input" name="lesson_note" value="${esc(
-              editingAtt?.lesson_note || ''
-            )}" placeholder="Lesson recap note..." required />
-            <button class="dark-cta-btn" type="submit">${ICONS.check} ${
-                editingAtt ? 'Update Attendance' : 'Save Attendance Offline & Sync'
-              }</button>
-          </form>
-        `
-            : ''
-        }
+      ${
+        canPost && (ui.showAttendanceCreator || editingAtt)
+          ? `
+        <form class="panel-card form-stack" id="upsert-attendance-form">
+          <div class="panel-head">
+            <h2 class="panel-title">${editingAtt ? 'Edit Attendance' : 'Log Attendance'}</h2>
+            <button type="button" class="outline-btn" id="cancel-att-edit">Cancel</button>
+          </div>
+          <input type="hidden" name="id" value="${esc(editingAtt?.id || '')}" />
+          <div class="form-grid-2">
+            <select class="field-input" name="student_id" required>
+              ${students
+                .map(
+                  (s) =>
+                    `<option value="${esc(s.id)}" ${editingAtt?.student_id === s.id ? 'selected' : ''}>${esc(
+                      s.name
+                    )} (${esc(s.grade)})</option>`
+                )
+                .join('')}
+            </select>
+            <select class="field-input" name="status" required>
+              <option value="present" ${editingAtt?.status === 'present' ? 'selected' : ''}>Present ✓</option>
+              <option value="late" ${editingAtt?.status === 'late' ? 'selected' : ''}>Late ⏱</option>
+              <option value="absent" ${editingAtt?.status === 'absent' ? 'selected' : ''}>Absent ✕</option>
+            </select>
+          </div>
+          <div class="form-grid-2">
+            <select class="field-input" name="subject">
+              ${SUBJECT_LIST.map(
+                (s) => `<option value="${esc(s)}" ${editingAtt?.subject === s ? 'selected' : ''}>${esc(s)}</option>`
+              ).join('')}
+            </select>
+            <input class="field-input" type="date" name="session_date" value="${esc(
+              editingAtt?.session_date || '2026-11-25'
+            )}" required />
+          </div>
+          <input class="field-input" name="lesson_note" value="${esc(
+            editingAtt?.lesson_note || ''
+          )}" placeholder="Lesson recap..." required />
+          <button class="dark-cta-btn" type="submit">${ICONS.check} Save Attendance</button>
+        </form>
+      `
+          : ''
+      }
 
-        <section class="panel-card" style="${canPost ? '' : 'grid-column:1/-1;'}">
-          <h2 class="panel-title">Attendance & Tutor Lesson Recaps</h2>
-          ${(vaultState.attendance || [])
-            .map(
-              (a) => `
-            <div class="list-row" style="flex-wrap:wrap;">
-              <div class="list-row-col">
-                <span class="row-title">${esc(a.student_name)} · ${esc(a.subject)}</span>
-                <span class="row-sub">${esc(a.session_date)} · ${esc(a.teacher_name)} — "${esc(a.lesson_note)}"</span>
-              </div>
-              <div class="action-cluster">
-                <span class="pill-badge">${esc((a.status || 'present').toUpperCase())}</span>
-                ${
-                  canPost
-                    ? `
-                  <button class="icon-action-btn" data-edit-att="${esc(a.id)}">${ICONS.edit}</button>
-                  <button class="icon-action-btn danger" data-del-att="${esc(a.id)}">${ICONS.trash}</button>
-                `
-                    : ''
-                }
-              </div>
+      <section class="panel-card">
+        <h2 class="panel-title">Class Attendance Log</h2>
+        ${(vaultState.attendance || [])
+          .map(
+            (a) => `
+          <div class="list-row">
+            <div class="list-row-col">
+              <span class="row-title">${esc(a.student_name)} · ${esc(a.subject)}</span>
+              <span class="row-sub">${esc(a.session_date)} · ${esc(a.teacher_name)} — "${esc(a.lesson_note)}"</span>
             </div>
-          `
-            )
-            .join('')}
-        </section>
-      </div>
+            <div class="action-cluster">
+              <span class="pill-badge">${esc((a.status || 'present').toUpperCase())}</span>
+              ${
+                canPost
+                  ? renderMoreMenu(`
+                      <button type="button" class="more-menu-item" data-edit-att="${esc(a.id)}">${ICONS.edit} Edit</button>
+                      <button type="button" class="more-menu-item is-danger" data-del-att="${esc(a.id)}">${ICONS.trash} Remove</button>
+                    `)
+                  : ''
+              }
+            </div>
+          </div>
+        `
+          )
+          .join('')}
+      </section>
     `
     }
   `;
 }
 
-/* --- PUBLIC TUITION PACKAGES, FEE ESTIMATOR & CONTACTS (FULL PACKAGE + CONTACT EDITOR!) --- */
+/* ==========================================================================
+   11. TUITION PACKAGES & CONTACTS (DE-CLUTTERED)
+   ========================================================================== */
 
 function buildTuitionContactsStage(user) {
   const info = vaultState.tuitionInfo;
@@ -2165,26 +2303,22 @@ function buildTuitionContactsStage(user) {
   return `
     <div class="page-header-row">
       <div>
-        <h1>${esc(info.headline || 'Tuition Prices, Fee Estimator & Contacts')}</h1>
-        <p>${esc(info.intro || 'Open to everyone — transparent tuition rates, instant fee estimator, and direct academy contact details.')}</p>
+        <h1>${esc(info.headline || 'Tuition & Contacts')}</h1>
+        <p>${esc(info.intro || 'Transparent monthly packages, fee estimator & direct academy contacts.')}</p>
       </div>
       <div class="action-cluster">
         ${
           user.role === 'visitor'
-            ? `<button class="dark-cta-btn" id="visitor-apply-tuition">${ICONS.plus} Apply to Join i-tutor</button>`
+            ? `<button class="dark-cta-btn" id="visitor-apply-tuition">${ICONS.plus} Apply to Join</button>`
             : ''
         }
         ${
           superEdit
-            ? `
-          <button class="dark-cta-btn" id="toggle-new-plan-btn">${ICONS.plus} ${
-                ui.showNewPlanForm || editingPlan ? 'Close Plan Editor' : 'Add Tuition Package'
-              }</button>
-          <button class="outline-btn" id="toggle-tuition-editor">${ICONS.edit} ${
-                ui.showTuitionEditor ? 'Close Contact Editor' : 'Edit Contacts & Headline'
-              }</button>
-        `
-            : `<span class="pill-badge">Public Access</span>`
+            ? renderMoreMenu(`
+                <button type="button" class="more-menu-item" id="toggle-new-plan-btn">${ICONS.plus} Add Tuition Package</button>
+                <button type="button" class="more-menu-item" id="toggle-tuition-editor">${ICONS.edit} Edit Contacts & Headline</button>
+              `)
+            : ''
         }
       </div>
     </div>
@@ -2194,22 +2328,22 @@ function buildTuitionContactsStage(user) {
         ? `
       <form class="panel-card form-stack" id="upsert-plan-form">
         <div class="panel-head">
-          <h2 class="panel-title">${editingPlan ? `Edit Package: ${esc(editingPlan.name)}` : 'Add New Tuition Package'}</h2>
+          <h2 class="panel-title">${editingPlan ? `Edit Package · ${esc(editingPlan.name)}` : 'Add Tuition Package'}</h2>
           <button type="button" class="outline-btn" id="cancel-plan-edit">Cancel</button>
         </div>
         <input type="hidden" name="id" value="${esc(editingPlan?.id || '')}" />
         <div class="form-grid-2">
-          <input class="field-input" name="name" value="${esc(editingPlan?.name || '')}" placeholder="Package Name (e.g. Weekend Exam Clinic)" required />
-          <input class="field-input" name="price" value="${esc(editingPlan?.price || '')}" placeholder="Displayed Price (e.g. R650 / month)" required />
+          <input class="field-input" name="name" value="${esc(editingPlan?.name || '')}" placeholder="Package Name" required />
+          <input class="field-input" name="price" value="${esc(editingPlan?.price || '')}" placeholder="Price (e.g. R650 / month)" required />
         </div>
         <div class="form-grid-2">
           <input class="field-input" type="number" name="numericRate" value="${esc(editingPlan?.numericRate || 650)}" placeholder="Numeric Rate" required />
-          <input class="field-input" name="badge" value="${esc(editingPlan?.badge || 'Grades 8 – 12')}" placeholder="Badge (e.g. Most Popular)" required />
+          <input class="field-input" name="badge" value="${esc(editingPlan?.badge || 'Grades 8 – 12')}" placeholder="Badge" required />
         </div>
-        <textarea class="field-input" name="featuresRaw" rows="3" placeholder="Package bullet features (one per line)..." required>${esc(
+        <textarea class="field-input" name="featuresRaw" rows="3" placeholder="Features (one per line)..." required>${esc(
           (editingPlan?.features || []).join('\n')
         )}</textarea>
-        <button class="dark-cta-btn" type="submit">${ICONS.check} Save Tuition Package & Sync</button>
+        <button class="dark-cta-btn" type="submit">${ICONS.check} Save Package</button>
       </form>
     `
         : ''
@@ -2219,11 +2353,12 @@ function buildTuitionContactsStage(user) {
       superEdit && ui.showTuitionEditor
         ? `
       <form class="panel-card form-stack" id="update-tuition-form">
-        <h2 class="panel-title">Edit Academy Headline, Intro & Public Contact Details</h2>
-        <input class="field-input" name="headline" value="${esc(info.headline || '')}" placeholder="Main Tuition Headline" required />
-        <textarea class="field-input" name="intro" rows="2" placeholder="Intro description..." required>${esc(
-          info.intro || ''
-        )}</textarea>
+        <div class="panel-head">
+          <h2 class="panel-title">Edit Headline & Contacts</h2>
+          <button type="button" class="outline-btn" id="cancel-tuition-editor">Cancel</button>
+        </div>
+        <input class="field-input" name="headline" value="${esc(info.headline || '')}" placeholder="Headline" required />
+        <textarea class="field-input" name="intro" rows="2" placeholder="Intro..." required>${esc(info.intro || '')}</textarea>
         <div class="form-grid-2">
           <input class="field-input" name="phone" value="${esc(contacts.phone)}" placeholder="Phone" required />
           <input class="field-input" name="whatsapp" value="${esc(contacts.whatsapp)}" placeholder="WhatsApp" required />
@@ -2233,7 +2368,7 @@ function buildTuitionContactsStage(user) {
           <input class="field-input" name="hours" value="${esc(contacts.hours)}" placeholder="Hours" required />
         </div>
         <input class="field-input" name="address" value="${esc(contacts.address)}" placeholder="Campus Address" required />
-        <button class="dark-cta-btn" type="submit">${ICONS.check} Save Public Details & Sync</button>
+        <button class="dark-cta-btn" type="submit">${ICONS.check} Save Details</button>
       </form>
     `
         : ''
@@ -2246,25 +2381,27 @@ function buildTuitionContactsStage(user) {
         <article class="tuition-plan-card ${plan.badge === 'Most Popular' ? 'popular' : ''}">
           <div style="display:flex;flex-direction:column;gap:0.4rem;">
             <div class="panel-head">
-              <h2 class="panel-title">${esc(plan.name)}</h2>
-              <div class="action-cluster">
-                <span class="pill-badge">${esc(plan.badge)}</span>
-                ${
-                  superEdit
-                    ? `
-                  <button class="icon-action-btn" data-edit-plan="${esc(plan.id)}">${ICONS.edit}</button>
-                  ${plans.length > 1 ? `<button class="icon-action-btn danger" data-del-plan="${esc(plan.id)}">${ICONS.trash}</button>` : ''}
-                `
-                    : ''
-                }
-              </div>
+              <span class="pill-badge">${esc(plan.badge)}</span>
+              ${
+                superEdit
+                  ? renderMoreMenu(`
+                      <button type="button" class="more-menu-item" data-edit-plan="${esc(plan.id)}">${ICONS.edit} Edit Plan</button>
+                      ${
+                        plans.length > 1
+                          ? `<button type="button" class="more-menu-item is-danger" data-del-plan="${esc(plan.id)}">${ICONS.trash} Remove Plan</button>`
+                          : ''
+                      }
+                    `)
+                  : ''
+              }
             </div>
+            <h2 class="panel-title">${esc(plan.name)}</h2>
             <div class="plan-price-big">${esc(plan.price)}</div>
             <ul class="plan-bullets">
               ${(plan.features || []).map((f) => `<li>${esc(f)}</li>`).join('')}
             </ul>
           </div>
-          <a href="#enquiry-form-card" class="outline-btn" style="text-decoration:none;">Select & Enquire</a>
+          <a href="#enquiry-form-card" class="outline-btn" style="text-decoration:none;">Enquire</a>
         </article>
       `
         )
@@ -2274,48 +2411,43 @@ function buildTuitionContactsStage(user) {
     <div class="two-col-grid">
       <section class="panel-card">
         <div class="panel-head">
-          <h2 class="panel-title">Custom Session Fee Estimator & Contacts</h2>
-          <span class="pill-badge">Instant Estimate</span>
+          <h2 class="panel-title">Monthly Fee Estimator & Contacts</h2>
         </div>
-        <label style="font-size:0.8rem;font-weight:750;">1. Tutoring Format:</label>
         <select class="field-input" id="calc-rate-select">
           <option value="220" ${ui.feeCalcRate === 220 ? 'selected' : ''}>1-on-1 Private Mentoring (R220 / hr)</option>
           <option value="120" ${ui.feeCalcRate === 120 ? 'selected' : ''}>Small-Group Subject Pod (R120 / session)</option>
-          <option value="90" ${ui.feeCalcRate === 90 ? 'selected' : ''}>Remote Pack + Live Check-In (R90 / session)</option>
+          <option value="90" ${ui.feeCalcRate === 90 ? 'selected' : ''}>Remote Pack + Check-In (R90 / session)</option>
         </select>
 
-        <label style="font-size:0.8rem;font-weight:750;">2. Weekly Sessions: <strong>${ui.feeCalcSessions} sessions / week</strong></label>
+        <label style="font-size:0.8rem;font-weight:750;">Sessions per week: <strong>${ui.feeCalcSessions}</strong></label>
         <input type="range" min="1" max="6" value="${ui.feeCalcSessions}" id="calc-sessions-range" />
 
         <div class="worksheet-box" style="display:flex;justify-content:space-between;align-items:center;">
-          <span>Estimated 4-Week Tuition:</span>
-          <strong style="font-size:1.28rem;">R${monthlyEst.toLocaleString()} / month</strong>
+          <span>4-Week Estimate:</span>
+          <strong style="font-size:1.25rem;">R${monthlyEst.toLocaleString()} / mo</strong>
         </div>
 
-        <div style="border-top:1px solid var(--border-warm);padding-top:0.8rem;display:flex;flex-direction:column;gap:0.36rem;font-size:0.84rem;">
-          <strong>i-tutor Academy Direct Contacts</strong>
-          <div>📞 Phone: <strong>${esc(contacts.phone)}</strong></div>
-          <div>💬 WhatsApp: <strong>${esc(contacts.whatsapp)}</strong></div>
-          <div>✉️ Email: <strong>${esc(contacts.email)}</strong></div>
-          <div>📍 Address: <strong>${esc(contacts.address)}</strong></div>
-          <div>🕒 Hours: <strong>${esc(contacts.hours)}</strong></div>
+        <div style="border-top:1px solid var(--border-warm);padding-top:0.8rem;display:flex;flex-direction:column;gap:0.34rem;font-size:0.84rem;">
+          <div>📞 <strong>${esc(contacts.phone)}</strong> · WhatsApp <strong>${esc(contacts.whatsapp)}</strong></div>
+          <div>✉️ <strong>${esc(contacts.email)}</strong></div>
+          <div>📍 ${esc(contacts.address)} (${esc(contacts.hours)})</div>
         </div>
       </section>
 
       <section class="panel-card" id="enquiry-form-card">
-        <h2 class="panel-title">Send Admissions / Tuition Enquiry</h2>
-        <p class="row-sub">Admissions can accept your enquiry directly into an active i-tutor account!</p>
+        <h2 class="panel-title">Send Admissions Enquiry</h2>
+        <p class="row-sub">Our team responds swiftly and can enroll learners directly.</p>
         <form class="form-stack" id="public-enquiry-form">
-          <input class="field-input" name="full_name" placeholder="Your Full Name (Parent or Student)" required />
+          <input class="field-input" name="full_name" placeholder="Full Name (Parent or Student)" required />
           <input class="field-input" name="contact_detail" placeholder="Phone / WhatsApp or Email" required />
           <div class="form-grid-2">
-            <input class="field-input" name="student_grade" placeholder="Learner Grade (e.g. Grade 12)" required />
+            <input class="field-input" name="student_grade" placeholder="Grade (e.g. Grade 12)" required />
             <select class="field-input" name="selected_plan">
               ${plans.map((p) => `<option value="${esc(p.name)}">${esc(p.name)} (${esc(p.price)})</option>`).join('')}
             </select>
           </div>
-          <textarea class="field-input" name="message" rows="3" placeholder="Which subjects do you need help with?" required></textarea>
-          <button class="dark-cta-btn" type="submit">${ICONS.send} Submit Enquiry to Admissions</button>
+          <textarea class="field-input" name="message" rows="3" placeholder="Subjects or goals..." required></textarea>
+          <button class="dark-cta-btn" type="submit">${ICONS.send} Send Enquiry</button>
         </form>
       </section>
     </div>
@@ -2323,7 +2455,7 @@ function buildTuitionContactsStage(user) {
 }
 
 /* ==========================================================================
-   6. MAIN SHELL RENDERER & EVENT WIRING
+   12. CLEAN SHELL RENDERER & EVENT WIRING (ZERO TOPBAR / STRIP BUTTON CLUTTER)
    ========================================================================== */
 
 function renderApp(opts = {}) {
@@ -2353,25 +2485,24 @@ function renderApp(opts = {}) {
   lastAnimatedKey = routeKey;
 
   const navItems = [
-    { id: 'overview', label: 'Overview Hub', short: 'Hub', icon: ICONS.home, badge: '' },
+    { id: 'overview', label: 'Overview', icon: ICONS.home, badge: '' },
     ...(superEdit
       ? [
           {
             id: 'admissions',
-            label: 'Admissions & Accounts',
-            short: pendingAdmissions ? `Admissions (${pendingAdmissions})` : 'Admissions',
+            label: 'Admissions',
             icon: ICONS.users,
-            badge: pendingAdmissions ? `${pendingAdmissions} New` : `${(vaultState.profiles || []).length}`
+            badge: pendingAdmissions ? `${pendingAdmissions}` : ''
           }
         ]
       : []),
-    { id: 'timetable', label: 'Timetable & Exams', short: 'Schedule', icon: ICONS.timetable, badge: String(vaultState.timetables.length) },
-    { id: 'assignments', label: 'Remote Assignments', short: 'Tasks', icon: ICONS.assignment, badge: String(vaultState.assignments.length) },
-    { id: 'toolkit', label: 'Offline Study Toolkit', short: 'Toolkit', icon: ICONS.toolkit, badge: '4 Tools' },
-    { id: 'messages', label: 'Chats & Study Groups', short: 'Chats', icon: ICONS.messages, badge: visibleRooms.length ? String(visibleRooms.length) : '' },
-    { id: 'broadcasts', label: 'Broadcasts & Attendance', short: 'Broadcasts', icon: ICONS.broadcast, badge: String(vaultState.broadcasts.length) },
-    { id: 'tuition', label: 'Tuition Prices & Contact', short: 'Tuition', icon: ICONS.tuition, badge: superEdit ? 'Edit' : 'Open' },
-    { id: 'account', label: user.role === 'visitor' ? 'Join / Sign In' : 'My Account', short: 'Account', icon: ICONS.user, badge: '' }
+    { id: 'assignments', label: 'Homework & Media', icon: ICONS.assignment, badge: String(vaultState.assignments.length) },
+    { id: 'messages', label: 'Messages & Groups', icon: ICONS.messages, badge: visibleRooms.length ? String(visibleRooms.length) : '' },
+    { id: 'timetable', label: 'Schedule & Exams', icon: ICONS.timetable, badge: '' },
+    { id: 'toolkit', label: 'Study Toolkit', icon: ICONS.toolkit, badge: '' },
+    { id: 'broadcasts', label: 'Notices & Attendance', icon: ICONS.broadcast, badge: '' },
+    { id: 'tuition', label: 'Tuition & Contacts', icon: ICONS.tuition, badge: '' },
+    { id: 'account', label: user.role === 'visitor' ? 'Join / Sign In' : 'My Account', icon: ICONS.user, badge: '' }
   ];
 
   let centerHTML = '';
@@ -2399,10 +2530,10 @@ function renderApp(opts = {}) {
 
   rootEl.innerHTML = `
     <div class="workspace-shell">
-      <!-- ZONE 1: LEFT NAVIGATION RAIL (DESKTOP) -->
+      <!-- ZONE 1: CLEAN DESKTOP LEFT RAIL -->
       <aside class="sidebar-rail">
         <div>
-          <button class="brand-header-btn" data-nav="overview" title="Go to Overview Hub">
+          <button class="brand-header-btn" data-nav="overview" title="Go to Overview">
             <div class="sidebar-emblem-wrap">
               ${renderEmblemSVG({ animated: false, uid: 'sidebar', className: 'brand-emblem-svg' })}
             </div>
@@ -2412,59 +2543,39 @@ function renderApp(opts = {}) {
             </div>
           </button>
 
-          <!-- SIGNED-IN ACCOUNT CARD -->
-          <div class="account-rail-card">
-            <div class="account-rail-top">
-              <div class="account-avatar-gold">${esc(initials(user.name))}</div>
-              <div style="min-width:0;flex:1;">
-                <div style="font-size:0.84rem;font-weight:800;color:#F8F3EC;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
-                  ${esc(user.name)}
-                </div>
-                <div style="font-size:0.69rem;color:var(--gold);font-weight:750;text-transform:uppercase;">
-                  ${esc(user.role)} ${superEdit ? '· Full Editor' : ''}
-                </div>
-              </div>
-            </div>
-            <div class="mini-btn-row">
-              <button class="rail-mini-btn" data-nav="account">My Account</button>
-              <button class="rail-mini-btn" data-action-signout="1">Switch / Out</button>
-            </div>
-          </div>
-
           <nav class="sidebar-nav" aria-label="Main navigation">
-            <div class="nav-section-label">Workspace</div>
             ${navButtonsMarkup('rail')}
           </nav>
         </div>
 
         <div class="sidebar-footer">
-          <div class="offline-vault-box">
-            <div class="vault-status-row">
-              <span><span class="dot-indicator ${offline ? 'offline' : ''}"></span>${
-    offline ? 'Offline Mode Active' : 'Online · Auto-Synced'
-  }</span>
-              ${outboxCount ? `<span class="nav-badge">${outboxCount} Queued</span>` : ''}
+          <div class="account-rail-card">
+            <div class="account-rail-top" data-nav="account" style="cursor:pointer;" title="Account settings">
+              <div class="account-avatar-gold">${esc(initials(user.name))}</div>
+              <div style="min-width:0;flex:1;">
+                <div style="font-size:0.82rem;font-weight:800;color:#F8F3EC;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                  ${esc(user.name)}
+                </div>
+                <div style="font-size:0.67rem;color:var(--gold);font-weight:750;text-transform:uppercase;">
+                  ${esc(user.role)} · <span class="dot-indicator ${offline ? 'offline' : ''}" style="margin:0 2px;"></span>${
+    offline ? 'Offline' : 'Synced'
+  }
+                </div>
+              </div>
             </div>
             <div class="mini-btn-row">
-              <button class="rail-mini-btn" data-action-sync="1">Sync Now</button>
-              <button class="rail-mini-btn" data-action-toggle-offline="1">${offline ? 'Go Online' : 'Test Offline'}</button>
+              <button class="rail-mini-btn" data-action-night="1">${sessionState.theme === 'night' ? '☀ Light' : '☾ Night'}</button>
+              <button class="rail-mini-btn" data-action-signout="1">Switch</button>
             </div>
-          </div>
-
-          <div class="mini-btn-row">
-            <button class="rail-mini-btn" data-action-night="1">${
-              sessionState.theme === 'night' ? '☀ Cream Theme' : '☾ Night Study'
-            }</button>
-            <button class="rail-mini-btn" data-action-replay="1">↻ 10s Intro</button>
           </div>
         </div>
       </aside>
 
-      <!-- ZONE 2: WIDE ADAPTIVE MAIN STAGE -->
+      <!-- ZONE 2: CALM, MINIMAL MAIN STAGE -->
       <div class="main-stage">
         <header class="stage-topbar">
           <div class="topbar-left-group">
-            <button class="mobile-menu-trigger" id="btn-open-mobile-drawer" aria-label="Open full workspace menu">
+            <button class="mobile-menu-trigger" id="btn-open-mobile-drawer" aria-label="Open workspace menu">
               ${ICONS.menu}
             </button>
 
@@ -2480,7 +2591,7 @@ function renderApp(opts = {}) {
               type="search"
               class="global-search-input"
               id="global-search-input"
-              placeholder="Search accounts, offline notes, timetable, tasks..."
+              placeholder="Search homework, notes, schedule, accounts..."
               value="${esc(ui.searchQuery)}"
             />
           </div>
@@ -2495,29 +2606,17 @@ function renderApp(opts = {}) {
               ${ICONS.search}
             </button>
 
-            ${
-              superEdit
-                ? `<button class="gold-cta-btn hide-label-mobile" data-nav="admissions" title="Admissions (${pendingAdmissions})">
-                    ${ICONS.users}<span>Admissions (${pendingAdmissions})</span>
-                  </button>`
-                : `<button class="gold-cta-btn hide-label-mobile" data-nav="tuition" title="Prices & Contact">
-                    ${ICONS.tuition}<span>Prices & Contact</span>
-                  </button>`
-            }
-
-            <button class="outline-btn" data-action-toggle-offline="1" title="Toggle offline simulation">
+            <button class="status-pill-btn" data-action-toggle-offline="1" title="Toggle offline mode">
               <span class="dot-indicator ${offline ? 'offline' : ''}"></span>
-              <span>${offline ? `Offline (${outboxCount})` : 'Synced'}</span>
+              <span>${offline ? (outboxCount ? `Offline (${outboxCount})` : 'Offline') : 'Synced'}</span>
             </button>
 
-            <button class="outline-btn" data-action-signout="1" title="Switch account or sign out">
-              ${ICONS.logout}
-              <span>${user.role === 'visitor' ? 'Join' : 'Switch'}</span>
+            <button class="topbar-avatar-btn" data-nav="account" title="${esc(user.name)} — My Account">
+              ${esc(initials(user.name))}
             </button>
           </div>
         </header>
 
-        <!-- EXPANDABLE MOBILE SEARCH DRAWER -->
         <div class="mobile-search-drawer ${ui.mobileSearchOpen || ui.searchQuery ? 'is-open' : ''}">
           <div class="search-box-wrap">
             <span class="search-icon-pos">${ICONS.search}</span>
@@ -2525,60 +2624,40 @@ function renderApp(opts = {}) {
               type="search"
               class="global-search-input"
               id="mobile-search-input"
-              placeholder="Search accounts, notes, schedule, tasks..."
+              placeholder="Search homework, notes, schedule..."
               value="${esc(ui.searchQuery)}"
             />
           </div>
         </div>
-
-        <!-- HORIZONTAL QUICK-JUMP STRIP ON MOBILE (ZERO CLIPPING, ALL 9 AREAS REACHABLE IN 1 TAP) -->
-        <nav class="mobile-quick-strip" aria-label="Quick section jump">
-          ${navItems
-            .map(
-              (item) => `
-            <button class="quick-strip-pill ${ui.view === item.id ? 'is-active' : ''}" data-nav="${item.id}">
-              ${item.icon}<span>${esc(item.short)}</span>
-            </button>
-          `
-            )
-            .join('')}
-        </nav>
 
         <main class="stage-body ${shouldAnimateStage ? 'is-entering' : ''}">
           ${centerHTML}
         </main>
       </div>
 
-      <!-- ZONE 3: RIGHT CONTEXTUAL LIVE WIDGET RAIL -->
+      <!-- ZONE 3: CALM DESKTOP WIDGET RAIL -->
       <aside class="context-rail">
         <section class="widget-card">
           <div class="panel-head">
-            <span class="panel-title" style="font-size:0.9rem;">Sunrise Confidence</span>
+            <span class="panel-title" style="font-size:0.88rem;">Sunrise Confidence</span>
             <span class="pill-badge">${avgConf}%</span>
           </div>
           ${renderSunriseGaugeSVG(avgConf)}
-          <button class="outline-btn" data-open-toolkit="quiz">${ICONS.quiz} Practice Quick Quiz</button>
         </section>
 
         <section class="widget-card">
           <div class="panel-head">
-            <span class="panel-title" style="font-size:0.9rem;">Live Focus Timer</span>
-            <span class="muted-pill">${ui.timerRunning ? 'Ticking' : 'Ready'}</span>
+            <span class="panel-title" style="font-size:0.88rem;">Focus Timer</span>
+            <button class="text-link-btn" data-timer-action="toggle">${ui.timerRunning ? 'Pause' : 'Start'}</button>
           </div>
-          <div class="timer-readout-big js-timer-readout ${ui.timerRunning ? 'is-ticking' : ''}" style="font-size:1.85rem;">${formatClock(
+          <div class="timer-readout-big js-timer-readout ${ui.timerRunning ? 'is-ticking' : ''}" style="font-size:1.75rem;">${formatClock(
             ui.timerSeconds
           )}</div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.4rem;">
-            <button class="dark-cta-btn" data-timer-action="toggle" style="padding:0.48rem;">
-              ${ui.timerRunning ? 'Pause' : 'Start'}
-            </button>
-            <button class="outline-btn" data-timer-preset="25" style="padding:0.48rem;">Reset 25m</button>
-          </div>
         </section>
 
         <section class="widget-card">
           <div class="panel-head">
-            <span class="panel-title" style="font-size:0.9rem;">Today's Study Checklist</span>
+            <span class="panel-title" style="font-size:0.88rem;">Study Checklist</span>
           </div>
           ${(personalState.tasks || [])
             .slice(0, 4)
@@ -2591,48 +2670,26 @@ function renderApp(opts = {}) {
           `
             )
             .join('')}
-          <button class="outline-btn" data-action-export="1" style="margin-top:0.35rem;">
-            ${ICONS.download} Export Offline Backup
-          </button>
         </section>
       </aside>
     </div>
 
-    <!-- ANIMATED SLIDE-OUT MOBILE MENU DRAWER -->
+    <!-- SLIDE-OUT MENU DRAWER (ALL SECONDARY UTILITIES TUCKED NEATLY HERE) -->
     <div class="mobile-drawer-backdrop ${ui.mobileDrawerOpen ? 'is-open' : ''}" id="mobile-drawer-backdrop"></div>
-    <aside class="mobile-drawer-panel ${ui.mobileDrawerOpen ? 'is-open' : ''}" id="mobile-drawer-panel" aria-label="Mobile menu drawer">
+    <aside class="mobile-drawer-panel ${ui.mobileDrawerOpen ? 'is-open' : ''}" id="mobile-drawer-panel" aria-label="Workspace menu">
       <div>
         <div class="drawer-head-row">
           <div style="display:flex;align-items:center;gap:0.55rem;">
-            <div style="width:36px;height:36px;">${renderEmblemSVG({ animated: false, uid: 'drawer', className: 'brand-emblem-svg' })}</div>
+            <div style="width:34px;height:34px;">${renderEmblemSVG({ animated: false, uid: 'drawer', className: 'brand-emblem-svg' })}</div>
             <div>
-              <div class="brand-title" style="font-size:1.05rem;"><span class="gold-i">i</span>-tutor</div>
+              <div class="brand-title" style="font-size:1.02rem;"><span class="gold-i">i</span>-tutor</div>
               <div class="brand-sub">Confidence in learning</div>
             </div>
           </div>
           <button class="drawer-close-btn" id="btn-close-mobile-drawer" aria-label="Close menu">${ICONS.close}</button>
         </div>
 
-        <div class="account-rail-card" style="margin-top:0.75rem;">
-          <div class="account-rail-top">
-            <div class="account-avatar-gold">${esc(initials(user.name))}</div>
-            <div style="min-width:0;flex:1;">
-              <div style="font-size:0.84rem;font-weight:800;color:#F8F3EC;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
-                ${esc(user.name)}
-              </div>
-              <div style="font-size:0.68rem;color:var(--gold);font-weight:750;text-transform:uppercase;">
-                ${esc(user.role)} ${superEdit ? '· Full Editor' : ''}
-              </div>
-            </div>
-          </div>
-          <div class="mini-btn-row">
-            <button class="rail-mini-btn" data-nav="account">My Account</button>
-            <button class="rail-mini-btn" data-action-signout="1">Switch / Out</button>
-          </div>
-        </div>
-
-        <nav class="sidebar-nav" aria-label="Drawer navigation">
-          <div class="nav-section-label">All Workspaces</div>
+        <nav class="sidebar-nav" style="margin-top:0.75rem;" aria-label="Drawer navigation">
           ${navButtonsMarkup('drawer')}
         </nav>
       </div>
@@ -2641,7 +2698,7 @@ function renderApp(opts = {}) {
         <div class="offline-vault-box">
           <div class="vault-status-row">
             <span><span class="dot-indicator ${offline ? 'offline' : ''}"></span>${
-    offline ? 'Offline Mode Active' : 'Online · Auto-Synced'
+    offline ? 'Offline Mode' : 'Cloud Synced'
   }</span>
             ${outboxCount ? `<span class="nav-badge">${outboxCount} Queued</span>` : ''}
           </div>
@@ -2649,34 +2706,28 @@ function renderApp(opts = {}) {
             <button class="rail-mini-btn" data-action-sync="1">Sync Now</button>
             <button class="rail-mini-btn" data-action-toggle-offline="1">${offline ? 'Go Online' : 'Test Offline'}</button>
           </div>
+          <div class="mini-btn-row">
+            <button class="rail-mini-btn" data-action-night="1">${sessionState.theme === 'night' ? '☀ Light' : '☾ Night'}</button>
+            <button class="rail-mini-btn" data-action-export="1">⬇ Backup</button>
+          </div>
+          <div class="mini-btn-row">
+            <button class="rail-mini-btn" data-action-replay="1">↻ 10s Intro</button>
+            <button class="rail-mini-btn" data-action-signout="1">Switch User</button>
+          </div>
         </div>
-
-        <div class="mini-btn-row">
-          <button class="rail-mini-btn" data-action-night="1">${
-            sessionState.theme === 'night' ? '☀ Cream Theme' : '☾ Night Study'
-          }</button>
-          <button class="rail-mini-btn" data-action-export="1">⬇ Backup</button>
-        </div>
-        <button class="rail-mini-btn" data-action-replay="1" style="width:100%;justify-content:center;">↻ Replay 10s Rising-Sun Intro</button>
       </div>
     </aside>
 
-    <!-- MOBILE LABELED 5-TAB BOTTOM BAR -->
+    <!-- CLEAN 5-TAB MOBILE BOTTOM BAR (HUB · HOMEWORK · CHATS · TOOLKIT · MENU) -->
     <nav class="mobile-tabbar" aria-label="Mobile bottom navigation">
       <button class="mob-tab-btn ${ui.view === 'overview' ? 'is-active' : ''}" data-nav="overview">
         ${ICONS.home}<span>Hub</span>
       </button>
-      ${
-        superEdit
-          ? `<button class="mob-tab-btn ${ui.view === 'admissions' ? 'is-active' : ''}" data-nav="admissions">
-              ${ICONS.users}<span>Admissions</span>
-            </button>`
-          : `<button class="mob-tab-btn ${ui.view === 'timetable' ? 'is-active' : ''}" data-nav="timetable">
-              ${ICONS.timetable}<span>Schedule</span>
-            </button>`
-      }
       <button class="mob-tab-btn ${ui.view === 'assignments' ? 'is-active' : ''}" data-nav="assignments">
-        ${ICONS.assignment}<span>Tasks</span>
+        ${ICONS.assignment}<span>Homework</span>
+      </button>
+      <button class="mob-tab-btn ${ui.view === 'messages' ? 'is-active' : ''}" data-nav="messages">
+        ${ICONS.messages}<span>Chats</span>
       </button>
       <button class="mob-tab-btn ${ui.view === 'toolkit' ? 'is-active' : ''}" data-nav="toolkit">
         ${ICONS.toolkit}<span>Toolkit</span>
@@ -2707,44 +2758,94 @@ function signOutToPortal(defaultTab = 'signin') {
   renderApp();
 }
 
+async function handleFileSelection(fileList, targetKey, getExistingList, setNextList) {
+  const files = Array.from(fileList || []);
+  if (!files.length) return;
+  ui.uploadingTarget = targetKey;
+  renderApp({ preserveScroll: true });
+
+  const uploaded = [];
+  for (const file of files) {
+    const att = await uploadAndCacheMediaFile(file, { simulateOffline: isOfflineActive() });
+    uploaded.push(att);
+  }
+
+  ui.uploadingTarget = '';
+  setNextList([...getExistingList(), ...uploaded]);
+  renderApp({ preserveScroll: true });
+  showToast(`${uploaded.length} ${uploaded.length === 1 ? 'file' : 'files'} attached & ready!`);
+}
+
 function bindWorkspaceEvents(user) {
+  // Close any open ⋯ row menus when clicking outside
+  document.querySelectorAll('.row-more-menu').forEach((menuEl) => {
+    menuEl.addEventListener('toggle', () => {
+      if (menuEl.open) {
+        document.querySelectorAll('.row-more-menu[open]').forEach((other) => {
+          if (other !== menuEl) other.open = false;
+        });
+      }
+    });
+  });
+
+  // Built-In In-App Media Opener triggers (PDFs, Photos, Videos anywhere in Homework or Chats!)
+  document.querySelectorAll('[data-open-media]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      try {
+        const att = JSON.parse(btn.getAttribute('data-open-media') || '{}');
+        openInAppMediaViewer(att);
+      } catch {
+        showToast('Could not open attachment.');
+      }
+    });
+  });
+
+  // Remove staged media attachment before sending/saving
+  document.querySelectorAll('[data-remove-staged]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const prefix = btn.getAttribute('data-remove-staged');
+      const idx = Number(btn.getAttribute('data-remove-idx'));
+      if (prefix === 'assign') {
+        ui.stagedAssignAttachments.splice(idx, 1);
+      } else if (prefix === 'chat') {
+        ui.stagedChatAttachments.splice(idx, 1);
+      } else if (prefix?.startsWith('sub:')) {
+        const asgId = prefix.slice(4);
+        const cur = [...(ui.stagedSubmissionAttachments[asgId] || [])];
+        cur.splice(idx, 1);
+        ui.stagedSubmissionAttachments[asgId] = cur;
+      }
+      renderApp({ preserveScroll: true });
+    });
+  });
+
   // Mobile Slide-Out Drawer controls
   const openDrawer = () => {
     ui.mobileDrawerOpen = true;
-    const backdrop = document.getElementById('mobile-drawer-backdrop');
-    const panel = document.getElementById('mobile-drawer-panel');
-    if (backdrop) backdrop.classList.add('is-open');
-    if (panel) panel.classList.add('is-open');
+    document.getElementById('mobile-drawer-backdrop')?.classList.add('is-open');
+    document.getElementById('mobile-drawer-panel')?.classList.add('is-open');
   };
   const closeDrawer = () => {
     ui.mobileDrawerOpen = false;
-    const backdrop = document.getElementById('mobile-drawer-backdrop');
-    const panel = document.getElementById('mobile-drawer-panel');
-    if (backdrop) backdrop.classList.remove('is-open');
-    if (panel) panel.classList.remove('is-open');
+    document.getElementById('mobile-drawer-backdrop')?.classList.remove('is-open');
+    document.getElementById('mobile-drawer-panel')?.classList.remove('is-open');
   };
 
-  const btnOpenDrawer = document.getElementById('btn-open-mobile-drawer');
-  if (btnOpenDrawer) btnOpenDrawer.addEventListener('click', openDrawer);
-  const mobTabMore = document.getElementById('mob-tab-more');
-  if (mobTabMore) mobTabMore.addEventListener('click', openDrawer);
-  const btnCloseDrawer = document.getElementById('btn-close-mobile-drawer');
-  if (btnCloseDrawer) btnCloseDrawer.addEventListener('click', closeDrawer);
-  const drawerBackdrop = document.getElementById('mobile-drawer-backdrop');
-  if (drawerBackdrop) drawerBackdrop.addEventListener('click', closeDrawer);
+  document.getElementById('btn-open-mobile-drawer')?.addEventListener('click', openDrawer);
+  document.getElementById('mob-tab-more')?.addEventListener('click', openDrawer);
+  document.getElementById('btn-close-mobile-drawer')?.addEventListener('click', closeDrawer);
+  document.getElementById('mobile-drawer-backdrop')?.addEventListener('click', closeDrawer);
 
   // Mobile Expandable Search toggle
-  const btnMobSearch = document.getElementById('btn-toggle-mobile-search');
-  if (btnMobSearch) {
-    btnMobSearch.addEventListener('click', () => {
-      ui.mobileSearchOpen = !ui.mobileSearchOpen;
-      renderApp({ preserveScroll: true });
-      if (ui.mobileSearchOpen) {
-        const mobInput = document.getElementById('mobile-search-input');
-        if (mobInput) mobInput.focus();
-      }
-    });
-  }
+  document.getElementById('btn-toggle-mobile-search')?.addEventListener('click', () => {
+    ui.mobileSearchOpen = !ui.mobileSearchOpen;
+    renderApp({ preserveScroll: true });
+    if (ui.mobileSearchOpen) {
+      document.getElementById('mobile-search-input')?.focus();
+    }
+  });
 
   document.querySelectorAll('[data-nav]').forEach((el) => {
     el.addEventListener('click', () => {
@@ -2782,25 +2883,22 @@ function bindWorkspaceEvents(user) {
   });
 
   ['btn-signout-main', 'btn-go-signin-portal'].forEach((id) => {
-    const el = document.getElementById(id);
-    if (el) el.addEventListener('click', () => signOutToPortal('signin'));
+    document.getElementById(id)?.addEventListener('click', () => signOutToPortal('signin'));
   });
 
   ['btn-go-join-portal', 'visitor-apply-cta', 'visitor-apply-tuition', 'visitor-apply-chat'].forEach((id) => {
-    const el = document.getElementById(id);
-    if (el) el.addEventListener('click', () => signOutToPortal('join'));
+    document.getElementById(id)?.addEventListener('click', () => signOutToPortal('join'));
   });
 
-  const quickNewAssign = document.getElementById('quick-new-assign-btn');
-  if (quickNewAssign) {
-    quickNewAssign.addEventListener('click', () => {
-      ui.view = 'assignments';
-      ui.showAssignCreator = true;
-      renderApp({ preserveScroll: false });
-    });
-  }
+  document.getElementById('quick-new-assign-btn')?.addEventListener('click', () => {
+    ui.view = 'assignments';
+    ui.editingAssignmentId = null;
+    ui.stagedAssignAttachments = [];
+    ui.showAssignCreator = true;
+    renderApp({ preserveScroll: false });
+  });
 
-  // Global search (desktop + mobile expandable search bar)
+  // Global search
   ['global-search-input', 'mobile-search-input'].forEach((inputId) => {
     const searchInput = document.getElementById(inputId);
     if (searchInput) {
@@ -2808,7 +2906,7 @@ function bindWorkspaceEvents(user) {
         ui.searchQuery = e.target.value;
         const pos = e.target.selectionStart;
         if (ui.view === 'overview' && ui.searchQuery.trim().length > 1) {
-          ui.view = canEditEverything(user) ? 'admissions' : 'toolkit';
+          ui.view = 'assignments';
         }
         renderApp({ preserveScroll: true });
         const nextInput = document.getElementById(inputId);
@@ -2820,14 +2918,14 @@ function bindWorkspaceEvents(user) {
     }
   });
 
-  // Sync & Offline controls (desktop rail + mobile drawer + topbar)
+  // Sync & Offline controls
   document.querySelectorAll('[data-action-sync]').forEach((syncBtn) => {
     syncBtn.addEventListener('click', async () => {
       ui.mobileDrawerOpen = false;
       const res = await syncWithServer({ simulateOffline: sessionState.simulateOffline });
       if (res.vault) vaultState = res.vault;
       renderApp({ preserveScroll: true });
-      showToast(res.status === 'synced' ? 'Synced with cloud database!' : 'Offline mode active — data stored locally.');
+      showToast(res.status === 'synced' ? 'Synced with cloud database!' : 'Offline mode active — stored locally.');
     });
   });
 
@@ -2839,10 +2937,10 @@ function bindWorkspaceEvents(user) {
         const res = await syncWithServer({ simulateOffline: false });
         if (res.vault) vaultState = res.vault;
         renderApp({ preserveScroll: true });
-        showToast('Back Online! Queued offline edits synced automatically.');
+        showToast('Back Online! Queued changes & media synced.');
       } else {
         renderApp({ preserveScroll: true });
-        showToast('Offline Mode ON: All edits & approvals queue locally.');
+        showToast('Offline Mode ON: Uploads & edits save to device.');
       }
     });
   });
@@ -2879,30 +2977,26 @@ function bindWorkspaceEvents(user) {
   });
 
   // --- ADMISSIONS & ACCOUNT EVENTS ---
-  document.querySelectorAll('[data-role-filter]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      ui.roleFilter = btn.getAttribute('data-role-filter');
-      renderApp();
-    });
+  document.getElementById('role-filter-select')?.addEventListener('change', (e) => {
+    ui.roleFilter = e.target.value;
+    renderApp();
   });
 
-  const toggleNewAccBtn = document.getElementById('btn-toggle-new-account');
-  if (toggleNewAccBtn) {
-    toggleNewAccBtn.addEventListener('click', () => {
-      ui.editingAccountId = null;
-      ui.showNewAccountForm = !ui.showNewAccountForm;
-      renderApp();
-    });
-  }
-
-  const cancelAccEditBtn = document.getElementById('btn-cancel-account-edit');
-  if (cancelAccEditBtn) {
-    cancelAccEditBtn.addEventListener('click', () => {
+  document.getElementById('btn-toggle-new-account')?.addEventListener('click', () => {
+    if (ui.editingAccountId || ui.showNewAccountForm) {
       ui.editingAccountId = null;
       ui.showNewAccountForm = false;
-      renderApp();
-    });
-  }
+    } else {
+      ui.showNewAccountForm = true;
+    }
+    renderApp();
+  });
+
+  document.getElementById('btn-cancel-account-edit')?.addEventListener('click', () => {
+    ui.editingAccountId = null;
+    ui.showNewAccountForm = false;
+    renderApp();
+  });
 
   document.querySelectorAll('[data-edit-acc]').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -2921,7 +3015,7 @@ function bindWorkspaceEvents(user) {
       const updated = { ...target, status: 'active' };
       await performActionAndSync('UPSERT_ACCOUNT', updated);
       await enrollAcceptedUserInRooms(updated);
-      showToast(`Accepted & activated ${target.name}! They can now sign in with full access.`);
+      showToast(`Accepted & activated ${target.name}!`);
     });
   });
 
@@ -2930,7 +3024,7 @@ function bindWorkspaceEvents(user) {
       const id = btn.getAttribute('data-decline-acc');
       const target = (vaultState.profiles || []).find((p) => p.id === id);
       if (!target) return;
-      performActionAndSync('UPSERT_ACCOUNT', { ...target, status: 'declined' }, `Application marked declined.`);
+      performActionAndSync('UPSERT_ACCOUNT', { ...target, status: 'declined' }, 'Application declined.');
     });
   });
 
@@ -2976,7 +3070,6 @@ function bindWorkspaceEvents(user) {
     });
   }
 
-  // Enquiries convert / edit / delete
   document.querySelectorAll('[data-convert-eq]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const eq = (vaultState.enquiries || []).find((x) => x.id === btn.getAttribute('data-convert-eq'));
@@ -3000,7 +3093,7 @@ function bindWorkspaceEvents(user) {
       await performActionAndSync('UPSERT_ACCOUNT', newAcc);
       await performActionAndSync('UPSERT_ENQUIRY', { ...eq, status: 'accepted' });
       await enrollAcceptedUserInRooms(newAcc);
-      showToast(`Accepted ${newAcc.name} & created active account (PIN: 1234)!`);
+      showToast(`Enrolled ${newAcc.name} (PIN: 1234)!`);
     });
   });
 
@@ -3069,7 +3162,7 @@ function bindWorkspaceEvents(user) {
           subtitle: fd.get('subtitle'),
           subjects
         },
-        'Your account profile has been updated!'
+        'Account profile saved!'
       );
     });
   }
@@ -3082,24 +3175,34 @@ function bindWorkspaceEvents(user) {
     });
   });
 
+  document.getElementById('btn-toggle-slot-creator')?.addEventListener('click', () => {
+    if (ui.editingTimetableId || ui.showSlotCreator) {
+      ui.editingTimetableId = null;
+      ui.showSlotCreator = false;
+    } else {
+      ui.showSlotCreator = true;
+    }
+    renderApp();
+  });
+
   document.querySelectorAll('[data-edit-tt]').forEach((el) => {
     el.addEventListener('click', () => {
       ui.editingTimetableId = el.getAttribute('data-edit-tt');
+      ui.showSlotCreator = false;
       renderApp();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     });
   });
 
-  const cancelTtEdit = document.getElementById('cancel-tt-edit');
-  if (cancelTtEdit) {
-    cancelTtEdit.addEventListener('click', () => {
-      ui.editingTimetableId = null;
-      renderApp();
-    });
-  }
+  document.getElementById('cancel-tt-edit')?.addEventListener('click', () => {
+    ui.editingTimetableId = null;
+    ui.showSlotCreator = false;
+    renderApp();
+  });
 
   document.querySelectorAll('[data-del-tt]').forEach((el) => {
     el.addEventListener('click', () => {
-      performActionAndSync('DELETE_TIMETABLE', { id: el.getAttribute('data-del-tt') }, 'Timetable slot deleted.');
+      performActionAndSync('DELETE_TIMETABLE', { id: el.getAttribute('data-del-tt') }, 'Slot removed.');
     });
   });
 
@@ -3111,6 +3214,7 @@ function bindWorkspaceEvents(user) {
       const existingId = fd.get('id');
       const official = isStaff(user);
       ui.editingTimetableId = null;
+      ui.showSlotCreator = false;
       performActionAndSync(
         'UPSERT_TIMETABLE',
         {
@@ -3126,14 +3230,25 @@ function bindWorkspaceEvents(user) {
           owner_id: official ? null : user.id,
           is_official: official
         },
-        existingId ? 'Timetable slot updated!' : 'Saved to offline timetable!'
+        existingId ? 'Slot updated!' : 'Saved to schedule!'
       );
     });
   }
 
+  document.getElementById('btn-toggle-exam-creator')?.addEventListener('click', () => {
+    if (ui.editingExamId || ui.showExamCreator) {
+      ui.editingExamId = null;
+      ui.showExamCreator = false;
+    } else {
+      ui.showExamCreator = true;
+    }
+    renderApp();
+  });
+
   document.querySelectorAll('[data-edit-exam]').forEach((btn) => {
     btn.addEventListener('click', () => {
       ui.editingExamId = btn.getAttribute('data-edit-exam');
+      ui.showExamCreator = false;
       renderApp();
     });
   });
@@ -3171,38 +3286,40 @@ function bindWorkspaceEvents(user) {
         });
       }
       ui.editingExamId = null;
+      ui.showExamCreator = false;
       savePersonal(personalState);
       showToast('Exam countdown saved!');
-    });
-  }
-
-  // --- ASSIGNMENTS EVENTS ---
-  const toggleAssignCreator = document.getElementById('toggle-assign-creator');
-  if (toggleAssignCreator) {
-    toggleAssignCreator.addEventListener('click', () => {
-      if (ui.editingAssignmentId || ui.showAssignCreator) {
-        ui.editingAssignmentId = null;
-        ui.showAssignCreator = false;
-      } else {
-        ui.showAssignCreator = true;
-      }
       renderApp();
     });
   }
 
-  const cancelAssignEdit = document.getElementById('cancel-assign-edit');
-  if (cancelAssignEdit) {
-    cancelAssignEdit.addEventListener('click', () => {
+  // --- HOMEWORK / ASSIGNMENTS & MEDIA UPLOAD EVENTS ---
+  document.getElementById('toggle-assign-creator')?.addEventListener('click', () => {
+    if (ui.editingAssignmentId || ui.showAssignCreator) {
       ui.editingAssignmentId = null;
       ui.showAssignCreator = false;
-      renderApp();
-    });
-  }
+      ui.stagedAssignAttachments = [];
+    } else {
+      ui.showAssignCreator = true;
+      ui.stagedAssignAttachments = [];
+    }
+    renderApp();
+  });
+
+  document.getElementById('cancel-assign-edit')?.addEventListener('click', () => {
+    ui.editingAssignmentId = null;
+    ui.showAssignCreator = false;
+    ui.stagedAssignAttachments = [];
+    renderApp();
+  });
 
   document.querySelectorAll('[data-edit-assign]').forEach((btn) => {
     btn.addEventListener('click', () => {
-      ui.editingAssignmentId = btn.getAttribute('data-edit-assign');
+      const id = btn.getAttribute('data-edit-assign');
+      const target = (vaultState.assignments || []).find((a) => a.id === id);
+      ui.editingAssignmentId = id;
       ui.showAssignCreator = false;
+      ui.stagedAssignAttachments = [...(target?.attachments || [])];
       renderApp();
       window.scrollTo({ top: 0, behavior: 'smooth' });
     });
@@ -3210,9 +3327,24 @@ function bindWorkspaceEvents(user) {
 
   document.querySelectorAll('[data-del-assign]').forEach((btn) => {
     btn.addEventListener('click', () => {
-      performActionAndSync('DELETE_ASSIGNMENT', { id: btn.getAttribute('data-del-assign') }, 'Assignment deleted.');
+      performActionAndSync('DELETE_ASSIGNMENT', { id: btn.getAttribute('data-del-assign') }, 'Homework deleted.');
     });
   });
+
+  // Homework Photo / PDF / Video file picker (Admin, Admissions, Teacher)
+  const assignMediaInput = document.getElementById('assign-media-input');
+  if (assignMediaInput) {
+    assignMediaInput.addEventListener('change', (e) => {
+      handleFileSelection(
+        e.target.files,
+        'assign',
+        () => ui.stagedAssignAttachments,
+        (next) => {
+          ui.stagedAssignAttachments = next;
+        }
+      );
+    });
+  }
 
   const upsertAssignForm = document.getElementById('upsert-assign-form');
   if (upsertAssignForm) {
@@ -3221,9 +3353,20 @@ function bindWorkspaceEvents(user) {
       const fd = new FormData(upsertAssignForm);
       const existingId = fd.get('id');
       const newId = existingId || `asg-${Date.now()}`;
+      const attachments = [...ui.stagedAssignAttachments];
+      const instructions = String(fd.get('instructions') || '').trim();
+      const packText = String(fd.get('offline_pack_content') || '').trim();
+
+      if (!attachments.length && !instructions && !packText) {
+        showToast('Please attach a Photo/PDF/Video or enter homework instructions.');
+        return;
+      }
+
       ui.editingAssignmentId = null;
       ui.showAssignCreator = false;
+      ui.stagedAssignAttachments = [];
       ui.expandedAssignmentId = newId;
+
       performActionAndSync(
         'UPSERT_ASSIGNMENT',
         {
@@ -3235,10 +3378,11 @@ function bindWorkspaceEvents(user) {
           teacher_name: fd.get('teacher_name'),
           due_date: fd.get('due_date'),
           max_marks: Number(fd.get('max_marks')) || 30,
-          instructions: fd.get('instructions'),
-          offline_pack_content: fd.get('offline_pack_content')
+          instructions: instructions || 'Open the attached homework media pack below.',
+          offline_pack_content: packText,
+          attachments
         },
-        existingId ? 'Assignment updated!' : 'Remote assignment published!'
+        existingId ? 'Homework updated!' : 'Homework published & sent!'
       );
     });
   }
@@ -3258,6 +3402,24 @@ function bindWorkspaceEvents(user) {
     });
   });
 
+  // Student Homework Submission Photo / PDF / Video picker
+  document.querySelectorAll('.sub-media-input').forEach((inp) => {
+    inp.addEventListener('change', (e) => {
+      const asgId = inp.getAttribute('data-sub-assign-id');
+      const mySub = (vaultState.submissions || []).find(
+        (s) => s.assignment_id === asgId && s.student_id === user.id
+      );
+      handleFileSelection(
+        e.target.files,
+        `sub:${asgId}`,
+        () => ui.stagedSubmissionAttachments[asgId] ?? (mySub?.attachments || []),
+        (next) => {
+          ui.stagedSubmissionAttachments[asgId] = next;
+        }
+      );
+    });
+  });
+
   document.querySelectorAll('.submit-work-form').forEach((form) => {
     form.addEventListener('submit', (e) => {
       e.preventDefault();
@@ -3266,6 +3428,15 @@ function bindWorkspaceEvents(user) {
       const existing = (vaultState.submissions || []).find(
         (s) => s.assignment_id === assignId && s.student_id === user.id
       );
+      const answerText = String(fd.get('answer_text') || '').trim();
+      const attachments = ui.stagedSubmissionAttachments[assignId] ?? (existing?.attachments || []);
+
+      if (!answerText && !attachments.length) {
+        showToast('Write your answer or attach a photo/PDF of your work.');
+        return;
+      }
+
+      delete ui.stagedSubmissionAttachments[assignId];
       performActionAndSync(
         'SUBMIT_ASSIGNMENT',
         {
@@ -3273,11 +3444,12 @@ function bindWorkspaceEvents(user) {
           assignment_id: assignId,
           student_id: user.id,
           student_name: user.name,
-          answer_text: fd.get('answer_text'),
+          answer_text: answerText || 'Attached homework working.',
+          attachments,
           status: 'submitted',
           submitted_at: new Date().toISOString()
         },
-        'Assignment answer saved & submitted!'
+        'Homework submitted!'
       );
     });
   });
@@ -3304,7 +3476,7 @@ function bindWorkspaceEvents(user) {
     });
   });
 
-  // --- TOOLKIT EVENTS (NOTES, QUIZZES, FLASHCARDS, FOCUS) ---
+  // --- STUDY TOOLKIT EVENTS ---
   document.querySelectorAll('[data-tk-tab]').forEach((el) => {
     el.addEventListener('click', () => {
       ui.toolkitTab = el.getAttribute('data-tk-tab');
@@ -3312,11 +3484,9 @@ function bindWorkspaceEvents(user) {
     });
   });
 
-  document.querySelectorAll('[data-subj-filter]').forEach((el) => {
-    el.addEventListener('click', () => {
-      ui.subjectFilter = el.getAttribute('data-subj-filter');
-      renderApp();
-    });
+  document.getElementById('notes-subj-select')?.addEventListener('change', (e) => {
+    ui.subjectFilter = e.target.value;
+    renderApp();
   });
 
   document.querySelectorAll('[data-bookmark-note]').forEach((el) => {
@@ -3330,27 +3500,21 @@ function bindWorkspaceEvents(user) {
     });
   });
 
-  const toggleNoteModal = document.getElementById('toggle-note-modal');
-  if (toggleNoteModal) {
-    toggleNoteModal.addEventListener('click', () => {
-      if (ui.editingNoteId || ui.showNoteModal) {
-        ui.editingNoteId = null;
-        ui.showNoteModal = false;
-      } else {
-        ui.showNoteModal = true;
-      }
-      renderApp();
-    });
-  }
-
-  const cancelNoteEdit = document.getElementById('cancel-note-edit');
-  if (cancelNoteEdit) {
-    cancelNoteEdit.addEventListener('click', () => {
+  document.getElementById('toggle-note-modal')?.addEventListener('click', () => {
+    if (ui.editingNoteId || ui.showNoteModal) {
       ui.editingNoteId = null;
       ui.showNoteModal = false;
-      renderApp();
-    });
-  }
+    } else {
+      ui.showNoteModal = true;
+    }
+    renderApp();
+  });
+
+  document.getElementById('cancel-note-edit')?.addEventListener('click', () => {
+    ui.editingNoteId = null;
+    ui.showNoteModal = false;
+    renderApp();
+  });
 
   document.querySelectorAll('[data-edit-note]').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -3388,33 +3552,27 @@ function bindWorkspaceEvents(user) {
           formulas,
           author_name: user.name
         },
-        'Study note saved & synced!'
+        'Study note saved!'
       );
     });
   }
 
   // Quizzes
-  const toggleQuizModal = document.getElementById('toggle-quiz-modal');
-  if (toggleQuizModal) {
-    toggleQuizModal.addEventListener('click', () => {
-      if (ui.editingQuizId || ui.showQuizModal) {
-        ui.editingQuizId = null;
-        ui.showQuizModal = false;
-      } else {
-        ui.showQuizModal = true;
-      }
-      renderApp();
-    });
-  }
-
-  const cancelQuizEdit = document.getElementById('cancel-quiz-edit');
-  if (cancelQuizEdit) {
-    cancelQuizEdit.addEventListener('click', () => {
+  document.getElementById('toggle-quiz-modal')?.addEventListener('click', () => {
+    if (ui.editingQuizId || ui.showQuizModal) {
       ui.editingQuizId = null;
       ui.showQuizModal = false;
-      renderApp();
-    });
-  }
+    } else {
+      ui.showQuizModal = true;
+    }
+    renderApp();
+  });
+
+  document.getElementById('cancel-quiz-edit')?.addEventListener('click', () => {
+    ui.editingQuizId = null;
+    ui.showQuizModal = false;
+    renderApp();
+  });
 
   document.querySelectorAll('[data-edit-quiz]').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -3428,7 +3586,7 @@ function bindWorkspaceEvents(user) {
     btn.addEventListener('click', () => {
       ui.quizState.index = 0;
       ui.quizState.picked = null;
-      performActionAndSync('DELETE_QUIZ', { id: btn.getAttribute('data-del-quiz') }, 'Quiz question deleted.');
+      performActionAndSync('DELETE_QUIZ', { id: btn.getAttribute('data-del-quiz') }, 'Question deleted.');
     });
   });
 
@@ -3453,22 +3611,20 @@ function bindWorkspaceEvents(user) {
           correctIndex: ci,
           explanation: fd.get('explanation')
         },
-        'Quiz question saved & synced!'
+        'Quiz question saved!'
       );
     });
   }
 
-  document.querySelectorAll('[data-quiz-subj]').forEach((el) => {
-    el.addEventListener('click', () => {
-      ui.quizState = {
-        subject: el.getAttribute('data-quiz-subj'),
-        index: 0,
-        picked: null,
-        correctCount: 0,
-        finished: false
-      };
-      renderApp();
-    });
+  document.getElementById('quiz-subj-select')?.addEventListener('change', (e) => {
+    ui.quizState = {
+      subject: e.target.value,
+      index: 0,
+      picked: null,
+      correctCount: 0,
+      finished: false
+    };
+    renderApp();
   });
 
   document.querySelectorAll('[data-quiz-pick]').forEach((el) => {
@@ -3488,43 +3644,36 @@ function bindWorkspaceEvents(user) {
     });
   });
 
-  const nextQuizBtn = document.getElementById('next-quiz-btn');
-  if (nextQuizBtn) {
-    nextQuizBtn.addEventListener('click', () => {
-      const allQuizzes = vaultState.quizzes || [];
-      const pool =
-        ui.quizState.subject === 'All' ? allQuizzes : allQuizzes.filter((q) => q.subject === ui.quizState.subject);
-      const total = (pool.length ? pool : allQuizzes).length;
-      if (ui.quizState.index + 1 >= total) {
-        ui.quizState.finished = true;
-        const targetSubj = ui.quizState.subject === 'All' ? 'Mathematics' : ui.quizState.subject;
-        const prev = Number(personalState.subjectConfidence[targetSubj] || 75);
-        const pct = Math.round((ui.quizState.correctCount / Math.max(1, total)) * 100);
-        personalState.subjectConfidence[targetSubj] = Math.min(100, Math.round(prev * 0.65 + pct * 0.35 + 3));
-        savePersonal(personalState);
-      } else {
-        ui.quizState.index += 1;
-        ui.quizState.picked = null;
-      }
-      renderApp();
-    });
-  }
+  document.getElementById('next-quiz-btn')?.addEventListener('click', () => {
+    const allQuizzes = vaultState.quizzes || [];
+    const pool =
+      ui.quizState.subject === 'All' ? allQuizzes : allQuizzes.filter((q) => q.subject === ui.quizState.subject);
+    const total = (pool.length ? pool : allQuizzes).length;
+    if (ui.quizState.index + 1 >= total) {
+      ui.quizState.finished = true;
+      const targetSubj = ui.quizState.subject === 'All' ? 'Mathematics' : ui.quizState.subject;
+      const prev = Number(personalState.subjectConfidence[targetSubj] || 75);
+      const pct = Math.round((ui.quizState.correctCount / Math.max(1, total)) * 100);
+      personalState.subjectConfidence[targetSubj] = Math.min(100, Math.round(prev * 0.65 + pct * 0.35 + 3));
+      savePersonal(personalState);
+    } else {
+      ui.quizState.index += 1;
+      ui.quizState.picked = null;
+    }
+    renderApp();
+  });
 
-  const restartQuizBtn = document.getElementById('restart-quiz-btn');
-  if (restartQuizBtn) {
-    restartQuizBtn.addEventListener('click', () => {
-      ui.quizState = { ...ui.quizState, index: 0, picked: null, correctCount: 0, finished: false };
-      renderApp();
-    });
-  }
+  document.getElementById('restart-quiz-btn')?.addEventListener('click', () => {
+    ui.quizState = { ...ui.quizState, index: 0, picked: null, correctCount: 0, finished: false };
+    renderApp();
+  });
 
-  // Flashcards (True 3D in-place flip without destroying DOM mid-animation)
+  // Flashcards
   const flipStage = document.getElementById('flip-card-stage');
   if (flipStage) {
     const doFlip = () => {
       ui.cardState.flipped = !ui.cardState.flipped;
-      const inner = document.getElementById('flashcard-3d-inner');
-      if (inner) inner.classList.toggle('is-flipped', ui.cardState.flipped);
+      document.getElementById('flashcard-3d-inner')?.classList.toggle('is-flipped', ui.cardState.flipped);
     };
     flipStage.addEventListener('click', doFlip);
     flipStage.addEventListener('keydown', (e) => {
@@ -3535,23 +3684,17 @@ function bindWorkspaceEvents(user) {
     });
   }
 
-  const prevCardBtn = document.getElementById('prev-card-btn');
-  if (prevCardBtn) {
-    prevCardBtn.addEventListener('click', () => {
-      const len = Math.max(1, (vaultState.flashcards || []).length);
-      ui.cardState = { index: (ui.cardState.index - 1 + len) % len, flipped: false };
-      renderApp();
-    });
-  }
+  document.getElementById('prev-card-btn')?.addEventListener('click', () => {
+    const len = Math.max(1, (vaultState.flashcards || []).length);
+    ui.cardState = { index: (ui.cardState.index - 1 + len) % len, flipped: false };
+    renderApp();
+  });
 
-  const nextCardBtn = document.getElementById('next-card-btn');
-  if (nextCardBtn) {
-    nextCardBtn.addEventListener('click', () => {
-      const len = Math.max(1, (vaultState.flashcards || []).length);
-      ui.cardState = { index: (ui.cardState.index + 1) % len, flipped: false };
-      renderApp();
-    });
-  }
+  document.getElementById('next-card-btn')?.addEventListener('click', () => {
+    const len = Math.max(1, (vaultState.flashcards || []).length);
+    ui.cardState = { index: (ui.cardState.index + 1) % len, flipped: false };
+    renderApp();
+  });
 
   document.querySelectorAll('[data-master-card]').forEach((el) => {
     el.addEventListener('click', () => {
@@ -3564,27 +3707,21 @@ function bindWorkspaceEvents(user) {
     });
   });
 
-  const toggleCardModal = document.getElementById('toggle-card-modal');
-  if (toggleCardModal) {
-    toggleCardModal.addEventListener('click', () => {
-      if (ui.editingCardId || ui.showCardModal) {
-        ui.editingCardId = null;
-        ui.showCardModal = false;
-      } else {
-        ui.showCardModal = true;
-      }
-      renderApp();
-    });
-  }
-
-  const cancelCardEdit = document.getElementById('cancel-card-edit');
-  if (cancelCardEdit) {
-    cancelCardEdit.addEventListener('click', () => {
+  document.getElementById('toggle-card-modal')?.addEventListener('click', () => {
+    if (ui.editingCardId || ui.showCardModal) {
       ui.editingCardId = null;
       ui.showCardModal = false;
-      renderApp();
-    });
-  }
+    } else {
+      ui.showCardModal = true;
+    }
+    renderApp();
+  });
+
+  document.getElementById('cancel-card-edit')?.addEventListener('click', () => {
+    ui.editingCardId = null;
+    ui.showCardModal = false;
+    renderApp();
+  });
 
   document.querySelectorAll('[data-edit-card]').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -3597,7 +3734,7 @@ function bindWorkspaceEvents(user) {
   document.querySelectorAll('[data-del-card]').forEach((btn) => {
     btn.addEventListener('click', () => {
       ui.cardState.index = 0;
-      performActionAndSync('DELETE_FLASHCARD', { id: btn.getAttribute('data-del-card') }, 'Flashcard deleted.');
+      performActionAndSync('DELETE_FLASHCARD', { id: btn.getAttribute('data-del-card') }, 'Card deleted.');
     });
   });
 
@@ -3617,12 +3754,12 @@ function bindWorkspaceEvents(user) {
           front: fd.get('front'),
           back: fd.get('back')
         },
-        'Flashcard saved & synced!'
+        'Flashcard saved!'
       );
     });
   }
 
-  // Focus Timer, Checklist & Scratchpad (Targeted DOM updates every second — zero full-page re-render jank!)
+  // Focus Timer, Checklist & Scratchpad
   document.querySelectorAll('[data-timer-action="toggle"]').forEach((btn) => {
     btn.addEventListener('click', () => {
       ui.timerRunning = !ui.timerRunning;
@@ -3649,17 +3786,15 @@ function bindWorkspaceEvents(user) {
     });
   });
 
-  document.querySelectorAll('[data-timer-preset]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const mins = Number(btn.getAttribute('data-timer-preset'));
-      ui.timerRunning = false;
-      if (timerHandle) {
-        clearInterval(timerHandle);
-        timerHandle = null;
-      }
-      ui.timerSeconds = mins * 60;
-      renderApp();
-    });
+  document.getElementById('timer-preset-select')?.addEventListener('change', (e) => {
+    const mins = Number(e.target.value);
+    ui.timerRunning = false;
+    if (timerHandle) {
+      clearInterval(timerHandle);
+      timerHandle = null;
+    }
+    ui.timerSeconds = mins * 60;
+    renderApp();
   });
 
   document.querySelectorAll('[data-check-id]').forEach((row) => {
@@ -3681,50 +3816,41 @@ function bindWorkspaceEvents(user) {
     });
   });
 
-  const addChecklistForm = document.getElementById('add-checklist-form');
-  if (addChecklistForm) {
-    addChecklistForm.addEventListener('submit', (e) => {
-      e.preventDefault();
-      const fd = new FormData(addChecklistForm);
-      personalState.tasks.unshift({
-        id: `tk-${Date.now()}`,
-        title: fd.get('title'),
-        subject: 'Study',
-        done: false
-      });
-      savePersonal(personalState);
-      renderApp();
+  document.getElementById('add-checklist-form')?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    personalState.tasks.unshift({
+      id: `tk-${Date.now()}`,
+      title: fd.get('title'),
+      subject: 'Study',
+      done: false
     });
-  }
+    savePersonal(personalState);
+    renderApp();
+  });
 
-  const scratchArea = document.getElementById('scratchpad-area');
-  if (scratchArea) {
-    scratchArea.addEventListener('input', (e) => {
-      personalState.scratchpad = e.target.value;
-      savePersonal(personalState);
-    });
-  }
+  document.getElementById('scratchpad-area')?.addEventListener('input', (e) => {
+    personalState.scratchpad = e.target.value;
+    savePersonal(personalState);
+  });
 
-  const calcForm = document.getElementById('quick-calc-form');
-  if (calcForm) {
-    calcForm.addEventListener('submit', (e) => {
-      e.preventDefault();
-      const raw = String(new FormData(calcForm).get('expr') || '');
-      if (/^[0-9+\-*/().\s%]+$/.test(raw)) {
-        try {
-          const val = Function(`"use strict"; return (${raw});`)();
-          ui.calcOutput = Number.isFinite(val) ? String(Math.round(val * 10000) / 10000) : 'Invalid expression';
-        } catch {
-          ui.calcOutput = 'Check syntax';
-        }
-      } else {
-        ui.calcOutput = 'Use numbers & + - * / ( )';
+  document.getElementById('quick-calc-form')?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const raw = String(new FormData(e.target).get('expr') || '');
+    if (/^[0-9+\-*/().\s%]+$/.test(raw)) {
+      try {
+        const val = Function(`"use strict"; return (${raw});`)();
+        ui.calcOutput = Number.isFinite(val) ? String(Math.round(val * 10000) / 10000) : 'Invalid expression';
+      } catch {
+        ui.calcOutput = 'Check syntax';
       }
-      renderApp();
-    });
-  }
+    } else {
+      ui.calcOutput = 'Use numbers & + - * / ( )';
+    }
+    renderApp();
+  });
 
-  // --- MESSENGER EVENTS ---
+  // --- MESSENGER & CHAT MEDIA UPLOAD EVENTS ---
   document.querySelectorAll('.room-btn[data-room-id]').forEach((btn) => {
     btn.addEventListener('click', () => {
       ui.selectedRoomId = btn.getAttribute('data-room-id');
@@ -3732,27 +3858,21 @@ function bindWorkspaceEvents(user) {
     });
   });
 
-  const toggleGroupBtn = document.getElementById('toggle-group-creator');
-  if (toggleGroupBtn) {
-    toggleGroupBtn.addEventListener('click', () => {
-      if (ui.editingRoomId || ui.showGroupCreator) {
-        ui.editingRoomId = null;
-        ui.showGroupCreator = false;
-      } else {
-        ui.showGroupCreator = true;
-      }
-      renderApp();
-    });
-  }
-
-  const cancelRoomEdit = document.getElementById('cancel-room-edit');
-  if (cancelRoomEdit) {
-    cancelRoomEdit.addEventListener('click', () => {
+  document.getElementById('toggle-group-creator')?.addEventListener('click', () => {
+    if (ui.editingRoomId || ui.showGroupCreator) {
       ui.editingRoomId = null;
       ui.showGroupCreator = false;
-      renderApp();
-    });
-  }
+    } else {
+      ui.showGroupCreator = true;
+    }
+    renderApp();
+  });
+
+  document.getElementById('cancel-room-edit')?.addEventListener('click', () => {
+    ui.editingRoomId = null;
+    ui.showGroupCreator = false;
+    renderApp();
+  });
 
   document.querySelectorAll('[data-edit-room]').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -3825,8 +3945,25 @@ function bindWorkspaceEvents(user) {
 
   document.querySelectorAll('[data-del-msg]').forEach((btn) => {
     btn.addEventListener('click', () => {
-      performActionAndSync('DELETE_MESSAGE', { id: btn.getAttribute('data-del-msg') }, 'Message removed.');
+      performActionAndSync('DELETE_MESSAGE', { id: btn.getAttribute('data-del-msg') }, 'Message deleted.');
     });
+  });
+
+  // Preserve chat draft text while attaching Photos/PDFs/Videos
+  document.getElementById('chat-text-input')?.addEventListener('input', (e) => {
+    ui.chatDraftText = e.target.value;
+  });
+
+  // Chat Photo / PDF / Video file picker
+  document.getElementById('chat-media-input')?.addEventListener('change', (e) => {
+    handleFileSelection(
+      e.target.files,
+      'chat',
+      () => ui.stagedChatAttachments,
+      (next) => {
+        ui.stagedChatAttachments = next;
+      }
+    );
   });
 
   const sendMsgForm = document.getElementById('send-msg-form');
@@ -3834,14 +3971,23 @@ function bindWorkspaceEvents(user) {
     sendMsgForm.addEventListener('submit', (e) => {
       e.preventDefault();
       const fd = new FormData(sendMsgForm);
+      const text = String(fd.get('body') || '').trim();
+      const attachments = [...ui.stagedChatAttachments];
+      if (!text && !attachments.length) {
+        showToast('Type a message or attach a PDF, photo, or video.');
+        return;
+      }
       const roomId = sendMsgForm.getAttribute('data-room-id');
+      ui.stagedChatAttachments = [];
+      ui.chatDraftText = '';
       performActionAndSync('SEND_MESSAGE', {
         id: `msg-${Date.now()}`,
         room_id: roomId,
         sender_id: user.id,
         sender_name: user.name,
         sender_role: user.role,
-        body: fd.get('body'),
+        body: text,
+        attachments,
         created_at: new Date().toISOString()
       });
     });
@@ -3855,24 +4001,33 @@ function bindWorkspaceEvents(user) {
     });
   });
 
+  document.getElementById('btn-toggle-bc-creator')?.addEventListener('click', () => {
+    if (ui.editingBroadcastId || ui.showBroadcastCreator) {
+      ui.editingBroadcastId = null;
+      ui.showBroadcastCreator = false;
+    } else {
+      ui.showBroadcastCreator = true;
+    }
+    renderApp();
+  });
+
   document.querySelectorAll('[data-edit-bc]').forEach((btn) => {
     btn.addEventListener('click', () => {
       ui.editingBroadcastId = btn.getAttribute('data-edit-bc');
+      ui.showBroadcastCreator = false;
       renderApp();
     });
   });
 
-  const cancelBcEdit = document.getElementById('cancel-bc-edit');
-  if (cancelBcEdit) {
-    cancelBcEdit.addEventListener('click', () => {
-      ui.editingBroadcastId = null;
-      renderApp();
-    });
-  }
+  document.getElementById('cancel-bc-edit')?.addEventListener('click', () => {
+    ui.editingBroadcastId = null;
+    ui.showBroadcastCreator = false;
+    renderApp();
+  });
 
   document.querySelectorAll('[data-del-bc]').forEach((btn) => {
     btn.addEventListener('click', () => {
-      performActionAndSync('DELETE_BROADCAST', { id: btn.getAttribute('data-del-bc') }, 'Broadcast deleted.');
+      performActionAndSync('DELETE_BROADCAST', { id: btn.getAttribute('data-del-bc') }, 'Notice deleted.');
     });
   });
 
@@ -3883,6 +4038,7 @@ function bindWorkspaceEvents(user) {
       const fd = new FormData(upsertBroadcastForm);
       const existingId = fd.get('id');
       ui.editingBroadcastId = null;
+      ui.showBroadcastCreator = false;
       performActionAndSync(
         'UPSERT_BROADCAST',
         {
@@ -3895,29 +4051,38 @@ function bindWorkspaceEvents(user) {
           priority: 'important',
           created_at: new Date().toISOString()
         },
-        existingId ? 'Broadcast updated!' : 'Broadcast sent!'
+        existingId ? 'Notice updated!' : 'Notice published!'
       );
     });
   }
 
+  document.getElementById('btn-toggle-att-creator')?.addEventListener('click', () => {
+    if (ui.editingAttendanceId || ui.showAttendanceCreator) {
+      ui.editingAttendanceId = null;
+      ui.showAttendanceCreator = false;
+    } else {
+      ui.showAttendanceCreator = true;
+    }
+    renderApp();
+  });
+
   document.querySelectorAll('[data-edit-att]').forEach((btn) => {
     btn.addEventListener('click', () => {
       ui.editingAttendanceId = btn.getAttribute('data-edit-att');
+      ui.showAttendanceCreator = false;
       renderApp();
     });
   });
 
-  const cancelAttEdit = document.getElementById('cancel-att-edit');
-  if (cancelAttEdit) {
-    cancelAttEdit.addEventListener('click', () => {
-      ui.editingAttendanceId = null;
-      renderApp();
-    });
-  }
+  document.getElementById('cancel-att-edit')?.addEventListener('click', () => {
+    ui.editingAttendanceId = null;
+    ui.showAttendanceCreator = false;
+    renderApp();
+  });
 
   document.querySelectorAll('[data-del-att]').forEach((btn) => {
     btn.addEventListener('click', () => {
-      performActionAndSync('DELETE_ATTENDANCE', { id: btn.getAttribute('data-del-att') }, 'Attendance entry removed.');
+      performActionAndSync('DELETE_ATTENDANCE', { id: btn.getAttribute('data-del-att') }, 'Attendance removed.');
     });
   });
 
@@ -3930,6 +4095,7 @@ function bindWorkspaceEvents(user) {
       const stuId = fd.get('student_id');
       const stuObj = (vaultState.profiles || []).find((p) => p.id === stuId);
       ui.editingAttendanceId = null;
+      ui.showAttendanceCreator = false;
       performActionAndSync(
         'UPSERT_ATTENDANCE',
         {
@@ -3948,51 +4114,37 @@ function bindWorkspaceEvents(user) {
   }
 
   // --- TUITION PACKAGES & CONTACTS EVENTS ---
-  const rateSelect = document.getElementById('calc-rate-select');
-  if (rateSelect) {
-    rateSelect.addEventListener('change', (e) => {
-      ui.feeCalcRate = Number(e.target.value);
-      renderApp();
-    });
-  }
+  document.getElementById('calc-rate-select')?.addEventListener('change', (e) => {
+    ui.feeCalcRate = Number(e.target.value);
+    renderApp();
+  });
 
-  const sessionsRange = document.getElementById('calc-sessions-range');
-  if (sessionsRange) {
-    sessionsRange.addEventListener('input', (e) => {
-      ui.feeCalcSessions = Number(e.target.value);
-      renderApp();
-    });
-  }
+  document.getElementById('calc-sessions-range')?.addEventListener('input', (e) => {
+    ui.feeCalcSessions = Number(e.target.value);
+    renderApp();
+  });
 
-  const toggleTuitionEditor = document.getElementById('toggle-tuition-editor');
-  if (toggleTuitionEditor) {
-    toggleTuitionEditor.addEventListener('click', () => {
-      ui.showTuitionEditor = !ui.showTuitionEditor;
-      renderApp();
-    });
-  }
+  document.getElementById('toggle-tuition-editor')?.addEventListener('click', () => {
+    ui.showTuitionEditor = !ui.showTuitionEditor;
+    renderApp();
+  });
 
-  const toggleNewPlanBtn = document.getElementById('toggle-new-plan-btn');
-  if (toggleNewPlanBtn) {
-    toggleNewPlanBtn.addEventListener('click', () => {
-      if (ui.editingPlanId || ui.showNewPlanForm) {
-        ui.editingPlanId = null;
-        ui.showNewPlanForm = false;
-      } else {
-        ui.showNewPlanForm = true;
-      }
-      renderApp();
-    });
-  }
+  document.getElementById('cancel-tuition-editor')?.addEventListener('click', () => {
+    ui.showTuitionEditor = false;
+    renderApp();
+  });
 
-  const cancelPlanEdit = document.getElementById('cancel-plan-edit');
-  if (cancelPlanEdit) {
-    cancelPlanEdit.addEventListener('click', () => {
-      ui.editingPlanId = null;
-      ui.showNewPlanForm = false;
-      renderApp();
-    });
-  }
+  document.getElementById('toggle-new-plan-btn')?.addEventListener('click', () => {
+    ui.editingPlanId = null;
+    ui.showNewPlanForm = !ui.showNewPlanForm;
+    renderApp();
+  });
+
+  document.getElementById('cancel-plan-edit')?.addEventListener('click', () => {
+    ui.editingPlanId = null;
+    ui.showNewPlanForm = false;
+    renderApp();
+  });
 
   document.querySelectorAll('[data-edit-plan]').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -4015,7 +4167,7 @@ function bindWorkspaceEvents(user) {
           plans: nextPlans,
           contacts: vaultState.tuitionInfo.contacts
         },
-        'Tuition package removed!'
+        'Package removed!'
       );
     });
   });
@@ -4053,7 +4205,7 @@ function bindWorkspaceEvents(user) {
           plans: currentPlans,
           contacts: vaultState.tuitionInfo.contacts
         },
-        'Tuition package saved & synced!'
+        'Tuition package saved!'
       );
     });
   }
@@ -4078,7 +4230,7 @@ function bindWorkspaceEvents(user) {
             address: fd.get('address')
           }
         },
-        'Public headline & contact details updated!'
+        'Public details updated!'
       );
     });
   }
@@ -4100,11 +4252,20 @@ function bindWorkspaceEvents(user) {
           status: 'pending',
           created_at: new Date().toISOString()
         },
-        'Enquiry sent! Admissions can accept & activate your account directly.'
+        'Enquiry sent!'
       );
     });
   }
 }
+
+/* Global listener to close any open ⋯ row menu when tapping anywhere outside */
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.row-more-menu')) {
+    document.querySelectorAll('.row-more-menu[open]').forEach((el) => {
+      el.open = false;
+    });
+  }
+});
 
 /* ==========================================================================
    BOOT SEQUENCE

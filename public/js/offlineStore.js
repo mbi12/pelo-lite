@@ -1,9 +1,12 @@
 import { createDefaultSnapshot, SUBJECT_LIST } from './defaultSeed.js';
 
-const VAULT_KEY = 'itutor_offline_vault_v4';
+const VAULT_KEY = 'itutor_offline_vault_v5';
 const PERSONAL_KEY = 'itutor_personal_study_v4';
-const OUTBOX_KEY = 'itutor_offline_outbox_v4';
+const OUTBOX_KEY = 'itutor_offline_outbox_v5';
 const SESSION_KEY = 'itutor_session_v4';
+
+const IDB_NAME = 'itutor_media_idb_v1';
+const IDB_STORE = 'blobs';
 
 export { SUBJECT_LIST };
 
@@ -22,6 +25,252 @@ function upsertInArray(arr, item, prepend = false) {
     arr.push(item);
   }
 }
+
+/* ==========================================================================
+   INDEXEDDB OFFLINE MEDIA VAULT (PHOTOS, PDFS & VIDEOS UP TO 50MB+)
+   ========================================================================== */
+
+function openMediaDb() {
+  return new Promise((resolve, reject) => {
+    if (typeof indexedDB === 'undefined') {
+      resolve(null);
+      return;
+    }
+    const req = indexedDB.open(IDB_NAME, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(IDB_STORE)) {
+        db.createObjectStore(IDB_STORE, { keyPath: 'id' });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+export async function saveLocalMediaBlob(id, blob, meta = {}) {
+  try {
+    const db = await openMediaDb();
+    if (!db) return false;
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      tx.objectStore(IDB_STORE).put({
+        id,
+        blob,
+        mime: meta.mime || blob.type || 'application/octet-stream',
+        name: meta.name || 'attachment',
+        savedAt: Date.now()
+      });
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => reject(tx.error);
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function getLocalMediaBlob(id) {
+  try {
+    const db = await openMediaDb();
+    if (!db || !id) return null;
+    return await new Promise((resolve) => {
+      const tx = db.transaction(IDB_STORE, 'readonly');
+      const req = tx.objectStore(IDB_STORE).get(id);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => resolve(null);
+    });
+  } catch {
+    return null;
+  }
+}
+
+export function detectAttachmentKind(name = '', mime = '') {
+  const m = String(mime || '').toLowerCase();
+  const n = String(name || '').toLowerCase();
+  if (m === 'application/pdf' || n.endsWith('.pdf')) return 'pdf';
+  if (m.startsWith('video/') || /\.(mp4|webm|mov|m4v|ogg|ogv)$/i.test(n)) return 'video';
+  if (m.startsWith('image/') || /\.(jpg|jpeg|png|webp|gif|svg|bmp|heic)$/i.test(n)) return 'image';
+  return 'file';
+}
+
+export function formatBytes(bytes = 0) {
+  const n = Number(bytes || 0);
+  if (!n || n < 1024) return `${Math.max(1, n)} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+async function createImageThumbDataUrl(file) {
+  try {
+    if (typeof document === 'undefined' || !file.type.startsWith('image/')) return '';
+    if (file.type === 'image/svg+xml' && file.size < 32000) {
+      return await new Promise((res) => {
+        const r = new FileReader();
+        r.onload = () => res(String(r.result || ''));
+        r.onerror = () => res('');
+        r.readAsDataURL(file);
+      });
+    }
+    const bitmapUrl = URL.createObjectURL(file);
+    try {
+      const img = await new Promise((resolve, reject) => {
+        const el = new Image();
+        el.onload = () => resolve(el);
+        el.onerror = reject;
+        el.src = bitmapUrl;
+      });
+      const maxDim = 260;
+      const scale = Math.min(1, maxDim / Math.max(img.width || 1, img.height || 1));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(img.width * scale));
+      canvas.height = Math.max(1, Math.round(img.height * scale));
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      return canvas.toDataURL('image/jpeg', 0.68);
+    } finally {
+      URL.revokeObjectURL(bitmapUrl);
+    }
+  } catch {
+    return '';
+  }
+}
+
+async function uploadBlobToCloud(blob, fileName, contentType) {
+  // 1. Try direct signed upload to Supabase Storage (supports up to 50MB Videos, PDFs & Photos on Vercel!)
+  const signRes = await fetch('/api/upload-sign', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fileName, contentType })
+  });
+
+  if (signRes.ok) {
+    const target = await signRes.json();
+    if (target.mode === 'supabase' && target.signedUrl && target.publicUrl) {
+      const putRes = await fetch(target.signedUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': contentType, 'x-upsert': 'true' },
+        body: blob
+      });
+      if (putRes.ok) {
+        return target.publicUrl;
+      }
+    }
+  }
+
+  // 2. Fallback to direct /api/upload endpoint
+  const upRes = await fetch(`/api/upload?name=${encodeURIComponent(fileName)}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': contentType,
+      'X-File-Name': encodeURIComponent(fileName)
+    },
+    body: blob
+  });
+  if (!upRes.ok) throw new Error(`Upload HTTP ${upRes.status}`);
+  const data = await upRes.json();
+  return data.url || '';
+}
+
+export async function uploadAndCacheMediaFile(file, { simulateOffline = false } = {}) {
+  const id = `att-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const mime = file.type || (file.name.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream');
+  const kind = detectAttachmentKind(file.name, mime);
+
+  await saveLocalMediaBlob(id, file, { mime, name: file.name });
+  const thumbUrl = kind === 'image' ? await createImageThumbDataUrl(file) : '';
+
+  const offline = simulateOffline || (typeof navigator !== 'undefined' && navigator.onLine === false);
+  if (!offline) {
+    try {
+      const cloudUrl = await uploadBlobToCloud(file, file.name, mime);
+      if (cloudUrl) {
+        return {
+          id,
+          name: file.name,
+          kind,
+          mime,
+          size: file.size || 0,
+          url: cloudUrl,
+          thumbUrl,
+          pendingUpload: false
+        };
+      }
+    } catch {
+      // Queue for auto-upload when connection stabilizes
+    }
+  }
+
+  return {
+    id,
+    name: file.name,
+    kind,
+    mime,
+    size: file.size || 0,
+    url: thumbUrl || '',
+    thumbUrl,
+    pendingUpload: true
+  };
+}
+
+export async function resolveAttachmentSource(att) {
+  if (!att) return null;
+  const kind = att.kind || detectAttachmentKind(att.name, att.mime);
+
+  // 1. Check local IndexedDB cache first (instant offline open!)
+  const cached = await getLocalMediaBlob(att.id);
+  if (cached?.blob) {
+    const objectUrl = URL.createObjectURL(cached.blob);
+    const arrayBuffer = kind === 'pdf' ? await cached.blob.arrayBuffer() : null;
+    return {
+      objectUrl,
+      arrayBuffer,
+      revokeAfterClose: true,
+      kind,
+      mime: cached.mime || att.mime || '',
+      name: att.name || 'Attachment'
+    };
+  }
+
+  // 2. Fetch from URL (/samples/..., Supabase Storage URL, /api/media/..., or data: URL) and cache in IndexedDB
+  if (att.url) {
+    try {
+      const res = await fetch(att.url);
+      if (res.ok) {
+        const blob = await res.blob();
+        if (att.id) {
+          await saveLocalMediaBlob(att.id, blob, { mime: att.mime || blob.type, name: att.name });
+        }
+        const objectUrl = URL.createObjectURL(blob);
+        const arrayBuffer = kind === 'pdf' ? await blob.arrayBuffer() : null;
+        return {
+          objectUrl,
+          arrayBuffer,
+          revokeAfterClose: true,
+          kind,
+          mime: att.mime || blob.type || '',
+          name: att.name || 'Attachment'
+        };
+      }
+    } catch {
+      // Fallback to direct URL if CORS/fetch restricted
+    }
+    return {
+      objectUrl: att.url,
+      arrayBuffer: null,
+      revokeAfterClose: false,
+      kind,
+      mime: att.mime || '',
+      name: att.name || 'Attachment'
+    };
+  }
+
+  return null;
+}
+
+/* ==========================================================================
+   VAULT, PERSONAL STATE & SYNC ENGINE
+   ========================================================================== */
 
 function createDefaultPersonalState() {
   return {
@@ -86,7 +335,7 @@ export function saveVault(vault) {
   try {
     localStorage.setItem(VAULT_KEY, JSON.stringify(vault));
   } catch {
-    // Ignore quota errors
+    // Ignore quota errors (binary blobs live in IndexedDB)
   }
 }
 
@@ -159,7 +408,7 @@ export function loadSession() {
     const raw = localStorage.getItem(SESSION_KEY);
     if (!raw) {
       return {
-        currentUserId: null, // null = show Account Sign-In / Join / Visitor Portal
+        currentUserId: null,
         theme: 'light',
         simulateOffline: false
       };
@@ -351,6 +600,30 @@ export function dispatchOfflineAction(vault, action) {
   saveOutbox(outbox);
 }
 
+async function flushQueuedBlobsInOutbox(outbox) {
+  let changed = false;
+  for (const act of outbox) {
+    const atts = act?.payload?.attachments;
+    if (!Array.isArray(atts) || !atts.length) continue;
+    for (const att of atts) {
+      if (!att.pendingUpload) continue;
+      const cached = await getLocalMediaBlob(att.id);
+      if (!cached?.blob) continue;
+      try {
+        const cloudUrl = await uploadBlobToCloud(cached.blob, att.name || cached.name, att.mime || cached.mime);
+        if (cloudUrl) {
+          att.url = cloudUrl;
+          att.pendingUpload = false;
+          changed = true;
+        }
+      } catch {
+        // Retry next sync
+      }
+    }
+  }
+  if (changed) saveOutbox(outbox);
+}
+
 export async function syncWithServer({ simulateOffline = false } = {}) {
   if (simulateOffline || (typeof navigator !== 'undefined' && navigator.onLine === false)) {
     return { status: 'offline', vault: loadVault(), pendingCount: loadOutbox().length };
@@ -358,6 +631,10 @@ export async function syncWithServer({ simulateOffline = false } = {}) {
 
   const outbox = loadOutbox();
   try {
+    if (outbox.length > 0) {
+      await flushQueuedBlobsInOutbox(outbox);
+    }
+
     const res =
       outbox.length > 0
         ? await fetch('/api/sync', {

@@ -264,7 +264,8 @@ export async function applyOutboxActions(actions = []) {
               due_date: p.due_date,
               max_marks: Number(p.max_marks || 30),
               instructions: p.instructions || '',
-              offline_pack_content: p.offline_pack_content || ''
+              offline_pack_content: p.offline_pack_content || '',
+              attachments: Array.isArray(p.attachments) ? p.attachments : []
             }
           });
           break;
@@ -292,6 +293,7 @@ export async function applyOutboxActions(actions = []) {
               status: p.status === 'graded' ? 'graded' : 'submitted',
               marks_awarded: p.marks_awarded ?? null,
               teacher_feedback: p.teacher_feedback || '',
+              attachments: Array.isArray(p.attachments) ? p.attachments : [],
               submitted_at: p.submitted_at || new Date().toISOString()
             }
           });
@@ -458,7 +460,8 @@ export async function applyOutboxActions(actions = []) {
               sender_id: p.sender_id,
               sender_name: p.sender_name,
               sender_role: p.sender_role || 'student',
-              body: p.body,
+              body: p.body || '',
+              attachments: Array.isArray(p.attachments) ? p.attachments : [],
               created_at: p.created_at || new Date().toISOString()
             }
           });
@@ -680,4 +683,118 @@ export async function applyOutboxActions(actions = []) {
     syncedAt: new Date().toISOString(),
     ...db
   };
+}
+
+const LOCAL_UPLOAD_DIR = path.join(__dirname, '..', 'data', 'uploads');
+
+function sanitizeStorageName(fileName = 'file.bin') {
+  const clean = path
+    .basename(String(fileName || 'file'))
+    .replace(/[^a-zA-Z0-9._-]+/g, '_')
+    .slice(-90);
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 7)}-${clean || 'file'}`;
+}
+
+export async function createSignedUploadTarget({ fileName }) {
+  const mode = await detectMode();
+  const objectName = sanitizeStorageName(fileName);
+  const cfg = getSupabaseConfig();
+
+  if (mode === 'supabase' && cfg) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3500);
+    try {
+      const res = await fetch(`${cfg.url}/storage/v1/object/upload/sign/itutor-media/${objectName}`, {
+        method: 'POST',
+        headers: {
+          apikey: cfg.key,
+          Authorization: `Bearer ${cfg.key}`
+        },
+        signal: controller.signal
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const rel = String(data.url || '');
+        const signedUrl = rel.startsWith('http') ? rel : `${cfg.url}/storage/v1${rel}`;
+        const publicUrl = `${cfg.url}/storage/v1/object/public/itutor-media/${objectName}`;
+        return { mode: 'supabase', signedUrl, publicUrl, objectName };
+      }
+    } catch {
+      // Fall through to direct /api/upload
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  return { mode: 'local', uploadUrl: `/api/upload?name=${encodeURIComponent(objectName)}`, objectName };
+}
+
+export async function uploadBinaryMedia({ fileName, contentType = 'application/octet-stream', buffer }) {
+  const mode = await detectMode();
+  const objectName = sanitizeStorageName(fileName);
+  const cfg = getSupabaseConfig();
+
+  if (mode === 'supabase' && cfg) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    try {
+      const res = await fetch(`${cfg.url}/storage/v1/object/itutor-media/${objectName}`, {
+        method: 'POST',
+        headers: {
+          apikey: cfg.key,
+          Authorization: `Bearer ${cfg.key}`,
+          'Content-Type': contentType,
+          'x-upsert': 'true'
+        },
+        body: buffer,
+        signal: controller.signal
+      });
+      if (res.ok) {
+        return {
+          ok: true,
+          backend: 'supabase',
+          url: `${cfg.url}/storage/v1/object/public/itutor-media/${objectName}`,
+          objectName
+        };
+      }
+    } catch {
+      // Fall back to local storage or data URL
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  try {
+    fs.mkdirSync(LOCAL_UPLOAD_DIR, { recursive: true });
+    fs.writeFileSync(path.join(LOCAL_UPLOAD_DIR, objectName), buffer);
+    fs.writeFileSync(path.join(LOCAL_UPLOAD_DIR, `${objectName}.meta.json`), JSON.stringify({ contentType }), 'utf8');
+    return {
+      ok: true,
+      backend: 'local',
+      url: `/api/media/${encodeURIComponent(objectName)}`,
+      objectName
+    };
+  } catch {
+    const b64 = Buffer.from(buffer).toString('base64');
+    return {
+      ok: true,
+      backend: 'inline',
+      url: `data:${contentType};base64,${b64}`,
+      objectName
+    };
+  }
+}
+
+export function readLocalUploadedMedia(objectName) {
+  const safe = path.basename(String(objectName || ''));
+  const filePath = path.join(LOCAL_UPLOAD_DIR, safe);
+  if (!fs.existsSync(filePath)) return null;
+  let contentType = 'application/octet-stream';
+  try {
+    const meta = JSON.parse(fs.readFileSync(`${filePath}.meta.json`, 'utf8'));
+    if (meta.contentType) contentType = meta.contentType;
+  } catch {
+    // Default mime
+  }
+  return { buffer: fs.readFileSync(filePath), contentType };
 }

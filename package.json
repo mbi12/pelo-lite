@@ -1,19 +1,20 @@
 {
   "name": "i-tutor-standalone",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "type": "module",
-  "description": "i-tutor — Confidence in learning. Offline-first tuition app with auto-sync.",
+  "description": "i-tutor — Confidence in learning. Offline-first tuition app with media attachments & built-in PDF/Photo/Video opener.",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node server.js",
-    "build": "node -e \"console.log('i-tutor offline-sync bundle ready')\"",
-    "test": "node --check server.js && node --check public/js/app.js && node --test test/sync.test.js"
+    "start": "node scripts/prepare-vendor.mjs && node server.js",
+    "dev": "node scripts/prepare-vendor.mjs && node server.js",
+    "build": "node scripts/prepare-vendor.mjs",
+    "test": "node scripts/prepare-vendor.mjs && node --check server.js && node --check public/js/app.js && node --test test/sync.test.js"
   },
   "engines": {
     "node": ">=20.0.0"
   },
   "dependencies": {
-    "express": "^4.21.2"
+    "express": "^4.21.2",
+    "pdfjs-dist": "^5.0.0 || ^6.0.0"
   }
 }

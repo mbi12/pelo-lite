@@ -1,12 +1,17 @@
-const CACHE_NAME = 'itutor-standalone-v11';
+const CACHE_NAME = 'itutor-standalone-v12';
 const OFFLINE_ASSETS = [
   '/',
   '/index.html',
   '/css/styles.css',
   '/js/app.js',
   '/js/emblem.js',
+  '/js/mediaViewer.js',
   '/js/offlineStore.js',
   '/js/defaultSeed.js',
+  '/vendor/pdfjs/pdf.min.js',
+  '/vendor/pdfjs/pdf.worker.min.js',
+  '/samples/trig-identities-worksheet.pdf',
+  '/samples/newton-pulley-diagram.svg',
   '/icon.svg',
   '/manifest.webmanifest',
   '/assets/itutor-logo.jpg'
@@ -37,8 +42,6 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url);
   if (request.method !== 'GET' || url.pathname.startsWith('/api/')) return;
 
-  // Network-first when online so latest optimizations & animations appear immediately,
-  // with instant fallback to cached offline assets when offline!
   event.respondWith(
     fetch(request)
       .then((response) => {

@@ -327,5 +327,48 @@ export const ICONS = {
     <svg viewBox="0 0 24 24" class="nav-svg" aria-hidden="true">
       <path d="M6 6l12 12M18 6L6 18" />
     </svg>
+  `,
+  paperclip: `
+    <svg viewBox="0 0 24 24" class="nav-svg-sm" aria-hidden="true">
+      <path d="M21.4 11.1l-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5" />
+    </svg>
+  `,
+  photo: `
+    <svg viewBox="0 0 24 24" class="nav-svg-sm" aria-hidden="true">
+      <rect x="3" y="4" width="18" height="16" rx="2.5" />
+      <circle cx="8.5" cy="9.5" r="1.6" />
+      <path d="M21 15l-5-5L5 20" />
+    </svg>
+  `,
+  pdf: `
+    <svg viewBox="0 0 24 24" class="nav-svg-sm" aria-hidden="true">
+      <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-6-6z" />
+      <path d="M14 3v6h6M8 14h8M8 17.5h5" />
+    </svg>
+  `,
+  video: `
+    <svg viewBox="0 0 24 24" class="nav-svg-sm" aria-hidden="true">
+      <rect x="2.5" y="5.5" width="13.5" height="13" rx="2.2" />
+      <path d="M16 10.5l5.5-3v9L16 13.5" />
+    </svg>
+  `,
+  dots: `
+    <svg viewBox="0 0 24 24" class="nav-svg-sm" aria-hidden="true">
+      <circle cx="5" cy="12" r="1.5" fill="currentColor" />
+      <circle cx="12" cy="12" r="1.5" fill="currentColor" />
+      <circle cx="19" cy="12" r="1.5" fill="currentColor" />
+    </svg>
+  `,
+  zoomIn: `
+    <svg viewBox="0 0 24 24" class="nav-svg-sm" aria-hidden="true">
+      <circle cx="11" cy="11" r="6.5" />
+      <path d="M11 8v6M8 11h6M16 16l4.5 4.5" />
+    </svg>
+  `,
+  zoomOut: `
+    <svg viewBox="0 0 24 24" class="nav-svg-sm" aria-hidden="true">
+      <circle cx="11" cy="11" r="6.5" />
+      <path d="M8 11h6M16 16l4.5 4.5" />
+    </svg>
   `
 };

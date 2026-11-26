@@ -268,7 +268,17 @@ export function createDefaultSnapshot() {
         instructions:
           'Complete Questions 1 to 3 even if you are studying offline at home. Show each step clearly from Left-Hand Side to Right-Hand Side.',
         offline_pack_content:
-          'OFFLINE WORKSHEET PACK (Downloaded to device):\n1) Prove: (1 - cos 2x) / sin 2x = tan x  [8 marks]\n2) Simplify without a calculator: sin 75° · cos 15° + cos 75° · sin 15°  [10 marks]\n3) Determine general solution: 2 sin²x - sin x - 1 = 0  [12 marks]\nFormula Reminder: sin(2x) = 2 sin x cos x  |  cos(2x) = 1 - 2 sin²x'
+          'OFFLINE WORKSHEET PACK (Downloaded to device):\n1) Prove: (1 - cos 2x) / sin 2x = tan x  [8 marks]\n2) Simplify without a calculator: sin 75° · cos 15° + cos 75° · sin 15°  [10 marks]\n3) Determine general solution: 2 sin²x - sin x - 1 = 0  [12 marks]\nFormula Reminder: sin(2x) = 2 sin x cos x  |  cos(2x) = 1 - 2 sin²x',
+        attachments: [
+          {
+            id: 'att-seed-pdf-1',
+            name: 'Trig-Identities-Worksheet.pdf',
+            kind: 'pdf',
+            mime: 'application/pdf',
+            size: 2940,
+            url: '/samples/trig-identities-worksheet.pdf'
+          }
+        ]
       },
       {
         id: 'asg-2',
@@ -282,7 +292,17 @@ export function createDefaultSnapshot() {
         instructions:
           'Read the downloaded scenario below, list all forces acting on Block A (4 kg) and Block B (6 kg), and calculate acceleration + rope tension.',
         offline_pack_content:
-          'OFFLINE WORKSHEET PACK (Downloaded to device):\n• Block A (4 kg) rests on a rough horizontal table (μ_k = 0.25) connected over a light frictionless pulley to hanging Block B (6 kg).\n1) State Newton’s Second Law in words. [4 marks]\n2) Write separate F_net = ma equations for Block A and Block B. [16 marks]\n3) Calculate acceleration a and tension T in the string. [20 marks]'
+          'OFFLINE WORKSHEET PACK (Downloaded to device):\n• Block A (4 kg) rests on a rough horizontal table (μ_k = 0.25) connected over a light frictionless pulley to hanging Block B (6 kg).\n1) State Newton’s Second Law in words. [4 marks]\n2) Write separate F_net = ma equations for Block A and Block B. [16 marks]\n3) Calculate acceleration a and tension T in the string. [20 marks]',
+        attachments: [
+          {
+            id: 'att-seed-img-1',
+            name: 'Newton-Pulley-Diagram.svg',
+            kind: 'image',
+            mime: 'image/svg+xml',
+            size: 2410,
+            url: '/samples/newton-pulley-diagram.svg'
+          }
+        ]
       },
       {
         id: 'asg-3',
@@ -619,7 +639,17 @@ export function createDefaultSnapshot() {
         sender_id: 'tch-naledi',
         sender_name: 'Ms. Naledi Khumalo',
         sender_role: 'teacher',
-        body: 'Hi Thabo! I uploaded Remote Worksheet 4 so it downloads straight to your phone for offline practice tonight.',
+        body: 'Hi Thabo! I attached the 2-page Worksheet 4 PDF below — tap it to open right inside the app even offline.',
+        attachments: [
+          {
+            id: 'att-msg-pdf-1',
+            name: 'Trig-Identities-Worksheet.pdf',
+            kind: 'pdf',
+            mime: 'application/pdf',
+            size: 2940,
+            url: '/samples/trig-identities-worksheet.pdf'
+          }
+        ],
         created_at: '2026-11-25T13:10:00.000Z'
       },
       {
@@ -655,7 +685,17 @@ export function createDefaultSnapshot() {
         sender_id: 'stu-liam',
         sender_name: 'Liam van der Merwe',
         sender_role: 'student',
-        body: 'Meeting here at 18:00 to compare free-body diagrams for the pulley assignment!',
+        body: 'Here is the free-body diagram for the pulley homework — tap to zoom in!',
+        attachments: [
+          {
+            id: 'att-msg-img-1',
+            name: 'Newton-Pulley-Diagram.svg',
+            kind: 'image',
+            mime: 'image/svg+xml',
+            size: 2410,
+            url: '/samples/newton-pulley-diagram.svg'
+          }
+        ],
         created_at: '2026-11-25T15:20:00.000Z'
       }
     ],
