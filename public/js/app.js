@@ -96,6 +96,7 @@ const ui = {
 
   // Flyers, Tuition & Package editors
   feeCalcMonthly: 750,
+  feeCalcOptionIdx: 6,
   feeCalcIncludeReg: true,
   showTuitionEditor: false,
   editingPlanId: null,
@@ -885,13 +886,15 @@ function renderAuthPortal(rootEl, { animateCard = true } = {}) {
                 <input class="field-input" name="grade" placeholder="Grade / Role (e.g. Grade 11)" required />
                 <input class="field-input" type="password" name="pin" placeholder="Create Password / PIN" required />
               </div>
-              <div class="form-grid-2">
-                <input class="field-input" name="subjectsRaw" placeholder="Subjects (e.g. Maths, Physics)" required />
-                <select class="field-input" name="selected_plan">
-                  ${plans.map((p) => `<option value="${esc(p.name)}">${esc(p.name)} (${esc(p.price)})</option>`).join('')}
-                  <option value="Educator Application">Tutor / Staff Application</option>
-                </select>
-              </div>
+              ${renderSubjectPickerBoxHTML({
+                currentSubjects: [],
+                inputName: 'subjectsRaw',
+                showAddBtn: false
+              })}
+              <select class="field-input" name="selected_plan">
+                ${plans.map((p) => `<option value="${esc(p.name)}">${esc(p.name)} (${esc(p.price)})</option>`).join('')}
+                <option value="Educator Application">Tutor / Staff Application</option>
+              </select>
               <input class="field-input" name="notes" placeholder="Goals or message for Admissions..." />
               <button class="dark-cta-btn" type="submit" style="padding:0.72rem;width:100%;">Submit Application →</button>
             </form>
@@ -1002,6 +1005,31 @@ function renderAuthPortal(rootEl, { animateCard = true } = {}) {
       await performActionAndSync('UPSERT_ACCOUNT', newProfile, 'Join application sent to Admissions!');
     });
   }
+
+  // Subject Picker Chips inside Apply to Join
+  rootEl.querySelectorAll('[data-toggle-subj-chip]').forEach((chipBtn) => {
+    chipBtn.addEventListener('click', () => {
+      const subj = chipBtn.getAttribute('data-toggle-subj-chip') || '';
+      const box = chipBtn.closest('[data-subj-picker-box]');
+      const inputEl = box?.querySelector('input[name="subjectsRaw"]');
+      if (!subj || !inputEl) return;
+      const list = String(inputEl.value || '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const idx = list.findIndex((s) => s.toLowerCase() === subj.toLowerCase());
+      if (idx >= 0) {
+        list.splice(idx, 1);
+        chipBtn.classList.remove('is-selected');
+      } else {
+        list.push(subj);
+        chipBtn.classList.add('is-selected');
+      }
+      inputEl.value = list.join(', ');
+    });
+  });
+
+  enhanceInAppControls(rootEl);
 }
 
 /* ==========================================================================
@@ -3573,9 +3601,7 @@ function buildTuitionContactsStage(user) {
           ${BOTSWANA_CALC_OPTIONS.map(
             (opt, idx) =>
               `<option value="${opt.rate}" data-opt-idx="${idx}" ${
-                ui.feeCalcMonthly === opt.rate && idx === BOTSWANA_CALC_OPTIONS.findIndex((o) => o.rate === ui.feeCalcMonthly)
-                  ? 'selected'
-                  : ''
+                ui.feeCalcOptionIdx === idx ? 'selected' : ''
               }>${esc(opt.label)}</option>`
           ).join('')}
         </select>
@@ -3630,6 +3656,7 @@ function buildTuitionContactsStage(user) {
    ========================================================================== */
 
 function renderApp(opts = {}) {
+  closeActiveInAppPopover();
   applyTheme();
   const rootEl = document.getElementById('app');
   if (!rootEl) return;
@@ -3941,6 +3968,7 @@ function renderApp(opts = {}) {
   `;
 
   bindWorkspaceEvents(user);
+  enhanceInAppControls(rootEl);
 
   if (opts.preserveScroll !== false && !shouldAnimateStage && prevScrollY > 0) {
     window.scrollTo(0, prevScrollY);
@@ -5792,6 +5820,7 @@ function bindWorkspaceEvents(user) {
 
   // --- FLYERS, BOTSWANA PULA PRICES & CONTACTS EVENTS ---
   document.getElementById('calc-rate-select')?.addEventListener('change', (e) => {
+    ui.feeCalcOptionIdx = Number(e.target.selectedIndex) || 0;
     ui.feeCalcMonthly = Number(e.target.value) || 500;
     renderApp({ preserveScroll: true });
   });
@@ -6041,12 +6070,368 @@ function bindWorkspaceEvents(user) {
   }
 }
 
-/* Global listener to close any open ⋯ row menu when tapping anywhere outside */
+/* ==========================================================================
+   ZERO PHONE SYSTEM POP-UPS: IN-APP SELECT MENUS, MINI CALENDAR & VALIDATION
+   ========================================================================== */
+
+let activeFloatingPopover = null;
+let activeFloatingTrigger = null;
+
+function closeActiveInAppPopover() {
+  if (activeFloatingPopover) {
+    activeFloatingPopover.remove();
+    activeFloatingPopover = null;
+  }
+  if (activeFloatingTrigger) {
+    activeFloatingTrigger.classList.remove('is-open');
+    activeFloatingTrigger.setAttribute('aria-expanded', 'false');
+    activeFloatingTrigger = null;
+  }
+}
+
+function positionFloatingPopover(popoverEl, anchorEl, minWidth = 210, maxHeightCap = 252) {
+  const rect = anchorEl.getBoundingClientRect();
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const width = Math.min(vw - 24, Math.max(rect.width, minWidth));
+  const left = Math.max(12, Math.min(rect.left, vw - width - 12));
+
+  popoverEl.style.width = `${Math.round(width)}px`;
+  popoverEl.style.left = `${Math.round(left)}px`;
+
+  const spaceBelow = vh - rect.bottom - 14;
+  const spaceAbove = rect.top - 14;
+  if (spaceBelow >= 200 || spaceBelow >= spaceAbove) {
+    popoverEl.style.top = `${Math.round(rect.bottom + 6)}px`;
+    popoverEl.style.bottom = 'auto';
+    popoverEl.style.maxHeight = `${Math.round(Math.min(maxHeightCap, Math.max(140, spaceBelow)))}px`;
+  } else {
+    popoverEl.style.top = 'auto';
+    popoverEl.style.bottom = `${Math.round(vh - rect.top + 6)}px`;
+    popoverEl.style.maxHeight = `${Math.round(Math.min(maxHeightCap, Math.max(140, spaceAbove)))}px`;
+  }
+}
+
+function enhanceInAppControls(root) {
+  if (!root) return;
+
+  // 1. Replace every native <select> with an in-app dropdown (eliminates OS picker sheets)
+  root.querySelectorAll('select:not(.is-itutor-upgraded)').forEach((selectEl) => {
+    selectEl.classList.add('is-itutor-upgraded');
+    selectEl.tabIndex = -1;
+    selectEl.setAttribute('aria-hidden', 'true');
+
+    const isCompact = selectEl.classList.contains('compact-select');
+    const wrap = document.createElement('div');
+    wrap.className = `itutor-select-wrap${isCompact ? ' is-compact' : ''}`;
+
+    const trigger = document.createElement('button');
+    trigger.type = 'button';
+    trigger.className = 'itutor-select-trigger';
+    trigger.setAttribute('aria-haspopup', 'listbox');
+    trigger.setAttribute('aria-expanded', 'false');
+    if (selectEl.getAttribute('aria-label')) {
+      trigger.setAttribute('aria-label', selectEl.getAttribute('aria-label'));
+    }
+
+    const getSelectedText = () => {
+      const opt = selectEl.options[selectEl.selectedIndex] || selectEl.options[0];
+      return opt ? opt.textContent.trim() : 'Select...';
+    };
+
+    const labelSpan = document.createElement('span');
+    labelSpan.className = 'itutor-select-label';
+    labelSpan.textContent = getSelectedText();
+
+    const chevSpan = document.createElement('span');
+    chevSpan.className = 'itutor-select-chevron';
+    chevSpan.innerHTML =
+      '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>';
+
+    trigger.appendChild(labelSpan);
+    trigger.appendChild(chevSpan);
+    wrap.appendChild(trigger);
+    selectEl.insertAdjacentElement('afterend', wrap);
+
+    trigger.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (activeFloatingTrigger === trigger) {
+        closeActiveInAppPopover();
+        return;
+      }
+
+      closeActiveInAppPopover();
+      trigger.classList.add('is-open');
+      trigger.setAttribute('aria-expanded', 'true');
+      activeFloatingTrigger = trigger;
+
+      const pop = document.createElement('div');
+      pop.className = 'itutor-floating-popover';
+      pop.setAttribute('role', 'listbox');
+
+      Array.from(selectEl.options).forEach((opt, idx) => {
+        const optBtn = document.createElement('button');
+        optBtn.type = 'button';
+        const isSel = idx === selectEl.selectedIndex;
+        optBtn.className = `itutor-select-option${isSel ? ' is-selected' : ''}`;
+        optBtn.setAttribute('role', 'option');
+        optBtn.setAttribute('aria-selected', isSel ? 'true' : 'false');
+
+        const textEl = document.createElement('span');
+        textEl.textContent = opt.textContent.trim();
+        optBtn.appendChild(textEl);
+
+        if (isSel) {
+          const checkEl = document.createElement('span');
+          checkEl.className = 'itutor-opt-check';
+          checkEl.textContent = '✓';
+          optBtn.appendChild(checkEl);
+        }
+
+        optBtn.addEventListener('click', (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          selectEl.selectedIndex = idx;
+          selectEl.value = opt.value;
+          labelSpan.textContent = getSelectedText();
+          trigger.classList.remove('is-field-invalid');
+          closeActiveInAppPopover();
+          selectEl.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+
+        pop.appendChild(optBtn);
+      });
+
+      document.body.appendChild(pop);
+      activeFloatingPopover = pop;
+      positionFloatingPopover(pop, trigger, 210, 256);
+
+      const selItem = pop.querySelector('.itutor-select-option.is-selected');
+      selItem?.scrollIntoView({ block: 'nearest' });
+    });
+  });
+
+  // 2. Replace every native <input type="date"> with an in-app calendar card
+  const MONTH_NAMES = [
+    'January',
+    'February',
+    'March',
+    'April',
+    'May',
+    'June',
+    'July',
+    'August',
+    'September',
+    'October',
+    'November',
+    'December'
+  ];
+
+  root.querySelectorAll('input[type="date"]').forEach((dateInput) => {
+    dateInput.type = 'text';
+    dateInput.readOnly = true;
+    dateInput.inputMode = 'none';
+    dateInput.autocomplete = 'off';
+    dateInput.classList.add('itutor-date-trigger');
+    if (!dateInput.placeholder) dateInput.placeholder = 'YYYY-MM-DD';
+
+    dateInput.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (activeFloatingTrigger === dateInput) {
+        closeActiveInAppPopover();
+        return;
+      }
+
+      closeActiveInAppPopover();
+      dateInput.classList.add('is-open');
+      activeFloatingTrigger = dateInput;
+
+      const parseISO = (str) => {
+        const m = String(str || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (!m) return new Date();
+        return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+      };
+
+      const curDate = parseISO(dateInput.value);
+      let viewYear = curDate.getFullYear();
+      let viewMonth = curDate.getMonth();
+
+      const cal = document.createElement('div');
+      cal.className = 'itutor-calendar-popover';
+
+      const renderCalendarGrid = () => {
+        const firstDay = new Date(viewYear, viewMonth, 1).getDay();
+        const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+        const pad2 = (n) => String(n).padStart(2, '0');
+        const selectedVal = dateInput.value;
+
+        let cells = '';
+        for (let i = 0; i < firstDay; i += 1) {
+          cells += `<span class="itutor-cal-day is-muted"></span>`;
+        }
+        for (let d = 1; d <= daysInMonth; d += 1) {
+          const iso = `${viewYear}-${pad2(viewMonth + 1)}-${pad2(d)}`;
+          cells += `<button type="button" class="itutor-cal-day ${
+            selectedVal === iso ? 'is-selected' : ''
+          }" data-pick-iso="${iso}">${d}</button>`;
+        }
+
+        cal.innerHTML = `
+          <div class="itutor-cal-head">
+            <button type="button" class="itutor-cal-nav-btn" data-cal-prev="1" aria-label="Previous month">‹</button>
+            <span class="itutor-cal-title">${MONTH_NAMES[viewMonth]} ${viewYear}</span>
+            <button type="button" class="itutor-cal-nav-btn" data-cal-next="1" aria-label="Next month">›</button>
+          </div>
+          <div class="itutor-cal-weekdays">
+            <span>Su</span><span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span>
+          </div>
+          <div class="itutor-cal-days">${cells}</div>
+          <div style="display:flex;justify-content:space-between;gap:0.4rem;padding-top:0.2rem;">
+            <button type="button" class="outline-btn" style="padding:0.32rem 0.65rem;font-size:0.74rem;" data-cal-today="1">Today</button>
+            <button type="button" class="outline-btn" style="padding:0.32rem 0.65rem;font-size:0.74rem;" data-cal-close="1">Done</button>
+          </div>
+        `;
+
+        cal.querySelector('[data-cal-prev]')?.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          viewMonth -= 1;
+          if (viewMonth < 0) {
+            viewMonth = 11;
+            viewYear -= 1;
+          }
+          renderCalendarGrid();
+        });
+
+        cal.querySelector('[data-cal-next]')?.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          viewMonth += 1;
+          if (viewMonth > 11) {
+            viewMonth = 0;
+            viewYear += 1;
+          }
+          renderCalendarGrid();
+        });
+
+        cal.querySelector('[data-cal-today]')?.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          const now = new Date();
+          const iso = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
+          dateInput.value = iso;
+          dateInput.classList.remove('is-field-invalid');
+          closeActiveInAppPopover();
+          dateInput.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+
+        cal.querySelector('[data-cal-close]')?.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          closeActiveInAppPopover();
+        });
+
+        cal.querySelectorAll('[data-pick-iso]').forEach((dayBtn) => {
+          dayBtn.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            dateInput.value = dayBtn.getAttribute('data-pick-iso') || '';
+            dateInput.classList.remove('is-field-invalid');
+            closeActiveInAppPopover();
+            dateInput.dispatchEvent(new Event('change', { bubbles: true }));
+          });
+        });
+      };
+
+      renderCalendarGrid();
+      document.body.appendChild(cal);
+      activeFloatingPopover = cal;
+      positionFloatingPopover(cal, dateInput, 290, 340);
+    });
+  });
+
+  // 3. Replace browser native HTML5 validation bubbles with clean in-app validation
+  root.querySelectorAll('form').forEach((formEl) => {
+    if (formEl.dataset.itutorValidated === '1') return;
+    formEl.dataset.itutorValidated = '1';
+    formEl.noValidate = true;
+    formEl.setAttribute('autocomplete', 'off');
+
+    formEl.querySelectorAll('input[type="email"]').forEach((em) => {
+      em.type = 'text';
+      em.inputMode = 'email';
+      em.autocapitalize = 'none';
+      em.autocorrect = 'off';
+    });
+
+    formEl.addEventListener(
+      'submit',
+      (e) => {
+        let firstInvalid = null;
+        let invalidLabel = '';
+        formEl.querySelectorAll('[required]').forEach((field) => {
+          const val = String(field.value || '').trim();
+          const proxyBtn =
+            field.tagName === 'SELECT' ? field.nextElementSibling?.querySelector('.itutor-select-trigger') : null;
+          if (!val) {
+            (proxyBtn || field).classList.add('is-field-invalid');
+            if (!firstInvalid) {
+              firstInvalid = proxyBtn || field;
+              invalidLabel = field.getAttribute('placeholder') || field.getAttribute('name') || 'required field';
+            }
+          } else {
+            (proxyBtn || field).classList.remove('is-field-invalid');
+          }
+        });
+
+        if (firstInvalid) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          firstInvalid.focus?.();
+          showToast(`Please complete: ${invalidLabel}`);
+        }
+      },
+      true
+    );
+
+    formEl.querySelectorAll('input, textarea').forEach((inp) => {
+      inp.addEventListener('input', () => inp.classList.remove('is-field-invalid'));
+    });
+  });
+}
+
+/* Global listeners to close open ⋯ menus & custom in-app popovers cleanly */
 document.addEventListener('click', (e) => {
   if (!e.target.closest('.row-more-menu')) {
     document.querySelectorAll('.row-more-menu[open]').forEach((el) => {
       el.open = false;
     });
+  }
+  if (
+    activeFloatingPopover &&
+    !activeFloatingPopover.contains(e.target) &&
+    (!activeFloatingTrigger || !activeFloatingTrigger.contains(e.target))
+  ) {
+    closeActiveInAppPopover();
+  }
+});
+
+window.addEventListener(
+  'scroll',
+  (e) => {
+    if (activeFloatingPopover && !activeFloatingPopover.contains(e.target)) {
+      closeActiveInAppPopover();
+    }
+  },
+  true
+);
+
+window.addEventListener('resize', () => {
+  if (activeFloatingPopover) closeActiveInAppPopover();
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && activeFloatingPopover) {
+    closeActiveInAppPopover();
   }
 });
 
@@ -6055,6 +6440,10 @@ document.addEventListener('click', (e) => {
    ========================================================================== */
 
 document.addEventListener('DOMContentLoaded', () => {
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+  });
+
   applyTheme();
   const rootEl = document.getElementById('app');
   if (!rootEl) return;
@@ -6069,7 +6458,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
     navigator.serviceWorker
-      .register('/sw.js?v=19', { updateViaCache: 'none' })
+      .register('/sw.js?v=20', { updateViaCache: 'none' })
       .then((reg) => reg.update().catch(() => {}))
       .catch(() => {});
   }

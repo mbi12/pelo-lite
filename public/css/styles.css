@@ -3763,6 +3763,249 @@ a {
   flex-shrink: 0;
 }
 
+/* ==========================================================================
+   ZERO PHONE SYSTEM POP-UPS: CUSTOM IN-APP DROPDOWNS & IN-APP CALENDAR
+   ========================================================================== */
+
+select.is-itutor-upgraded {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+.itutor-select-wrap {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  display: flex;
+}
+
+.itutor-select-wrap.is-compact {
+  width: auto;
+  max-width: 100%;
+}
+
+.itutor-select-trigger {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  min-width: 0;
+  background: var(--surface-recessed);
+  border: 1.5px solid var(--border-warm);
+  border-radius: 12px;
+  padding: 0.68rem 0.85rem;
+  color: var(--charcoal);
+  font-family: inherit;
+  font-size: 0.86rem;
+  font-weight: 650;
+  text-align: left;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.55rem;
+  cursor: pointer;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
+}
+
+.itutor-select-wrap.is-compact .itutor-select-trigger {
+  padding: 0.44rem 0.76rem;
+  font-size: 0.78rem;
+  border-radius: 10px;
+  background: var(--surface-ivory);
+  border-color: var(--border-strong);
+}
+
+.itutor-select-trigger:hover,
+.itutor-select-trigger.is-open {
+  border-color: var(--gold);
+  background: var(--surface-ivory);
+  box-shadow: 0 0 0 3px rgba(242, 183, 40, 0.18);
+}
+
+.itutor-select-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.itutor-select-chevron {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--charcoal-muted);
+  transition: transform 0.2s var(--ease-spring), color 0.18s ease;
+}
+
+.itutor-select-trigger.is-open .itutor-select-chevron {
+  transform: rotate(180deg);
+  color: var(--gold-deep);
+}
+
+.itutor-floating-popover {
+  position: fixed;
+  z-index: 2600;
+  background: var(--surface-ivory);
+  border: 1.5px solid rgba(242, 183, 40, 0.62);
+  border-radius: 16px;
+  box-shadow: 0 18px 44px rgba(18, 19, 17, 0.24), 0 3px 10px rgba(18, 19, 17, 0.1);
+  padding: 0.36rem;
+  max-height: 252px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 0.18rem;
+  animation: panelDropIn 0.18s var(--ease-spring);
+}
+
+.itutor-select-option {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--charcoal);
+  font-family: inherit;
+  font-size: 0.84rem;
+  font-weight: 650;
+  text-align: left;
+  padding: 0.62rem 0.76rem;
+  border-radius: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  cursor: pointer;
+  line-height: 1.32;
+  transition: background-color 0.14s ease;
+}
+
+.itutor-select-option:hover {
+  background: var(--surface-hover);
+}
+
+.itutor-select-option.is-selected {
+  background: rgba(242, 183, 40, 0.22);
+  color: var(--charcoal);
+  font-weight: 800;
+}
+
+.itutor-opt-check {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--gold);
+  color: #191A18;
+  font-size: 0.7rem;
+  font-weight: 900;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Custom In-App Mini Calendar (replaces phone system date pop-ups) */
+.itutor-date-trigger {
+  cursor: pointer;
+}
+
+.itutor-calendar-popover {
+  position: fixed;
+  z-index: 2600;
+  width: min(304px, calc(100vw - 24px));
+  background: var(--surface-ivory);
+  border: 1.5px solid rgba(242, 183, 40, 0.62);
+  border-radius: 18px;
+  box-shadow: 0 18px 44px rgba(18, 19, 17, 0.26);
+  padding: 0.82rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.58rem;
+  animation: panelDropIn 0.18s var(--ease-spring);
+}
+
+.itutor-cal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+
+.itutor-cal-title {
+  font-size: 0.86rem;
+  font-weight: 800;
+  color: var(--charcoal);
+}
+
+.itutor-cal-nav-btn {
+  appearance: none;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-recessed);
+  color: var(--charcoal);
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  font-size: 0.9rem;
+  font-weight: 800;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.itutor-cal-weekdays,
+.itutor-cal-days {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0.2rem;
+  text-align: center;
+}
+
+.itutor-cal-weekdays span {
+  font-size: 0.68rem;
+  font-weight: 800;
+  color: var(--charcoal-muted);
+  padding: 0.18rem 0;
+}
+
+.itutor-cal-day {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--charcoal);
+  border-radius: 9px;
+  height: 33px;
+  font-size: 0.79rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color 0.14s ease;
+}
+
+.itutor-cal-day:hover {
+  background: var(--surface-hover);
+}
+
+.itutor-cal-day.is-selected {
+  background: var(--gold);
+  color: #191A18;
+  font-weight: 850;
+}
+
+.itutor-cal-day.is-muted {
+  opacity: 0.32;
+  pointer-events: none;
+}
+
+.field-input.is-field-invalid,
+.itutor-select-trigger.is-field-invalid {
+  border-color: #D6453A !important;
+  box-shadow: 0 0 0 3px rgba(214, 69, 58, 0.18) !important;
+}
+
+
 
 
 
