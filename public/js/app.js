@@ -519,10 +519,75 @@ function getPendingAdmissionsCount() {
   return pendingAccounts + pendingEnquiries;
 }
 
+function getUserScopedSubjectSet(user) {
+  if (!user || user.role === 'visitor' || canEditEverything(user)) return null;
+
+  let rawSubjects = Array.isArray(user.subjects) ? user.subjects : [];
+  if (user.role === 'parent') {
+    const child = (vaultState.profiles || []).find((p) => p.id === user.linked_student_id);
+    if (child && Array.isArray(child.subjects) && child.subjects.length > 0) {
+      rawSubjects = child.subjects;
+    }
+  }
+
+  const cleaned = rawSubjects.map((s) => String(s || '').trim()).filter(Boolean);
+  if (cleaned.some((s) => s.toLowerCase() === 'all subjects')) return null;
+  return new Set(cleaned.map((s) => s.toLowerCase()));
+}
+
+function matchesUserSubject(user, itemSubject, { allowCompound = false } = {}) {
+  const allowed = getUserScopedSubjectSet(user);
+  if (allowed === null) return true;
+
+  const subj = String(itemSubject || '').trim().toLowerCase();
+  if (!subj || subj === 'all subjects' || subj === 'general' || subj === 'free extra lessons') {
+    return true;
+  }
+  if (allowed.has(subj)) return true;
+
+  if (allowCompound) {
+    const parts = subj
+      .split(/[&,\/|]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (parts.some((p) => allowed.has(p))) return true;
+  }
+
+  return false;
+}
+
+function getVisibleAssignments(user) {
+  return (vaultState.assignments || []).filter((a) => matchesUserSubject(user, a.subject));
+}
+
+function getVisibleNotes(user) {
+  return (vaultState.notes || []).filter((n) => matchesUserSubject(user, n.subject));
+}
+
+function getVisibleQuizzes(user) {
+  return (vaultState.quizzes || []).filter((q) => matchesUserSubject(user, q.subject));
+}
+
+function getVisibleFlashcards(user) {
+  return (vaultState.flashcards || []).filter((c) => matchesUserSubject(user, c.subject));
+}
+
+function getVisibleTimetables(user) {
+  return (vaultState.timetables || []).filter(
+    (t) => t.owner_id === user?.id || matchesUserSubject(user, t.subject, { allowCompound: true })
+  );
+}
+
 function getVisibleRooms(user) {
   if (!user || user.role === 'visitor') return [];
   if (canEditEverything(user)) return vaultState.rooms || [];
-  return (vaultState.rooms || []).filter((r) => (r.participant_ids || []).includes(user.id));
+  return (vaultState.rooms || []).filter((r) => {
+    if (!(r.participant_ids || []).includes(user.id)) return false;
+    if ((user.role === 'student' || user.role === 'parent') && r.room_type === 'group' && r.subject) {
+      return matchesUserSubject(user, r.subject);
+    }
+    return true;
+  });
 }
 
 function getActiveRoom(user) {
@@ -545,18 +610,40 @@ async function performActionAndSync(type, payload, toastMessage) {
 
 async function enrollAcceptedUserInRooms(profile) {
   if (!profile || !profile.id) return;
-  const groupRoom = (vaultState.rooms || []).find((r) => r.id === 'room-grp-trig');
-  if (groupRoom && !(groupRoom.participant_ids || []).includes(profile.id)) {
-    const updatedParticipants = [...(groupRoom.participant_ids || []), profile.id];
-    dispatchOfflineAction(vaultState, {
-      type: 'UPSERT_ROOM',
-      payload: {
-        ...groupRoom,
-        participant_ids: updatedParticipants,
-        members_label: `${updatedParticipants.length} members · Study Group`
-      }
-    });
+  const knownSubjectLower = new Set(getAllKnownSubjects().map((s) => s.toLowerCase()));
+
+  // Only enroll into study group rooms whose subject matches the student's enrolled subjects
+  for (const room of vaultState.rooms || []) {
+    if (room.room_type !== 'group' || !room.subject) continue;
+    const roomSubjLower = String(room.subject).trim().toLowerCase();
+    if (!knownSubjectLower.has(roomSubjLower)) continue;
+    if (!matchesUserSubject(profile, room.subject)) continue;
+    if (!(room.participant_ids || []).includes(profile.id)) {
+      const updatedParticipants = [...(room.participant_ids || []), profile.id];
+      dispatchOfflineAction(vaultState, {
+        type: 'UPSERT_ROOM',
+        payload: {
+          ...room,
+          participant_ids: updatedParticipants,
+          members_label: `${updatedParticipants.length} members · Study Group`
+        }
+      });
+    }
   }
+
+  const matchingTeacherIds = (vaultState.profiles || [])
+    .filter(
+      (t) =>
+        t.role === 'teacher' &&
+        t.status === 'active' &&
+        (t.subjects || []).some((ts) => matchesUserSubject(profile, ts))
+    )
+    .map((t) => t.id);
+
+  const welcomeParticipants = Array.from(
+    new Set([profile.id, 'adm-lerato', 'admin-1', 'admin-itutor', ...matchingTeacherIds])
+  );
+
   const welcomeRoomId = `room-welcome-${profile.id}`;
   if (!(vaultState.rooms || []).some((r) => r.id === welcomeRoomId)) {
     dispatchOfflineAction(vaultState, {
@@ -566,8 +653,8 @@ async function enrollAcceptedUserInRooms(profile) {
         room_type: 'direct',
         name: `Admissions & Support · ${profile.name}`,
         subject: profile.selected_plan || 'Welcome Channel',
-        participant_ids: [profile.id, 'adm-lerato', 'admin-1', 'tch-naledi'],
-        members_label: 'Direct Support · Admissions & Educators',
+        participant_ids: welcomeParticipants,
+        members_label: 'Direct Support · Admissions & Subject Educators',
         created_by_name: 'Admissions Office'
       }
     });
@@ -579,7 +666,7 @@ async function enrollAcceptedUserInRooms(profile) {
         sender_id: 'adm-lerato',
         sender_name: 'Lerato Sithole (Admissions)',
         sender_role: 'admissions',
-        body: `Welcome to i-tutor, ${profile.name}! Your account has been accepted and activated. Your timetables & offline homework packs are ready.`,
+        body: `Welcome to i-tutor, ${profile.name}! Your account has been accepted and activated. Your timetables & offline homework packs for ${(profile.subjects || []).join(', ') || 'your subjects'} are ready.`,
         attachments: [],
         created_at: new Date().toISOString()
       }
@@ -1288,9 +1375,16 @@ function buildOverviewStage(user) {
   const avgConf = getOverallConfidence(personalState);
   const weakest = getWeakestSubject(personalState);
   const pendingAdmissions = getPendingAdmissionsCount();
+  const visibleAssignments = getVisibleAssignments(user);
+  const visibleNotes = getVisibleNotes(user);
+  const visibleFlashcards = getVisibleFlashcards(user);
+  const visibleTimetables = getVisibleTimetables(user);
+  const visibleAssignIds = new Set(visibleAssignments.map((a) => a.id));
   const mySubs = (vaultState.submissions || []).filter((s) => s.student_id === user.id);
-  const pendingCount = (vaultState.assignments || []).filter((a) => !mySubs.some((s) => s.assignment_id === a.id)).length;
-  const ungradedCount = (vaultState.submissions || []).filter((s) => s.status !== 'graded').length;
+  const pendingCount = visibleAssignments.filter((a) => !mySubs.some((s) => s.assignment_id === a.id)).length;
+  const ungradedCount = (vaultState.submissions || []).filter(
+    (s) => s.status !== 'graded' && visibleAssignIds.has(s.assignment_id)
+  ).length;
   const visibleRooms = getVisibleRooms(user);
   const attendanceRecords = vaultState.attendance || [];
   const presentRatio = attendanceRecords.length
@@ -1315,25 +1409,27 @@ function buildOverviewStage(user) {
     kpis = [
       { label: 'My Subjects & Notes', value: `${myStudentCount} Students`, foot: `${mySubjects.join(', ')}`, go: 'subjects' },
       { label: 'Homework & Media', value: `${ungradedCount} To Mark`, foot: 'Post PDFs, Photos & Videos', go: 'assignments' },
-      { label: 'Class Schedule', value: `${vaultState.timetables.length} Slots`, foot: 'Weekly timetable', go: 'timetable' },
+      { label: 'Class Schedule', value: `${visibleTimetables.length} Slots`, foot: 'Weekly timetable', go: 'timetable' },
       { label: 'Chats & Groups', value: `${visibleRooms.length} Open`, foot: 'Send media & notes', go: 'messages' }
     ];
   } else if (user.role === 'parent') {
     const childId = user.linked_student_id || 'stu-thabo';
-    const childSubs = (vaultState.submissions || []).filter((s) => s.student_id === childId);
+    const childSubs = (vaultState.submissions || []).filter(
+      (s) => s.student_id === childId && visibleAssignIds.has(s.assignment_id)
+    );
     const graded = childSubs.find((s) => s.status === 'graded');
     kpis = [
       { label: 'Attendance', value: `${presentRatio}%`, foot: 'Tutor recaps', go: 'broadcasts' },
-      { label: 'Homework', value: graded ? `${graded.marks_awarded} Marks` : 'Active', foot: 'Open PDFs & feedback', go: 'assignments' },
-      { label: 'Timetable', value: `${vaultState.timetables.length} Classes`, foot: 'Saved offline', go: 'timetable' },
+      { label: 'Homework', value: graded ? `${graded.marks_awarded} Marks` : `${visibleAssignments.length} Active`, foot: 'Child’s enrolled subjects', go: 'assignments' },
+      { label: 'Timetable', value: `${visibleTimetables.length} Classes`, foot: 'Saved offline', go: 'timetable' },
       { label: 'Teacher Chats', value: `${visibleRooms.length} Open`, foot: 'Direct channels', go: 'messages' }
     ];
   } else {
     kpis = [
       { label: 'Confidence', value: `${avgConf}%`, foot: `Next: ${weakest.subject}`, go: 'toolkit' },
-      { label: 'Homework', value: `${pendingCount} Due`, foot: 'Open PDFs, Photos & Videos', go: 'assignments' },
+      { label: 'Homework', value: `${pendingCount} Due`, foot: 'Only your enrolled subjects', go: 'assignments' },
       { label: 'Chats & Groups', value: `${visibleRooms.length} Open`, foot: 'Share media & ask tutors', go: 'messages' },
-      { label: 'Study Toolkit', value: `${vaultState.notes.length + vaultState.flashcards.length} Items`, foot: 'Notes, quiz & cards', go: 'toolkit' }
+      { label: 'Study Toolkit', value: `${visibleNotes.length + visibleFlashcards.length} Items`, foot: 'Notes, quiz & cards', go: 'toolkit' }
     ];
   }
 
@@ -1389,23 +1485,29 @@ function buildOverviewStage(user) {
           <h2 class="panel-title">Recent Homework & Media Packs</h2>
           <button class="text-link-btn" data-nav="assignments">See all →</button>
         </div>
-        ${(vaultState.assignments || [])
-          .slice(0, 3)
-          .map((asg) => {
-            const attCount = Array.isArray(asg.attachments) ? asg.attachments.length : 0;
-            return `
+        ${
+          visibleAssignments.length === 0
+            ? `<p class="row-sub">No homework posted yet for your enrolled subjects (${esc(
+                (user.subjects || []).join(', ') || 'none assigned'
+              )}).</p>`
+            : visibleAssignments
+                .slice(0, 3)
+                .map((asg) => {
+                  const attCount = Array.isArray(asg.attachments) ? asg.attachments.length : 0;
+                  return `
               <button type="button" class="list-row clickable-list-row" data-jump-assign="${esc(asg.id)}">
                 <div class="list-row-col">
                   <span class="row-title">${esc(asg.title)}</span>
                   <span class="row-sub">${esc(asg.subject)} · Due ${esc(asg.due_date)}${
-              attCount ? ` · 📎 ${attCount} ${attCount === 1 ? 'file' : 'files'}` : ''
-            }</span>
+                    attCount ? ` · 📎 ${attCount} ${attCount === 1 ? 'file' : 'files'}` : ''
+                  }</span>
                 </div>
                 <span class="pill-badge">Open →</span>
               </button>
             `;
-          })
-          .join('')}
+                })
+                .join('')
+        }
       </section>
 
       <section class="panel-card">
@@ -1413,7 +1515,7 @@ function buildOverviewStage(user) {
           <h2 class="panel-title">Upcoming Classes</h2>
           <button class="text-link-btn" data-nav="timetable">Full schedule →</button>
         </div>
-        ${(vaultState.timetables || [])
+        ${visibleTimetables
           .slice(0, 3)
           .map(
             (slot) => `
@@ -1441,7 +1543,7 @@ function buildTimetableStage(user) {
   const q = ui.searchQuery.trim().toLowerCase();
   const superEdit = isStaff(user);
 
-  const slots = (vaultState.timetables || []).filter((slot) => {
+  const slots = getVisibleTimetables(user).filter((slot) => {
     const dayOk = ui.timetableDay === 'All' || slot.day_of_week === ui.timetableDay;
     const searchOk =
       !q ||
@@ -1610,18 +1712,25 @@ function buildTimetableStage(user) {
 function buildAssignmentsStage(user) {
   const canManage = isStaff(user);
   const q = ui.searchQuery.trim().toLowerCase();
-  const list = (vaultState.assignments || []).filter(
+  const visiblePool = getVisibleAssignments(user);
+  const list = visiblePool.filter(
     (a) => !q || (a.title || '').toLowerCase().includes(q) || (a.subject || '').toLowerCase().includes(q)
   );
   const editingAsg = ui.editingAssignmentId
     ? (vaultState.assignments || []).find((a) => a.id === ui.editingAssignmentId)
     : null;
+  const editableSubjects = getEditableSubjectsForUser(user);
+  const scopedSubjectSet = getUserScopedSubjectSet(user);
 
   return `
     <div class="page-header-row">
       <div>
         <h1>Homework & Media Packs</h1>
-        <p>Tap any PDF, Photo, or Video to open it right inside i-tutor — cached automatically for offline study.</p>
+        <p>${
+          scopedSubjectSet !== null
+            ? `Showing homework only for ${user.role === 'teacher' ? 'your teaching' : 'your enrolled'} subjects: ${(user.subjects || []).join(', ') || 'None assigned yet'}.`
+            : 'Tap any PDF, Photo, or Video to open it right inside i-tutor — cached automatically for offline study.'
+        }</p>
       </div>
       ${
         canManage
@@ -1640,17 +1749,25 @@ function buildAssignmentsStage(user) {
         ? `
       <form class="panel-card form-stack" id="upsert-assign-form">
         <div class="panel-head">
-          <h2 class="panel-title">${editingAsg ? `Edit Homework · ${esc(editingAsg.title)}` : 'Post New Homework (Photos, PDFs, Videos or Text)'}</h2>
+          <div>
+            <h2 class="panel-title">${editingAsg ? `Edit Homework · ${esc(editingAsg.title)}` : 'Post New Homework (Photos, PDFs, Videos or Text)'}</h2>
+            <p class="row-sub">Delivered strictly to students enrolled in the selected subject — students not taking that subject will not receive it.</p>
+          </div>
           <button type="button" class="outline-btn" id="cancel-assign-edit">Cancel</button>
         </div>
         <input type="hidden" name="id" value="${esc(editingAsg?.id || '')}" />
         <div class="form-grid-2">
           <input class="field-input" name="title" value="${esc(editingAsg?.title || '')}" placeholder="Homework Title (e.g. Trig Paper 2 Worksheet)" required />
           <select class="field-input" name="subject">
-            ${getAllKnownSubjects()
-              .map(
-                (s) => `<option value="${esc(s)}" ${editingAsg?.subject === s ? 'selected' : ''}>${esc(s)}</option>`
-              )
+            ${editableSubjects
+              .map((s) => {
+                const enrolledCount = (vaultState.profiles || []).filter(
+                  (p) => p.role === 'student' && p.status === 'active' && matchesUserSubject(p, s)
+                ).length;
+                return `<option value="${esc(s)}" ${editingAsg?.subject === s ? 'selected' : ''}>${esc(
+                  s
+                )} (${enrolledCount} ${enrolledCount === 1 ? 'student' : 'students'})</option>`;
+              })
               .join('')}
           </select>
         </div>
@@ -1700,8 +1817,13 @@ function buildAssignmentsStage(user) {
     }
 
     <div class="form-stack" style="gap:1rem;">
-      ${list
-        .map((asg) => {
+      ${
+        list.length === 0
+          ? `<section class="panel-card"><p class="row-sub">No homework found for your subjects (${esc(
+              (user.subjects || []).join(', ') || 'none assigned'
+            )}).</p></section>`
+          : list
+              .map((asg) => {
           const isOpen = ui.expandedAssignmentId === asg.id;
           const allSubs = (vaultState.submissions || []).filter((s) => s.assignment_id === asg.id);
           const targetStuId = user.role === 'parent' ? user.linked_student_id || 'stu-thabo' : user.id;
@@ -1849,8 +1971,9 @@ function buildAssignmentsStage(user) {
               }
             </article>
           `;
-        })
-        .join('')}
+              })
+              .join('')
+      }
     </div>
   `;
 }
@@ -2330,10 +2453,13 @@ function buildSubjectStudioStage(user) {
    ========================================================================== */
 
 function buildToolkitStage(user) {
+  const visibleNotes = getVisibleNotes(user);
+  const visibleQuizzes = getVisibleQuizzes(user);
+  const visibleCards = getVisibleFlashcards(user);
   const tabs = [
-    { id: 'notes', label: `Notes (${(vaultState.notes || []).length})` },
-    { id: 'quiz', label: `Quiz (${(vaultState.quizzes || []).length})` },
-    { id: 'flashcards', label: `Cards (${(vaultState.flashcards || []).length})` },
+    { id: 'notes', label: `Notes (${visibleNotes.length})` },
+    { id: 'quiz', label: `Quiz (${visibleQuizzes.length})` },
+    { id: 'flashcards', label: `Cards (${visibleCards.length})` },
     { id: 'focus', label: 'Timer & Pad' }
   ];
 
@@ -2361,13 +2487,17 @@ function buildToolkitStage(user) {
 }
 
 function buildNotesSubstage(user) {
-  const knownSubjects = getAllKnownSubjects();
+  const allKnown = getAllKnownSubjects();
+  const knownSubjects =
+    getUserScopedSubjectSet(user) === null
+      ? allKnown
+      : allKnown.filter((s) => matchesUserSubject(user, s));
   const subjects = ['All', ...knownSubjects];
   const q = ui.searchQuery.trim().toLowerCase();
   const canManage = isStaff(user);
   const editingNote = ui.editingNoteId ? (vaultState.notes || []).find((n) => n.id === ui.editingNoteId) : null;
 
-  const notes = (vaultState.notes || []).filter((n) => {
+  const notes = getVisibleNotes(user).filter((n) => {
     const subjOk = ui.subjectFilter === 'All' || n.subject === ui.subjectFilter;
     const searchOk =
       !q ||
@@ -2470,7 +2600,7 @@ function buildNotesSubstage(user) {
 
 function buildQuizSubstage(user) {
   const canManage = isStaff(user);
-  const allQuizzes = vaultState.quizzes || [];
+  const allQuizzes = getVisibleQuizzes(user);
   const subjects = ['All', ...new Set(allQuizzes.map((q) => q.subject))];
   const pool =
     ui.quizState.subject === 'All' ? allQuizzes : allQuizzes.filter((q) => q.subject === ui.quizState.subject);
@@ -2617,7 +2747,7 @@ function buildQuizSubstage(user) {
 }
 
 function buildFlashcardsSubstage(user) {
-  const cards = vaultState.flashcards || [];
+  const cards = getVisibleFlashcards(user);
   const card = cards.length ? cards[ui.cardState.index % cards.length] : null;
   const masteredIds = personalState.masteredCardIds || [];
   const masteredCount = cards.filter((c) => masteredIds.includes(c.id)).length;
@@ -3548,7 +3678,7 @@ function renderApp(opts = {}) {
           }
         ]
       : []),
-    { id: 'assignments', label: 'Homework & Media', icon: ICONS.assignment, badge: String(vaultState.assignments.length) },
+    { id: 'assignments', label: 'Homework & Media', icon: ICONS.assignment, badge: String(getVisibleAssignments(user).length) },
     { id: 'messages', label: 'Messages & Groups', icon: ICONS.messages, badge: visibleRooms.length ? String(visibleRooms.length) : '' },
     { id: 'timetable', label: 'Schedule & Exams', icon: ICONS.timetable, badge: '' },
     { id: 'toolkit', label: 'Study Toolkit', icon: ICONS.toolkit, badge: '' },
@@ -5176,10 +5306,11 @@ function bindWorkspaceEvents(user) {
     el.addEventListener('click', () => {
       if (ui.quizState.picked !== null) return;
       const picked = Number(el.getAttribute('data-quiz-pick'));
-      const allQuizzes = vaultState.quizzes || [];
+      const allQuizzes = getVisibleQuizzes(user);
       const pool =
         ui.quizState.subject === 'All' ? allQuizzes : allQuizzes.filter((q) => q.subject === ui.quizState.subject);
       const safePool = pool.length ? pool : allQuizzes;
+      if (!safePool.length) return;
       const current = safePool[ui.quizState.index % safePool.length];
       ui.quizState.picked = picked;
       if (picked === Number(current.correct_index ?? current.correctIndex ?? 0)) {
@@ -5190,10 +5321,11 @@ function bindWorkspaceEvents(user) {
   });
 
   document.getElementById('next-quiz-btn')?.addEventListener('click', () => {
-    const allQuizzes = vaultState.quizzes || [];
+    const allQuizzes = getVisibleQuizzes(user);
     const pool =
       ui.quizState.subject === 'All' ? allQuizzes : allQuizzes.filter((q) => q.subject === ui.quizState.subject);
     const total = (pool.length ? pool : allQuizzes).length;
+    if (!total) return;
     if (ui.quizState.index + 1 >= total) {
       ui.quizState.finished = true;
       const targetSubj = ui.quizState.subject === 'All' ? 'Mathematics' : ui.quizState.subject;
@@ -5230,13 +5362,13 @@ function bindWorkspaceEvents(user) {
   }
 
   document.getElementById('prev-card-btn')?.addEventListener('click', () => {
-    const len = Math.max(1, (vaultState.flashcards || []).length);
+    const len = Math.max(1, getVisibleFlashcards(user).length);
     ui.cardState = { index: (ui.cardState.index - 1 + len) % len, flipped: false };
     renderApp();
   });
 
   document.getElementById('next-card-btn')?.addEventListener('click', () => {
-    const len = Math.max(1, (vaultState.flashcards || []).length);
+    const len = Math.max(1, getVisibleFlashcards(user).length);
     ui.cardState = { index: (ui.cardState.index + 1) % len, flipped: false };
     renderApp();
   });
@@ -5937,7 +6069,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
     navigator.serviceWorker
-      .register('/sw.js?v=18', { updateViaCache: 'none' })
+      .register('/sw.js?v=19', { updateViaCache: 'none' })
       .then((reg) => reg.update().catch(() => {}))
       .catch(() => {});
   }
