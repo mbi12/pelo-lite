@@ -4000,10 +4000,95 @@ select.is-itutor-upgraded {
 }
 
 .field-input.is-field-invalid,
-.itutor-select-trigger.is-field-invalid {
+.itutor-select-trigger.is-field-invalid,
+.parent-child-picker-box.is-field-invalid {
   border-color: #D6453A !important;
   box-shadow: 0 0 0 3px rgba(214, 69, 58, 0.18) !important;
 }
+
+/* Parent Child Selector Card (for Apply to Join, Admin Account Form & My Account) */
+.parent-child-picker-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  background: var(--surface-recessed);
+  border: 1.5px solid rgba(242, 183, 40, 0.45);
+  border-radius: 16px;
+  padding: 0.78rem;
+}
+
+.child-pick-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.42rem;
+  max-height: 230px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 0.1rem;
+}
+
+.child-pick-card {
+  appearance: none;
+  border: 1.5px solid var(--border-warm);
+  background: var(--surface-ivory);
+  color: var(--charcoal);
+  border-radius: 13px;
+  padding: 0.58rem 0.72rem;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  cursor: pointer;
+  width: 100%;
+  min-width: 0;
+  transition: border-color 0.16s ease, background-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.child-pick-card:hover {
+  border-color: rgba(242, 183, 40, 0.7);
+  background: var(--surface-hover);
+}
+
+.child-pick-card.is-selected {
+  border-color: var(--gold);
+  background: linear-gradient(135deg, rgba(242, 183, 40, 0.2), var(--surface-ivory));
+  box-shadow: 0 3px 10px rgba(242, 183, 40, 0.2);
+}
+
+.child-pick-lead {
+  display: flex;
+  align-items: center;
+  gap: 0.62rem;
+  flex: 1 1 0%;
+  min-width: 0;
+}
+
+.child-pick-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  flex: 1 1 0%;
+  min-width: 0;
+}
+
+.child-pick-name {
+  font-size: 0.84rem;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.child-pick-sub {
+  font-size: 0.74rem;
+  color: var(--charcoal-muted);
+  line-height: 1.32;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 
 
 

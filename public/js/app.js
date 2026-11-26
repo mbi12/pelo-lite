@@ -51,6 +51,8 @@ const ui = {
   editingEnquiryId: null,
   directorySearch: '',
   showAddSubjectModal: false,
+  joinDraft: null,
+  accFormDraft: null,
 
   // Timetable & Exam editors
   timetableDay: 'All',
@@ -274,29 +276,203 @@ function formatRoleLabel(role = '') {
   return map[role] || String(role).toUpperCase();
 }
 
-function getAllKnownSubjects() {
-  const set = new Set(SUBJECT_LIST);
-  for (const s of vaultState.tuitionInfo?.custom_subjects || []) {
-    if (s && s !== 'All Subjects') set.add(s);
-  }
-  for (const p of vaultState.profiles || []) {
-    for (const s of p.subjects || []) {
-      if (s && s !== 'All Subjects') set.add(s);
-    }
-  }
-  for (const n of vaultState.notes || []) {
-    if (n.subject) set.add(n.subject);
-  }
-  return Array.from(set);
+function normalizeSubjectLabel(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return '';
+  const low = s.toLowerCase();
+  if (low === 'maths' || low === 'math') return 'Mathematics';
+  return s;
 }
 
-function renderSubjectPickerBoxHTML({ currentSubjects = [], inputName = 'subjectsRaw', showAddBtn = true } = {}) {
+function getAllKnownSubjects() {
+  const map = new Map();
+  const pushSubj = (raw) => {
+    const clean = normalizeSubjectLabel(raw);
+    if (!clean || clean.toLowerCase() === 'all subjects') return;
+    const key = clean.toLowerCase();
+    if (!map.has(key)) map.set(key, clean);
+  };
+  for (const s of SUBJECT_LIST) pushSubj(s);
+  for (const s of vaultState.tuitionInfo?.custom_subjects || []) pushSubj(s);
+  for (const p of vaultState.profiles || []) {
+    for (const s of p.subjects || []) pushSubj(s);
+  }
+  for (const n of vaultState.notes || []) {
+    if (n.subject) pushSubj(n.subject);
+  }
+  return Array.from(map.values());
+}
+
+function getEnrollableStudents() {
+  return (vaultState.profiles || []).filter(
+    (p) => p.role === 'student' && p.status !== 'declined'
+  );
+}
+
+function renderParentChildPickerHTML({
+  selectedChildId = '',
+  unlistedChildName = '',
+  allowUnlisted = true,
+  label = 'Choose Your Child (Student)'
+} = {}) {
+  const students = getEnrollableStudents();
+  const isUnlisted = selectedChildId === '__unlisted__';
+  const effectiveSelected =
+    selectedChildId || (students.length === 1 ? students[0].id : '');
+
+  return `
+    <div class="parent-child-picker-box" data-child-picker-box>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;flex-wrap:wrap;">
+        <span class="row-sub" style="font-weight:800;color:var(--charcoal);">${esc(label)}</span>
+        <span class="pill-badge" style="font-size:0.68rem;">Auto-links subjects & homework</span>
+      </div>
+      ${
+        students.length > 2
+          ? `<input
+              type="search"
+              class="field-input"
+              data-child-search-input
+              placeholder="Search child's name or grade..."
+              style="padding:0.48rem 0.72rem;font-size:0.81rem;"
+            />`
+          : ''
+      }
+      <input type="hidden" name="linked_student_id" value="${esc(effectiveSelected)}" />
+      <div class="child-pick-list" data-child-pick-list>
+        ${students
+          .map((stu) => {
+            const active = effectiveSelected === stu.id;
+            const hay = `${stu.name || ''} ${stu.grade || ''} ${(stu.subjects || []).join(' ')}`.toLowerCase();
+            return `
+              <button
+                type="button"
+                class="child-pick-card ${active ? 'is-selected' : ''}"
+                data-pick-child-id="${esc(stu.id)}"
+                data-child-haystack="${esc(hay)}"
+              >
+                <div class="child-pick-lead">
+                  ${renderAvatarHTML(stu, { size: 34 })}
+                  <div class="child-pick-meta">
+                    <span class="child-pick-name">
+                      <span>${esc(stu.name)}</span>
+                      <span class="muted-pill" style="font-size:0.68rem;">${esc(stu.grade || 'Student')}</span>
+                    </span>
+                    <span class="child-pick-sub">${esc(
+                      (stu.subjects || []).join(', ') || 'Subjects assigned by tutor'
+                    )}</span>
+                  </div>
+                </div>
+                <span class="status-chip ${active ? 'active' : 'pending'}" data-child-pick-badge>
+                  ${active ? '✓ Selected' : 'Select'}
+                </span>
+              </button>
+            `;
+          })
+          .join('')}
+        ${
+          allowUnlisted
+            ? `
+          <button
+            type="button"
+            class="child-pick-card ${isUnlisted ? 'is-selected' : ''}"
+            data-pick-child-id="__unlisted__"
+            data-child-haystack="not listed yet new child add unlisted"
+          >
+            <div class="child-pick-lead">
+              <div class="child-pick-meta">
+                <span class="child-pick-name">+ My child is not listed yet</span>
+                <span class="child-pick-sub">Enter your child's name & level so Admissions links you both</span>
+              </div>
+            </div>
+            <span class="status-chip ${isUnlisted ? 'active' : 'pending'}" data-child-pick-badge>
+              ${isUnlisted ? '✓ Selected' : 'Select'}
+            </span>
+          </button>
+        `
+            : ''
+        }
+      </div>
+      ${
+        allowUnlisted
+          ? `
+        <div data-unlisted-child-wrap style="display:${isUnlisted ? 'block' : 'none'};margin-top:0.2rem;">
+          <input
+            class="field-input"
+            name="child_unlisted_name"
+            value="${esc(unlistedChildName)}"
+            placeholder="Child's Full Name & Level (e.g. Kabelo Sebele · Std 6)"
+          />
+        </div>
+      `
+          : ''
+      }
+    </div>
+  `;
+}
+
+function bindParentChildPickerEvents(root = document) {
+  if (!root || !root.querySelectorAll) return;
+  root.querySelectorAll('[data-child-picker-box]').forEach((box) => {
+    if (box.dataset.childPickerBound === '1') return;
+    box.dataset.childPickerBound = '1';
+
+    const hiddenInput = box.querySelector('input[name="linked_student_id"]');
+    const searchInput = box.querySelector('[data-child-search-input]');
+    const unlistedWrap = box.querySelector('[data-unlisted-child-wrap]');
+    const cards = Array.from(box.querySelectorAll('[data-pick-child-id]'));
+
+    cards.forEach((card) => {
+      card.addEventListener('click', () => {
+        const pickedId = card.getAttribute('data-pick-child-id') || '';
+        if (hiddenInput) hiddenInput.value = pickedId;
+        box.classList.remove('is-field-invalid');
+        cards.forEach((c) => {
+          const isThis = c === card;
+          c.classList.toggle('is-selected', isThis);
+          const badge = c.querySelector('[data-child-pick-badge]');
+          if (badge) {
+            badge.className = `status-chip ${isThis ? 'active' : 'pending'}`;
+            badge.textContent = isThis ? '✓ Selected' : 'Select';
+          }
+        });
+        if (unlistedWrap) {
+          unlistedWrap.style.display = pickedId === '__unlisted__' ? 'block' : 'none';
+          if (pickedId === '__unlisted__') {
+            unlistedWrap.querySelector('input')?.focus();
+          }
+        }
+      });
+    });
+
+    if (searchInput) {
+      searchInput.addEventListener('input', () => {
+        const q = searchInput.value.trim().toLowerCase();
+        cards.forEach((c) => {
+          const pid = c.getAttribute('data-pick-child-id');
+          if (pid === '__unlisted__') {
+            c.style.display = '';
+            return;
+          }
+          const hay = c.getAttribute('data-child-haystack') || '';
+          c.style.display = !q || hay.includes(q) ? '' : 'none';
+        });
+      });
+    }
+  });
+}
+
+function renderSubjectPickerBoxHTML({
+  currentSubjects = [],
+  inputName = 'subjectsRaw',
+  showAddBtn = true,
+  label = 'Subjects (tap chips to toggle or type below)'
+} = {}) {
   const allKnown = getAllKnownSubjects();
-  const activeSet = new Set((currentSubjects || []).map((s) => String(s).trim()).filter(Boolean));
+  const activeSet = new Set((currentSubjects || []).map((s) => normalizeSubjectLabel(s)).filter(Boolean));
   return `
     <div class="subject-picker-box" data-subj-picker-box>
       <div style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;flex-wrap:wrap;">
-        <span class="row-sub" style="font-weight:750;">Subjects (tap chips to toggle or type below)</span>
+        <span class="row-sub" style="font-weight:750;">${esc(label)}</span>
         ${
           showAddBtn
             ? `<button type="button" class="outline-btn add-subject-btn" style="padding:0.28rem 0.62rem;font-size:0.73rem;" data-open-add-subject="1">${ICONS.plus} Add Subject</button>`
@@ -782,6 +958,12 @@ function renderAuthPortal(rootEl, { animateCard = true } = {}) {
     { id: 'tch-naledi', tag: 'Teacher · Maths', label: 'Ms. Naledi Khumalo' },
     { id: 'par-grace', tag: 'Parent Account', label: 'Mrs. Grace Mokoena' }
   ];
+  const joinDraft = ui.joinDraft || {};
+  const joinRole = joinDraft.role || 'student';
+  const joinSubjects = String(joinDraft.subjectsRaw || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
 
   rootEl.innerHTML = `
     <div class="auth-portal-shell">
@@ -871,31 +1053,67 @@ function renderAuthPortal(rootEl, { animateCard = true } = {}) {
             <form class="form-stack animated-drop" id="account-join-form">
               <p class="row-sub">Submit your details below — Admissions activates accounts in 1 click.</p>
               <div class="form-grid-2">
-                <input class="field-input" name="name" placeholder="Full Name" required />
+                <input class="field-input" name="name" value="${esc(joinDraft.name || '')}" placeholder="Full Name" required />
                 <select class="field-input" name="role" required>
-                  <option value="student">Joining as Student</option>
-                  <option value="parent">Joining as Parent</option>
-                  <option value="teacher">Joining as Teacher / Tutor</option>
+                  <option value="student" ${joinRole === 'student' ? 'selected' : ''}>Joining as Student</option>
+                  <option value="parent" ${joinRole === 'parent' ? 'selected' : ''}>Joining as Parent</option>
+                  <option value="teacher" ${joinRole === 'teacher' ? 'selected' : ''}>Joining as Teacher / Tutor</option>
                 </select>
               </div>
               <div class="form-grid-2">
-                <input class="field-input" type="email" name="email" placeholder="Email Address" required />
-                <input class="field-input" name="phone" placeholder="Phone / WhatsApp Number" required />
+                <input class="field-input" type="email" name="email" value="${esc(joinDraft.email || '')}" placeholder="Email Address" required />
+                <input class="field-input" name="phone" value="${esc(joinDraft.phone || '')}" placeholder="Phone / WhatsApp Number" required />
               </div>
-              <div class="form-grid-2">
-                <input class="field-input" name="grade" placeholder="Grade / Role (e.g. Grade 11)" required />
-                <input class="field-input" type="password" name="pin" placeholder="Create Password / PIN" required />
-              </div>
-              ${renderSubjectPickerBoxHTML({
-                currentSubjects: [],
-                inputName: 'subjectsRaw',
-                showAddBtn: false
-              })}
-              <select class="field-input" name="selected_plan">
-                ${plans.map((p) => `<option value="${esc(p.name)}">${esc(p.name)} (${esc(p.price)})</option>`).join('')}
-                <option value="Educator Application">Tutor / Staff Application</option>
-              </select>
-              <input class="field-input" name="notes" placeholder="Goals or message for Admissions..." />
+              ${
+                joinRole === 'parent'
+                  ? `
+                <input class="field-input" type="password" name="pin" value="${esc(joinDraft.pin || '')}" placeholder="Create Password / PIN" required />
+                ${renderParentChildPickerHTML({
+                  selectedChildId: joinDraft.linked_student_id || '',
+                  unlistedChildName: joinDraft.child_unlisted_name || '',
+                  allowUnlisted: true,
+                  label: 'Choose Your Child (Student)'
+                })}
+              `
+                  : joinRole === 'teacher'
+                  ? `
+                <div class="form-grid-2">
+                  <input class="field-input" name="grade" value="${esc(joinDraft.grade || '')}" placeholder="Levels Taught (e.g. JCE & BGCSE)" required />
+                  <input class="field-input" type="password" name="pin" value="${esc(joinDraft.pin || '')}" placeholder="Create Password / PIN" required />
+                </div>
+                ${renderSubjectPickerBoxHTML({
+                  currentSubjects: joinSubjects,
+                  inputName: 'subjectsRaw',
+                  showAddBtn: false,
+                  label: 'Subjects You Teach (tap chips to select)'
+                })}
+                <input type="hidden" name="selected_plan" value="Educator Application" />
+              `
+                  : `
+                <div class="form-grid-2">
+                  <input class="field-input" name="grade" value="${esc(joinDraft.grade || '')}" placeholder="Grade / Form (e.g. Form 5 / Grade 11)" required />
+                  <input class="field-input" type="password" name="pin" value="${esc(joinDraft.pin || '')}" placeholder="Create Password / PIN" required />
+                </div>
+                ${renderSubjectPickerBoxHTML({
+                  currentSubjects: joinSubjects,
+                  inputName: 'subjectsRaw',
+                  showAddBtn: false
+                })}
+                <select class="field-input" name="selected_plan">
+                  ${plans
+                    .map(
+                      (p) =>
+                        `<option value="${esc(p.name)}" ${
+                          joinDraft.selected_plan === p.name ? 'selected' : ''
+                        }>${esc(p.name)} (${esc(p.price)})</option>`
+                    )
+                    .join('')}
+                </select>
+              `
+              }
+              <input class="field-input" name="notes" value="${esc(joinDraft.notes || '')}" placeholder="${
+                joinRole === 'parent' ? 'Relationship or message for Admissions (optional)...' : 'Goals or message for Admissions...'
+              }" />
               <button class="dark-cta-btn" type="submit" style="padding:0.72rem;width:100%;">Submit Application →</button>
             </form>
           `
@@ -976,29 +1194,109 @@ function renderAuthPortal(rootEl, { animateCard = true } = {}) {
 
   const joinForm = document.getElementById('account-join-form');
   if (joinForm) {
+    const snapshotJoinDraft = () => {
+      const fd = new FormData(joinForm);
+      const prev = ui.joinDraft || {};
+      ui.joinDraft = {
+        ...prev,
+        name: String(fd.get('name') ?? prev.name ?? ''),
+        role: String(fd.get('role') ?? prev.role ?? 'student'),
+        email: String(fd.get('email') ?? prev.email ?? ''),
+        phone: String(fd.get('phone') ?? prev.phone ?? ''),
+        pin: String(fd.get('pin') ?? prev.pin ?? ''),
+        grade: fd.has('grade') ? String(fd.get('grade') || '') : String(prev.grade || ''),
+        subjectsRaw: fd.has('subjectsRaw') ? String(fd.get('subjectsRaw') || '') : String(prev.subjectsRaw || ''),
+        selected_plan: fd.has('selected_plan')
+          ? String(fd.get('selected_plan') || '')
+          : String(prev.selected_plan || ''),
+        linked_student_id: fd.has('linked_student_id')
+          ? String(fd.get('linked_student_id') || '')
+          : String(prev.linked_student_id || ''),
+        child_unlisted_name: fd.has('child_unlisted_name')
+          ? String(fd.get('child_unlisted_name') || '')
+          : String(prev.child_unlisted_name || ''),
+        notes: String(fd.get('notes') ?? prev.notes ?? '')
+      };
+    };
+
+    const roleSelect = joinForm.querySelector('select[name="role"]');
+    roleSelect?.addEventListener('change', () => {
+      snapshotJoinDraft();
+      renderApp({ preserveScroll: true });
+    });
+
+    bindParentChildPickerEvents(joinForm);
+
     joinForm.addEventListener('submit', async (e) => {
       e.preventDefault();
       const fd = new FormData(joinForm);
+      const role = String(fd.get('role') || 'student');
       const subjects = String(fd.get('subjectsRaw') || '')
         .split(',')
-        .map((s) => s.trim())
+        .map((s) => normalizeSubjectLabel(s))
         .filter(Boolean);
-      const role = fd.get('role');
+
+      let resolvedGrade = String(fd.get('grade') || '').trim();
+      let resolvedSubjects = subjects;
+      let resolvedPlan = String(fd.get('selected_plan') || '').trim();
+      let resolvedLinkedStudentId = '';
+      let resolvedSubtitle = `${resolvedGrade} · ${role.charAt(0).toUpperCase() + role.slice(1)}`;
+      let resolvedNotes = String(fd.get('notes') || '').trim() || 'Applied via in-app registration.';
+
+      if (role === 'parent') {
+        const pickedChildId = String(fd.get('linked_student_id') || '').trim();
+        const unlistedChild = String(fd.get('child_unlisted_name') || '').trim();
+        const pickerBox = joinForm.querySelector('[data-child-picker-box]');
+
+        if (!pickedChildId || (pickedChildId === '__unlisted__' && !unlistedChild)) {
+          pickerBox?.classList.add('is-field-invalid');
+          if (pickedChildId === '__unlisted__') {
+            joinForm.querySelector('input[name="child_unlisted_name"]')?.focus();
+            showToast("Please enter your child's full name and level.");
+          } else {
+            showToast('Please choose your child from the student list.');
+          }
+          return;
+        }
+
+        if (pickedChildId === '__unlisted__') {
+          resolvedLinkedStudentId = '';
+          resolvedGrade = 'Parent';
+          resolvedSubjects = [];
+          resolvedPlan = `Child: ${unlistedChild}`;
+          resolvedSubtitle = `Parent of ${unlistedChild}`;
+          resolvedNotes = `Requested child link: ${unlistedChild}. ${resolvedNotes}`;
+        } else {
+          const childProfile = (vaultState.profiles || []).find((p) => p.id === pickedChildId);
+          resolvedLinkedStudentId = pickedChildId;
+          resolvedGrade = childProfile?.grade || 'Parent';
+          resolvedSubjects = Array.isArray(childProfile?.subjects) ? [...childProfile.subjects] : [];
+          resolvedPlan = childProfile?.selected_plan || 'Linked to Child';
+          resolvedSubtitle = childProfile
+            ? `Parent of ${childProfile.name}${childProfile.grade ? ` (${childProfile.grade})` : ''}`
+            : 'Parent Account';
+        }
+      } else if (role === 'teacher') {
+        resolvedPlan = 'Educator Application';
+        resolvedSubtitle = `${resolvedGrade || 'Educator'} · Teacher`;
+      }
+
       const newProfile = {
         id: `acc-${Date.now()}`,
-        name: fd.get('name'),
+        name: String(fd.get('name') || '').trim(),
         role,
-        subtitle: `${fd.get('grade')} · ${role.charAt(0).toUpperCase() + role.slice(1)}`,
-        grade: fd.get('grade'),
-        pin: fd.get('pin') || '1234',
-        email: fd.get('email'),
-        phone: fd.get('phone'),
+        subtitle: resolvedSubtitle,
+        grade: resolvedGrade,
+        pin: String(fd.get('pin') || '1234'),
+        email: String(fd.get('email') || '').trim(),
+        phone: String(fd.get('phone') || '').trim(),
         status: 'pending',
-        subjects,
-        selected_plan: fd.get('selected_plan'),
-        linked_student_id: '',
-        notes: fd.get('notes') || 'Applied via in-app registration.'
+        subjects: resolvedSubjects,
+        selected_plan: resolvedPlan,
+        linked_student_id: resolvedLinkedStudentId,
+        notes: resolvedNotes
       };
+      ui.joinDraft = null;
       ui.authError = '';
       ui.authSuccess = `Application received for ${newProfile.name}! Status: Pending Admissions Approval.`;
       ui.authTab = 'signin';
@@ -1058,7 +1356,21 @@ function buildAdmissionsStage(user) {
   });
 
   const editingAcc = ui.editingAccountId ? allProfiles.find((p) => p.id === ui.editingAccountId) : null;
+  const accDraft = { ...(editingAcc || {}), ...(ui.accFormDraft || {}) };
+  const accFormRole = accDraft.role || 'student';
+  const accFormSubjects = Array.isArray(accDraft.subjects)
+    ? accDraft.subjects
+    : String(accDraft.subjectsRaw || '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
   const plans = vaultState.tuitionInfo?.plans || [];
+  const describeParentChild = (acc) => {
+    if (acc.role !== 'parent') return '';
+    const stu = allProfiles.find((s) => s.id === acc.linked_student_id);
+    if (stu) return `Child: ${stu.name}${stu.grade ? ` (${stu.grade})` : ''}`;
+    return acc.subtitle || 'Child link pending';
+  };
 
   return `
     <div class="page-header-row">
@@ -1086,53 +1398,72 @@ function buildAdmissionsStage(user) {
         </div>
         <input type="hidden" name="id" value="${esc(editingAcc?.id || '')}" />
         ${renderAvatarPickerHTML({
-          profile: editingAcc || { name: 'New Account' },
+          profile: accDraft.name ? accDraft : editingAcc || { name: 'New Account' },
           stagedAvatar: ui.stagedAccAvatar,
           scope: 'admin'
         })}
         <div class="form-grid-2">
-          <input class="field-input" name="name" value="${esc(editingAcc?.name || '')}" placeholder="Full Name" required />
+          <input class="field-input" name="name" value="${esc(accDraft.name || '')}" placeholder="Full Name" required />
           <select class="field-input" name="role" required>
             ${['student', 'parent', 'teacher', 'admissions', 'admin']
               .map(
                 (r) =>
-                  `<option value="${r}" ${editingAcc?.role === r ? 'selected' : ''}>Role: ${r.toUpperCase()}</option>`
+                  `<option value="${r}" ${accFormRole === r ? 'selected' : ''}>Role: ${r.toUpperCase()}</option>`
               )
               .join('')}
           </select>
         </div>
         <div class="form-grid-2">
-          <input class="field-input" name="email" value="${esc(editingAcc?.email || '')}" placeholder="Email Address" required />
-          <input class="field-input" name="phone" value="${esc(editingAcc?.phone || '')}" placeholder="Phone / WhatsApp" />
+          <input class="field-input" name="email" value="${esc(accDraft.email || '')}" placeholder="Email Address" required />
+          <input class="field-input" name="phone" value="${esc(accDraft.phone || '')}" placeholder="Phone / WhatsApp" />
         </div>
         <div class="form-grid-2">
-          <input class="field-input" name="pin" value="${esc(editingAcc?.pin || '1234')}" placeholder="Password / PIN" required />
+          <input class="field-input" name="pin" value="${esc(accDraft.pin || '1234')}" placeholder="Password / PIN" required />
           <select class="field-input" name="status">
             ${['active', 'pending', 'suspended', 'declined']
               .map(
                 (st) =>
-                  `<option value="${st}" ${(editingAcc?.status || 'active') === st ? 'selected' : ''}>Status: ${st.toUpperCase()}</option>`
+                  `<option value="${st}" ${(accDraft.status || 'active') === st ? 'selected' : ''}>Status: ${st.toUpperCase()}</option>`
               )
               .join('')}
           </select>
         </div>
-        <div class="form-grid-2">
-          <input class="field-input" name="grade" value="${esc(editingAcc?.grade || 'Grade 12')}" placeholder="Grade / Department" />
-          <input class="field-input" name="subtitle" value="${esc(editingAcc?.subtitle || '')}" placeholder="Profile Subtitle" />
-        </div>
-        ${renderSubjectPickerBoxHTML({
-          currentSubjects: editingAcc?.subjects || [],
-          inputName: 'subjectsRaw',
-          showAddBtn: true
-        })}
-        <select class="field-input" name="selected_plan">
-          <option value="${esc(editingAcc?.selected_plan || '')}">${esc(
-          editingAcc?.selected_plan || 'Select Tuition Plan / Staff'
-        )}</option>
-          ${plans.map((p) => `<option value="${esc(p.name)}">${esc(p.name)} (${esc(p.price)})</option>`).join('')}
-          <option value="Staff">Staff / Educator</option>
-        </select>
-        <input class="field-input" name="notes" value="${esc(editingAcc?.notes || '')}" placeholder="Admissions / Learner Notes" />
+        ${
+          accFormRole === 'parent'
+            ? `
+          ${renderParentChildPickerHTML({
+            selectedChildId: accDraft.linked_student_id || '',
+            unlistedChildName: accDraft.child_unlisted_name || '',
+            allowUnlisted: true,
+            label: 'Choose Child (Student)'
+          })}
+          <input class="field-input" name="subtitle" value="${esc(accDraft.subtitle || '')}" placeholder="Parent Headline (auto-filled from child if left blank)" />
+        `
+            : `
+          <div class="form-grid-2">
+            <input class="field-input" name="grade" value="${esc(accDraft.grade || 'Grade 12')}" placeholder="Grade / Department" />
+            <input class="field-input" name="subtitle" value="${esc(accDraft.subtitle || '')}" placeholder="Profile Subtitle" />
+          </div>
+          ${renderSubjectPickerBoxHTML({
+            currentSubjects: accFormSubjects,
+            inputName: 'subjectsRaw',
+            showAddBtn: true
+          })}
+          ${
+            accFormRole === 'student'
+              ? `
+            <select class="field-input" name="selected_plan">
+              <option value="${esc(accDraft.selected_plan || '')}">${esc(
+                  accDraft.selected_plan || 'Select Tuition Plan'
+                )}</option>
+              ${plans.map((p) => `<option value="${esc(p.name)}">${esc(p.name)} (${esc(p.price)})</option>`).join('')}
+            </select>
+          `
+              : `<input type="hidden" name="selected_plan" value="Staff" />`
+          }
+        `
+        }
+        <input class="field-input" name="notes" value="${esc(accDraft.notes || '')}" placeholder="Admissions / Learner Notes" />
         <button class="dark-cta-btn" type="submit">${ICONS.check} Save Account</button>
       </form>
     `
@@ -1156,9 +1487,15 @@ function buildAdmissionsStage(user) {
                   ${esc(app.name)}
                   <span class="status-chip pending">${esc(app.role)}</span>
                 </span>
-                <span class="row-sub">${esc(app.grade)} · ${esc(app.selected_plan || 'Standard')} · ${esc(
-                  (app.subjects || []).join(', ') || 'General'
-                )}</span>
+                <span class="row-sub">${
+                  app.role === 'parent'
+                    ? `${esc(describeParentChild(app))} · Subjects: ${esc(
+                        (app.subjects || []).join(', ') || 'Inherited from child'
+                      )}`
+                    : `${esc(app.grade)} · ${esc(app.selected_plan || 'Standard')} · ${esc(
+                        (app.subjects || []).join(', ') || 'General'
+                      )}`
+                }</span>
                 <span class="row-sub">${esc(app.email)} · ${esc(app.phone)}</span>
               </div>
               <div class="action-cluster">
@@ -1267,9 +1604,13 @@ function buildAdmissionsStage(user) {
                   <span class="muted-pill">${esc(formatRoleLabel(acc.role))}</span>
                   <span class="status-chip ${esc(acc.status || 'active')}">${esc(acc.status || 'active')}</span>
                 </span>
-                <span class="row-sub">${esc(acc.subtitle || acc.grade)} · ${esc(acc.email || '—')} · Subjects: ${esc(
-              (acc.subjects || []).join(', ') || '—'
-            )}</span>
+                <span class="row-sub">${
+                  acc.role === 'parent'
+                    ? `${esc(describeParentChild(acc))} · ${esc(acc.email || '—')}`
+                    : `${esc(acc.subtitle || acc.grade)} · ${esc(acc.email || '—')} · Subjects: ${esc(
+                        (acc.subjects || []).join(', ') || '—'
+                      )}`
+                }</span>
               </div>
             </div>
             <div class="action-cluster">
@@ -1358,22 +1699,38 @@ function buildMyAccountStage(user) {
         </div>
       </div>
 
-      <div class="form-grid-2">
+      ${
+        user.role === 'parent'
+          ? `
         <div>
-          <label class="row-sub">Grade / Department</label>
-          <input class="field-input" name="grade" value="${esc(user.grade || '')}" />
+          <label class="row-sub">Profile Headline</label>
+          <input class="field-input" name="subtitle" value="${esc(user.subtitle || '')}" placeholder="e.g. Parent of Thabo Mokoena" />
         </div>
-        <div>
-          <label class="row-sub">Profile Headline / Stream</label>
-          <input class="field-input" name="subtitle" value="${esc(user.subtitle || '')}" />
+        ${renderParentChildPickerHTML({
+          selectedChildId: user.linked_student_id || '',
+          allowUnlisted: false,
+          label: 'My Child (Linked Student)'
+        })}
+      `
+          : `
+        <div class="form-grid-2">
+          <div>
+            <label class="row-sub">Grade / Department</label>
+            <input class="field-input" name="grade" value="${esc(user.grade || '')}" />
+          </div>
+          <div>
+            <label class="row-sub">Profile Headline / Stream</label>
+            <input class="field-input" name="subtitle" value="${esc(user.subtitle || '')}" />
+          </div>
         </div>
-      </div>
 
-      ${renderSubjectPickerBoxHTML({
-        currentSubjects: user.subjects || [],
-        inputName: 'subjectsRaw',
-        showAddBtn: isStaff(user)
-      })}
+        ${renderSubjectPickerBoxHTML({
+          currentSubjects: user.subjects || [],
+          inputName: 'subjectsRaw',
+          showAddBtn: isStaff(user)
+        })}
+      `
+      }
 
       <button class="dark-cta-btn" type="submit" style="align-self:flex-start;">${ICONS.check} Save Changes</button>
     </form>
@@ -4395,6 +4752,8 @@ function bindWorkspaceEvents(user) {
   });
 
   // --- ADMISSIONS & ACCOUNT EVENTS ---
+  bindParentChildPickerEvents(document);
+
   document.getElementById('role-filter-select')?.addEventListener('change', (e) => {
     ui.roleFilter = e.target.value;
     renderApp();
@@ -4406,10 +4765,12 @@ function bindWorkspaceEvents(user) {
       ui.showNewAccountForm = false;
       ui.stagedAccAvatar = null;
       ui.stagedAccAvatarAttachment = null;
+      ui.accFormDraft = null;
     } else {
       ui.showNewAccountForm = true;
       ui.stagedAccAvatar = null;
       ui.stagedAccAvatarAttachment = null;
+      ui.accFormDraft = null;
     }
     renderApp();
   });
@@ -4419,6 +4780,7 @@ function bindWorkspaceEvents(user) {
     ui.showNewAccountForm = false;
     ui.stagedAccAvatar = null;
     ui.stagedAccAvatarAttachment = null;
+    ui.accFormDraft = null;
     renderApp();
   });
 
@@ -4428,6 +4790,7 @@ function bindWorkspaceEvents(user) {
       ui.showNewAccountForm = false;
       ui.stagedAccAvatar = null;
       ui.stagedAccAvatarAttachment = null;
+      ui.accFormDraft = null;
       renderApp();
       window.scrollTo({ top: 0, behavior: 'smooth' });
     });
@@ -4462,30 +4825,95 @@ function bindWorkspaceEvents(user) {
 
   const upsertAccForm = document.getElementById('upsert-account-form');
   if (upsertAccForm) {
+    upsertAccForm.querySelector('select[name="role"]')?.addEventListener('change', () => {
+      const fd = new FormData(upsertAccForm);
+      const prev = ui.accFormDraft || {};
+      ui.accFormDraft = {
+        ...prev,
+        name: String(fd.get('name') ?? prev.name ?? ''),
+        role: String(fd.get('role') ?? 'student'),
+        email: String(fd.get('email') ?? prev.email ?? ''),
+        phone: String(fd.get('phone') ?? prev.phone ?? ''),
+        pin: String(fd.get('pin') ?? prev.pin ?? '1234'),
+        status: String(fd.get('status') ?? prev.status ?? 'active'),
+        grade: fd.has('grade') ? String(fd.get('grade') || '') : String(prev.grade || ''),
+        subtitle: String(fd.get('subtitle') ?? prev.subtitle ?? ''),
+        subjectsRaw: fd.has('subjectsRaw') ? String(fd.get('subjectsRaw') || '') : String(prev.subjectsRaw || ''),
+        selected_plan: fd.has('selected_plan')
+          ? String(fd.get('selected_plan') || '')
+          : String(prev.selected_plan || ''),
+        linked_student_id: fd.has('linked_student_id')
+          ? String(fd.get('linked_student_id') || '')
+          : String(prev.linked_student_id || ''),
+        child_unlisted_name: fd.has('child_unlisted_name')
+          ? String(fd.get('child_unlisted_name') || '')
+          : String(prev.child_unlisted_name || ''),
+        notes: String(fd.get('notes') ?? prev.notes ?? '')
+      };
+      renderApp({ preserveScroll: true });
+    });
+
     upsertAccForm.addEventListener('submit', async (e) => {
       e.preventDefault();
       const fd = new FormData(upsertAccForm);
       const existingId = fd.get('id');
       const prev = existingId ? (vaultState.profiles || []).find((p) => p.id === existingId) : null;
-      const subjects = String(fd.get('subjectsRaw') || '')
+      const role = String(fd.get('role') || 'student');
+      let subjects = String(fd.get('subjectsRaw') || '')
         .split(',')
-        .map((s) => s.trim())
+        .map((s) => normalizeSubjectLabel(s))
         .filter(Boolean);
+      let resolvedGrade = String(fd.get('grade') || prev?.grade || '').trim();
+      let resolvedPlan = String(fd.get('selected_plan') || prev?.selected_plan || '').trim();
+      let resolvedLinkedStudentId = String(prev?.linked_student_id || '');
+      let resolvedSubtitle = String(fd.get('subtitle') || '').trim();
+
+      if (role === 'parent') {
+        const pickedChildId = String(fd.get('linked_student_id') || '').trim();
+        const unlistedChild = String(fd.get('child_unlisted_name') || '').trim();
+        if (pickedChildId === '__unlisted__') {
+          resolvedLinkedStudentId = '';
+          resolvedGrade = 'Parent';
+          subjects = [];
+          resolvedPlan = unlistedChild ? `Child: ${unlistedChild}` : 'Linked to Child';
+          if (!resolvedSubtitle) {
+            resolvedSubtitle = unlistedChild ? `Parent of ${unlistedChild}` : 'Parent Account';
+          }
+        } else if (pickedChildId) {
+          const childProfile = (vaultState.profiles || []).find((p) => p.id === pickedChildId);
+          resolvedLinkedStudentId = pickedChildId;
+          resolvedGrade = childProfile?.grade || 'Parent';
+          subjects = Array.isArray(childProfile?.subjects) ? [...childProfile.subjects] : [];
+          resolvedPlan = childProfile?.selected_plan || 'Linked to Child';
+          if (!resolvedSubtitle) {
+            resolvedSubtitle = childProfile
+              ? `Parent of ${childProfile.name}${childProfile.grade ? ` (${childProfile.grade})` : ''}`
+              : 'Parent Account';
+          }
+        }
+      } else {
+        resolvedLinkedStudentId = '';
+        if (!resolvedSubtitle) {
+          resolvedSubtitle = `${resolvedGrade} · ${role}`;
+        }
+      }
+
       const resolvedAvatar =
         ui.stagedAccAvatar !== null ? ui.stagedAccAvatar : String(prev?.avatar || '');
       const profile = {
         ...(prev || {}),
         id: existingId || `acc-${Date.now()}`,
         name: fd.get('name'),
-        role: fd.get('role'),
+        role,
         email: fd.get('email'),
         phone: fd.get('phone'),
         pin: fd.get('pin') || '1234',
         status: fd.get('status') || 'active',
-        grade: fd.get('grade'),
-        subtitle: fd.get('subtitle') || `${fd.get('grade')} · ${fd.get('role')}`,
+        grade: resolvedGrade,
+        subtitle: resolvedSubtitle,
         subjects,
-        selected_plan: fd.get('selected_plan'),
+        selected_plan: resolvedPlan,
+        linked_student_id: resolvedLinkedStudentId,
         notes: fd.get('notes'),
         avatar: ui.stagedAccAvatarAttachment?.url || resolvedAvatar,
         ...(ui.stagedAccAvatarAttachment ? { avatarAttachment: ui.stagedAccAvatarAttachment } : {})
@@ -4494,6 +4922,7 @@ function bindWorkspaceEvents(user) {
       ui.showNewAccountForm = false;
       ui.stagedAccAvatar = null;
       ui.stagedAccAvatarAttachment = null;
+      ui.accFormDraft = null;
       await performActionAndSync('UPSERT_ACCOUNT', profile);
       if (profile.status === 'active') {
         await enrollAcceptedUserInRooms(profile);
@@ -4578,10 +5007,27 @@ function bindWorkspaceEvents(user) {
     myProfileForm.addEventListener('submit', (e) => {
       e.preventDefault();
       const fd = new FormData(myProfileForm);
-      const subjects = String(fd.get('subjectsRaw') || '')
+      let subjects = String(fd.get('subjectsRaw') || '')
         .split(',')
-        .map((s) => s.trim())
+        .map((s) => normalizeSubjectLabel(s))
         .filter(Boolean);
+      let nextGrade = fd.has('grade') ? String(fd.get('grade') || '') : String(user.grade || '');
+      let nextSubtitle = String(fd.get('subtitle') || '');
+      let nextLinkedStudentId = String(user.linked_student_id || '');
+
+      if (user.role === 'parent') {
+        const pickedChildId = String(fd.get('linked_student_id') || '').trim();
+        if (pickedChildId) {
+          const childProfile = (vaultState.profiles || []).find((p) => p.id === pickedChildId);
+          nextLinkedStudentId = pickedChildId;
+          nextGrade = childProfile?.grade || nextGrade;
+          subjects = Array.isArray(childProfile?.subjects) ? [...childProfile.subjects] : user.subjects || [];
+          if (!nextSubtitle && childProfile) {
+            nextSubtitle = `Parent of ${childProfile.name}${childProfile.grade ? ` (${childProfile.grade})` : ''}`;
+          }
+        }
+      }
+
       const nextAvatar =
         ui.stagedMyAvatarAttachment?.url ||
         (ui.stagedMyAvatar !== null ? ui.stagedMyAvatar : String(user.avatar || ''));
@@ -4596,9 +5042,10 @@ function bindWorkspaceEvents(user) {
           email: fd.get('email'),
           phone: fd.get('phone'),
           pin: fd.get('pin') || '1234',
-          grade: fd.get('grade'),
-          subtitle: fd.get('subtitle'),
+          grade: nextGrade,
+          subtitle: nextSubtitle,
           subjects,
+          linked_student_id: nextLinkedStudentId,
           avatar: nextAvatar,
           ...(avatarAtt ? { avatarAttachment: avatarAtt } : {})
         },
@@ -6458,7 +6905,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
     navigator.serviceWorker
-      .register('/sw.js?v=20', { updateViaCache: 'none' })
+      .register('/sw.js?v=21', { updateViaCache: 'none' })
       .then((reg) => reg.update().catch(() => {}))
       .catch(() => {});
   }
