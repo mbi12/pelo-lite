@@ -565,10 +565,15 @@ export function applyActionToVault(vault, action) {
       vault.messages = (vault.messages || []).filter((m) => m.room_id !== p.id);
       break;
     case 'SEND_MESSAGE':
-    case 'UPSERT_MESSAGE':
+    case 'UPSERT_MESSAGE': {
       vault.messages = vault.messages || [];
       upsertInArray(vault.messages, p, false);
+      if (action.type === 'SEND_MESSAGE' && p.sender_id) {
+        const senderProf = (vault.profiles || []).find((u) => u.id === p.sender_id);
+        if (senderProf) senderProf.last_seen_at = p.created_at || new Date().toISOString();
+      }
       break;
+    }
     case 'DELETE_MESSAGE':
       vault.messages = (vault.messages || []).filter((m) => m.id !== p.id);
       break;
@@ -665,11 +670,43 @@ async function flushQueuedBlobsInOutbox(outbox) {
 }
 
 let activeSyncPromise = null;
+let lastPresenceHeartbeatAt = 0;
+let lastPresenceHeartbeatUid = null;
 
-async function runSingleSyncPass({ simulateOffline = false } = {}) {
+export async function reportPresenceOffline(userId) {
+  const cleanId = String(userId || '').trim();
+  if (!cleanId || cleanId === 'visitor') return;
+  lastPresenceHeartbeatAt = 0;
+  lastPresenceHeartbeatUid = null;
+  try {
+    const payload = JSON.stringify({ userId: cleanId, offline: true });
+    if (typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
+      const blob = new Blob([payload], { type: 'application/json' });
+      navigator.sendBeacon('/api/presence', blob);
+      return;
+    }
+    await fetch('/api/presence', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: payload,
+      keepalive: true
+    });
+  } catch {
+    // Ignore network failure while going offline
+  }
+}
+
+async function runSingleSyncPass({ simulateOffline = false, forcePresence = false } = {}) {
   if (simulateOffline || (typeof navigator !== 'undefined' && navigator.onLine === false)) {
     return { status: 'offline', vault: loadVault(), pendingCount: loadOutbox().length };
   }
+
+  const session = loadSession();
+  const isVisible = typeof document === 'undefined' || !document.hidden;
+  const activeUid =
+    isVisible && session?.currentUserId && session.currentUserId !== 'visitor'
+      ? String(session.currentUserId).trim()
+      : '';
 
   const outboxBatch = loadOutbox();
   try {
@@ -677,15 +714,36 @@ async function runSingleSyncPass({ simulateOffline = false } = {}) {
       await flushQueuedBlobsInOutbox(outboxBatch);
     }
 
-    const res =
-      outboxBatch.length > 0
-        ? await fetch('/api/sync', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ actions: outboxBatch }),
-            cache: 'no-store'
-          })
-        : await fetch('/api/sync', { method: 'GET', cache: 'no-store' });
+    let res;
+    if (outboxBatch.length > 0) {
+      if (activeUid) {
+        lastPresenceHeartbeatAt = Date.now();
+        lastPresenceHeartbeatUid = activeUid;
+      }
+      res = await fetch('/api/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          actions: outboxBatch,
+          ...(activeUid ? { presenceUserId: activeUid } : {})
+        }),
+        cache: 'no-store'
+      });
+    } else {
+      const shouldSendHeartbeat =
+        Boolean(activeUid) &&
+        (forcePresence ||
+          lastPresenceHeartbeatUid !== activeUid ||
+          Date.now() - lastPresenceHeartbeatAt >= 20000);
+      if (shouldSendHeartbeat) {
+        lastPresenceHeartbeatAt = Date.now();
+        lastPresenceHeartbeatUid = activeUid;
+      }
+      const syncUrl = shouldSendHeartbeat
+        ? `/api/sync?uid=${encodeURIComponent(activeUid)}`
+        : '/api/sync';
+      res = await fetch(syncUrl, { method: 'GET', cache: 'no-store' });
+    }
 
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const remoteSnap = await res.json();

@@ -12,6 +12,7 @@ import {
   authenticateAccount,
   dispatchOfflineAction,
   syncWithServer,
+  reportPresenceOffline,
   uploadAndCacheMediaFile
 } from './offlineStore.js';
 import { openInAppMediaViewer, renderAttachmentGalleryHTML } from './mediaViewer.js';
@@ -176,20 +177,34 @@ function isAvatarImageUrl(val = '') {
   );
 }
 
-function renderAvatarHTML(profile, { size = 38, className = 'account-avatar-gold', overrideAvatar = null } = {}) {
+function renderAvatarHTML(
+  profile,
+  { size = 38, className = 'account-avatar-gold', overrideAvatar = null, showPresence = false } = {}
+) {
   const av = overrideAvatar !== null ? String(overrideAvatar || '') : String(profile?.avatar || '');
   const dim = `width:${size}px;height:${size}px;min-width:${size}px;`;
+  let core = '';
   if (isAvatarImageUrl(av)) {
-    return `<span class="${className} is-photo-avatar" style="${dim}"><img src="${esc(av)}" alt="${esc(
+    core = `<span class="${className} is-photo-avatar" style="${dim}"><img src="${esc(av)}" alt="${esc(
       profile?.name || 'Profile'
     )}" class="avatar-img-fill" /></span>`;
+  } else if (av) {
+    core = `<span class="${className} is-icon-avatar" style="${dim}font-size:${Math.round(
+      size * 0.52
+    )}px;">${esc(av)}</span>`;
+  } else {
+    core = `<span class="${className}" style="${dim}font-size:${Math.max(
+      11,
+      Math.round(size * 0.36)
+    )}px;">${esc(initials(profile?.name || 'IT'))}</span>`;
   }
-  if (av) {
-    return `<span class="${className} is-icon-avatar" style="${dim}font-size:${Math.round(size * 0.52)}px;">${esc(av)}</span>`;
+  if (!showPresence || !profile || profile.role === 'visitor') {
+    return core;
   }
-  return `<span class="${className}" style="${dim}font-size:${Math.max(11, Math.round(size * 0.36))}px;">${esc(
-    initials(profile?.name || 'IT')
-  )}</span>`;
+  const pres = getProfilePresence(profile);
+  return `<span class="avatar-presence-wrap" title="${esc(pres.label)}">${core}<span class="presence-dot ${
+    pres.isOnline ? 'is-online' : 'is-offline'
+  }"></span></span>`;
 }
 
 function renderAvatarPickerHTML({ profile, stagedAvatar, scope = 'self' }) {
@@ -829,17 +844,122 @@ function formatMessageTime(isoStr) {
   }
 }
 
-function getRoomDisplayMeta(room, currentUser) {
-  if (!room) return { title: 'Chat', subtitle: '', peerProfile: null };
-  if (room.room_type === 'group') {
+const ACTIVE_ONLINE_WINDOW_MS = 75 * 1000;
+
+function getProfilePresence(profile, currentUser = getActiveUser()) {
+  if (!profile || profile.role === 'visitor') {
+    return { isOnline: false, label: 'Offline', shortLabel: 'Offline', lastSeenMs: null };
+  }
+  if (currentUser && profile.id === currentUser.id) {
+    if (!isOfflineActive()) {
+      return { isOnline: true, label: 'Active now', shortLabel: 'Active now', lastSeenMs: Date.now() };
+    }
+    return { isOnline: false, label: 'Offline mode', shortLabel: 'Offline', lastSeenMs: null };
+  }
+
+  let seenMs = profile.last_seen_at ? Date.parse(profile.last_seen_at) : NaN;
+  const nowMs = Date.now();
+
+  const msgs = vaultState?.messages || [];
+  for (let i = msgs.length - 1; i >= 0; i -= 1) {
+    const m = msgs[i];
+    if (m.sender_id === profile.id && m.created_at) {
+      const mMs = Date.parse(m.created_at);
+      if (!Number.isNaN(mMs) && mMs <= nowMs + 60000) {
+        if (Number.isNaN(seenMs) || mMs > seenMs) {
+          seenMs = mMs;
+        }
+        break;
+      }
+    }
+  }
+
+  if (Number.isNaN(seenMs)) {
+    return { isOnline: false, label: 'Offline', shortLabel: 'Offline', lastSeenMs: null };
+  }
+
+  const diffMs = Math.max(0, nowMs - seenMs);
+  if (diffMs <= ACTIVE_ONLINE_WINDOW_MS) {
+    return { isOnline: true, label: 'Active now', shortLabel: 'Active now', lastSeenMs: seenMs };
+  }
+  if (diffMs < 60 * 60 * 1000) {
+    const mins = Math.max(1, Math.floor(diffMs / 60000));
+    return { isOnline: false, label: `Last seen ${mins}m ago`, shortLabel: `${mins}m ago`, lastSeenMs: seenMs };
+  }
+  if (diffMs < 24 * 60 * 60 * 1000) {
+    const hrs = Math.max(1, Math.floor(diffMs / 3600000));
+    return { isOnline: false, label: `Last seen ${hrs}h ago`, shortLabel: `${hrs}h ago`, lastSeenMs: seenMs };
+  }
+  if (diffMs < 7 * 24 * 60 * 60 * 1000) {
+    const days = Math.max(1, Math.floor(diffMs / 86400000));
     return {
-      title: room.name || 'Study Group',
-      subtitle: room.members_label || room.subject || 'Study Group',
-      peerProfile: null
+      isOnline: false,
+      label: days === 1 ? 'Last seen yesterday' : `Last seen ${days}d ago`,
+      shortLabel: `${days}d ago`,
+      lastSeenMs: seenMs
+    };
+  }
+  const dateLabel = new Date(seenMs).toLocaleDateString([], { day: 'numeric', month: 'short' });
+  return { isOnline: false, label: `Last seen ${dateLabel}`, shortLabel: dateLabel, lastSeenMs: seenMs };
+}
+
+function renderPresencePillHTML(profile, { compact = false } = {}) {
+  const pres = getProfilePresence(profile);
+  return `<span class="presence-pill ${pres.isOnline ? 'is-online' : ''}"><span class="presence-pill-dot"></span><span>${esc(
+    compact ? pres.shortLabel : pres.label
+  )}</span></span>`;
+}
+
+function getRoomDisplayMeta(room, currentUser) {
+  if (!room) {
+    return {
+      title: 'Chat',
+      subtitle: '',
+      peerProfile: null,
+      presence: { isOnline: false, label: 'Offline', shortLabel: 'Offline' }
     };
   }
 
   const allProfiles = vaultState.profiles || [];
+
+  if (room.room_type === 'group') {
+    const groupMembers = allProfiles.filter(
+      (p) =>
+        p.status === 'active' &&
+        p.role !== 'visitor' &&
+        ((room.participant_ids || []).includes(p.id) ||
+          (room.subject && (p.role === 'student' || p.role === 'teacher') && matchesUserSubject(p, room.subject)))
+    );
+    const onlinePeers = groupMembers.filter(
+      (m) => m.id !== currentUser?.id && getProfilePresence(m, currentUser).isOnline
+    );
+    const presence =
+      onlinePeers.length === 1
+        ? {
+            isOnline: true,
+            label: `${onlinePeers[0].name.split(' ')[0]} active now · ${groupMembers.length} members`,
+            shortLabel: '1 active now'
+          }
+        : onlinePeers.length > 1
+        ? {
+            isOnline: true,
+            label: `${onlinePeers.length} active now · ${groupMembers.length} members`,
+            shortLabel: `${onlinePeers.length} active now`
+          }
+        : {
+            isOnline: false,
+            label: `${groupMembers.length} members · ${room.subject || 'Study Group'}`,
+            shortLabel: `${groupMembers.length} members`
+          };
+
+    return {
+      title: room.name || 'Study Group',
+      subtitle: room.members_label || room.subject || 'Study Group',
+      peerProfile: null,
+      presence
+    };
+  }
+
   const otherIds = (room.participant_ids || []).filter((pid) => pid !== currentUser?.id);
   const nonAdminOthers = otherIds.filter((pid) => pid !== 'admin-itutor' && pid !== 'admin-1');
   const candidateIds = nonAdminOthers.length > 0 ? nonAdminOthers : otherIds;
@@ -851,10 +971,38 @@ function getRoomDisplayMeta(room, currentUser) {
     title = `${peerProfile.name} (${formatRoleLabel(peerProfile.role)})`;
   }
 
+  let presence = { isOnline: false, label: 'Offline', shortLabel: 'Offline' };
+  if (peerProfile) {
+    presence = getProfilePresence(peerProfile, currentUser);
+  } else if (otherIds.length > 0) {
+    const otherProfiles = otherIds.map((id) => allProfiles.find((p) => p.id === id)).filter(Boolean);
+    const onlinePeers = otherProfiles.filter((p) => getProfilePresence(p, currentUser).isOnline);
+    if (onlinePeers.length > 0) {
+      presence = {
+        isOnline: true,
+        label:
+          otherProfiles.length === 1
+            ? 'Active now'
+            : `${onlinePeers[0].name.split(' ')[0]} active now`,
+        shortLabel: 'Active now'
+      };
+    } else {
+      let bestPres = null;
+      for (const p of otherProfiles) {
+        const pr = getProfilePresence(p, currentUser);
+        if (pr.lastSeenMs && (!bestPres || pr.lastSeenMs > bestPres.lastSeenMs)) {
+          bestPres = pr;
+        }
+      }
+      if (bestPres) presence = bestPres;
+    }
+  }
+
   return {
     title,
     subtitle: room.members_label || room.subject || 'Direct Message',
-    peerProfile
+    peerProfile,
+    presence
   };
 }
 
@@ -881,7 +1029,7 @@ function getVaultSyncSignature(v) {
     rooms.length,
     rooms[0]?.id || '',
     profiles.length,
-    profiles.map((p) => `${p.id}:${p.status}`).join(','),
+    profiles.map((p) => `${p.id}:${p.status}:${p.last_seen_at || ''}`).join(','),
     asgs.length,
     subs.map((s) => `${s.id}:${s.status}:${s.marks_awarded ?? ''}`).join(','),
     att.length,
@@ -938,10 +1086,84 @@ function renderChatMessagesInnerHTML(roomMessages, user, superEdit) {
     .join('');
 }
 
+function renderRoomAvatarWithPresenceHTML(r, meta, size = 36) {
+  if (meta?.peerProfile) {
+    return renderAvatarHTML(meta.peerProfile, { size, showPresence: true });
+  }
+  const badge = `<div class="avatar-badge">${r.room_type === 'group' ? 'SG' : '1:1'}</div>`;
+  const pres = meta?.presence;
+  if (!pres) return badge;
+  return `<span class="avatar-presence-wrap" title="${esc(pres.label)}">${badge}<span class="presence-dot ${
+    pres.isOnline ? 'is-online' : 'is-offline'
+  }"></span></span>`;
+}
+
+function renderRoomListButtonsHTML(rooms, activeRoom, user) {
+  return rooms
+    .map((r) => {
+      const meta = getRoomDisplayMeta(r, user);
+      const rMsgs = (vaultState.messages || []).filter((m) => m.room_id === r.id);
+      const lastMsg = rMsgs[rMsgs.length - 1];
+      const lastTime = lastMsg ? formatMessageTime(lastMsg.created_at) : '';
+      const previewLine = lastMsg
+        ? `${lastMsg.sender_id === user.id ? 'You: ' : `${lastMsg.sender_name.split(' ')[0]}: `}${
+            lastMsg.body || (lastMsg.attachments?.length ? '📎 Attachment' : '')
+          }`
+        : meta.presence?.label && meta.presence.label !== 'Offline'
+        ? `${meta.presence.label} · ${meta.subtitle}`
+        : meta.subtitle;
+
+      return `
+        <button type="button" class="room-btn ${
+          activeRoom && activeRoom.id === r.id ? 'is-active' : ''
+        }" data-room-id="${esc(r.id)}">
+          ${renderRoomAvatarWithPresenceHTML(r, meta, 36)}
+          <div style="min-width:0;flex:1;">
+            <div style="display:flex;align-items:baseline;justify-content:space-between;gap:0.35rem;">
+              <div class="row-title" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(
+                meta.title
+              )}</div>
+              ${lastTime ? `<span class="msg-time">${esc(lastTime)}</span>` : ''}
+            </div>
+            <div class="row-sub" style="display:flex;align-items:center;gap:0.32rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+              ${
+                meta.presence?.isOnline
+                  ? `<span class="presence-pill is-online" style="font-size:0.7rem;"><span class="presence-pill-dot"></span><span>${esc(
+                      meta.presence.shortLabel
+                    )}</span></span>${lastMsg ? `<span>· ${esc(previewLine)}</span>` : ''}`
+                  : `<span style="overflow:hidden;text-overflow:ellipsis;">${esc(previewLine)}</span>`
+              }
+            </div>
+          </div>
+        </button>
+      `;
+    })
+    .join('');
+}
+
+function renderActiveRoomHeaderSubtitleHTML(activeRoom, activeMeta) {
+  const pres = activeMeta?.presence || { isOnline: false, label: 'Offline' };
+  const subtitle = activeMeta ? activeMeta.subtitle : activeRoom?.members_label || activeRoom?.subject || '';
+  return `
+    <span class="presence-pill ${pres.isOnline ? 'is-online' : ''}">
+      <span class="presence-pill-dot"></span>
+      <span>${esc(pres.label)}</span>
+    </span>
+    ${
+      subtitle
+        ? `<span class="row-sub" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">· ${esc(
+            subtitle
+          )}</span>`
+        : ''
+    }
+  `;
+}
+
 function updateActiveViewWithoutDroppingInput() {
   const activeEl = document.activeElement;
   if (ui.view === 'messages' && activeEl && activeEl.id === 'chat-text-input' && !ui.editingMessageId) {
     const user = getActiveUser();
+    const rooms = user ? getVisibleRooms(user) : [];
     const activeRoom = user ? getActiveRoom(user) : null;
     const scrollEl = document.getElementById('chat-messages-scroll');
     if (user && activeRoom && scrollEl) {
@@ -949,6 +1171,28 @@ function updateActiveViewWithoutDroppingInput() {
       scrollEl.innerHTML = renderChatMessagesInnerHTML(roomMessages, user, canEditEverything(user));
       scrollChatToBottom();
       bindChatBubbleEventsOnly();
+
+      const activeMeta = getRoomDisplayMeta(activeRoom, user);
+      const headerPresEl = document.getElementById('chat-header-presence');
+      if (headerPresEl) {
+        headerPresEl.innerHTML = renderActiveRoomHeaderSubtitleHTML(activeRoom, activeMeta);
+      }
+      const headerAvatarEl = document.getElementById('chat-header-avatar-slot');
+      if (headerAvatarEl) {
+        headerAvatarEl.innerHTML = renderRoomAvatarWithPresenceHTML(activeRoom, activeMeta, 36);
+      }
+      const roomListContainer = document.getElementById('chat-room-list-items');
+      if (roomListContainer && rooms.length) {
+        roomListContainer.innerHTML = renderRoomListButtonsHTML(rooms, activeRoom, user);
+        roomListContainer.querySelectorAll('[data-room-id]').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            ui.selectedRoomId = btn.getAttribute('data-room-id');
+            ui.mobileChatThreadOpen = true;
+            ui.editingMessageId = null;
+            renderApp();
+          });
+        });
+      }
       return;
     }
   }
@@ -1354,6 +1598,7 @@ function renderAuthPortal(rootEl, { animateCard = true } = {}) {
       const id = btn.getAttribute('data-quick-login');
       const target = (vaultState.profiles || []).find((p) => p.id === id);
       if (target) {
+        target.last_seen_at = new Date().toISOString();
         sessionState.currentUserId = target.id;
         saveSession(sessionState);
         ui.showAuthPortal = false;
@@ -1363,6 +1608,16 @@ function renderAuthPortal(rootEl, { animateCard = true } = {}) {
         ui.view = getDefaultLandingView(target);
         renderApp({ preserveScroll: false });
         showToast(`Signed in as ${target.name} (${target.role.toUpperCase()})`);
+        if (!isOfflineActive()) {
+          syncWithServer({ simulateOffline: false, forcePresence: true })
+            .then((syncRes) => {
+              if (syncRes.vault) {
+                vaultState = syncRes.vault;
+                updateActiveViewWithoutDroppingInput();
+              }
+            })
+            .catch(() => {});
+        }
       }
     });
   });
@@ -1394,6 +1649,7 @@ function renderAuthPortal(rootEl, { animateCard = true } = {}) {
         return;
       }
 
+      res.profile.last_seen_at = new Date().toISOString();
       sessionState.currentUserId = res.profile.id;
       saveSession(sessionState);
       ui.showAuthPortal = false;
@@ -1405,11 +1661,11 @@ function renderAuthPortal(rootEl, { animateCard = true } = {}) {
       showToast(`Welcome back, ${res.profile.name}!`);
 
       if (!isOfflineActive()) {
-        syncWithServer({ simulateOffline: false })
+        syncWithServer({ simulateOffline: false, forcePresence: true })
           .then((syncRes) => {
             if (syncRes.vault) {
               vaultState = syncRes.vault;
-              renderApp({ preserveScroll: true });
+              updateActiveViewWithoutDroppingInput();
             }
           })
           .catch(() => {});
@@ -1822,12 +2078,13 @@ function buildAdmissionsStage(user) {
             (acc) => `
           <div class="list-row">
             <div class="list-row-lead">
-              ${renderAvatarHTML(acc, { size: 38 })}
+              ${renderAvatarHTML(acc, { size: 38, showPresence: acc.status === 'active' })}
               <div class="list-row-col">
                 <span class="row-title">
                   <span>${esc(acc.name)}</span>
                   <span class="muted-pill">${esc(formatRoleLabel(acc.role))}</span>
                   <span class="status-chip ${esc(acc.status || 'active')}">${esc(acc.status || 'active')}</span>
+                  ${acc.status === 'active' ? renderPresencePillHTML(acc, { compact: true }) : ''}
                 </span>
                 <span class="row-sub">${
                   acc.role === 'parent'
@@ -3793,6 +4050,13 @@ function buildMessagesStage(user) {
     .filter(Boolean)
     .join(' ');
 
+  const formatRecipientPresenceSuffix = (person) => {
+    const pr = getProfilePresence(person, user);
+    if (pr.isOnline) return ' · ● Active now';
+    if (pr.lastSeenMs) return ` · ${pr.label}`;
+    return '';
+  };
+
   const renderDirectRecipientOptions = () => {
     if (!staffMember) {
       return directRecipients
@@ -3804,7 +4068,7 @@ function buildMessagesStage(user) {
                 : st.role === 'admissions'
                 ? 'Admissions'
                 : 'Academy Admin'
-            )}</option>`
+            )}${esc(formatRecipientPresenceSuffix(st))}</option>`
         )
         .join('');
     }
@@ -3821,7 +4085,7 @@ function buildMessagesStage(user) {
                 (s) =>
                   `<option value="${esc(s.id)}">${esc(s.name)} — Student (${esc(
                     s.grade || (s.subjects || []).join(', ') || 'Enrolled'
-                  )})</option>`
+                  )})${esc(formatRecipientPresenceSuffix(s))}</option>`
               )
               .join('')}</optgroup>`
           : ''
@@ -3833,7 +4097,7 @@ function buildMessagesStage(user) {
                 const linked = getParentLinkedChild(p);
                 return `<option value="${esc(p.id)}">${esc(p.name)} — Parent${
                   linked ? ` of ${esc(linked.name)}` : ''
-                }</option>`;
+                }${esc(formatRecipientPresenceSuffix(p))}</option>`;
               })
               .join('')}</optgroup>`
           : ''
@@ -3845,7 +4109,7 @@ function buildMessagesStage(user) {
                 (t) =>
                   `<option value="${esc(t.id)}">${esc(t.name)} — ${esc(formatRoleLabel(t.role))}${
                     (t.subjects || []).length ? ` (${esc(t.subjects.join(', '))})` : ''
-                  }</option>`
+                  }${esc(formatRecipientPresenceSuffix(t))}</option>`
               )
               .join('')}</optgroup>`
           : ''
@@ -3975,42 +4239,11 @@ function buildMessagesStage(user) {
         }</span>
         ${
           rooms.length
-            ? rooms
-                .map((r) => {
-                  const meta = getRoomDisplayMeta(r, user);
-                  const rMsgs = (vaultState.messages || []).filter((m) => m.room_id === r.id);
-                  const lastMsg = rMsgs[rMsgs.length - 1];
-                  const lastTime = lastMsg ? formatMessageTime(lastMsg.created_at) : '';
-                  const previewLine = lastMsg
-                    ? `${lastMsg.sender_id === user.id ? 'You: ' : `${lastMsg.sender_name.split(' ')[0]}: `}${
-                        lastMsg.body || (lastMsg.attachments?.length ? '📎 Attachment' : '')
-                      }`
-                    : meta.subtitle;
-
-                  return `
-                <button type="button" class="room-btn ${
-                  activeRoom && activeRoom.id === r.id ? 'is-active' : ''
-                }" data-room-id="${esc(r.id)}">
-                  ${
-                    meta.peerProfile
-                      ? renderAvatarHTML(meta.peerProfile, { size: 36 })
-                      : `<div class="avatar-badge">${r.room_type === 'group' ? 'SG' : '1:1'}</div>`
-                  }
-                  <div style="min-width:0;flex:1;">
-                    <div style="display:flex;align-items:baseline;justify-content:space-between;gap:0.35rem;">
-                      <div class="row-title" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(
-                        meta.title
-                      )}</div>
-                      ${lastTime ? `<span class="msg-time">${esc(lastTime)}</span>` : ''}
-                    </div>
-                    <div class="row-sub" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(
-                      previewLine
-                    )}</div>
-                  </div>
-                </button>
-              `;
-                })
-                .join('')
+            ? `<div id="chat-room-list-items" style="display:flex;flex-direction:column;gap:0.38rem;">${renderRoomListButtonsHTML(
+                rooms,
+                activeRoom,
+                user
+              )}</div>`
             : `
           <div class="worksheet-box" style="text-align:center;">
             <p class="row-sub" style="margin-bottom:0.5rem;">No conversations open yet.</p>
@@ -4031,18 +4264,16 @@ function buildMessagesStage(user) {
                   ? `<button type="button" class="mobile-chat-back-btn" id="mobile-chat-back-btn" aria-label="Back to chats">← Chats</button>`
                   : ''
               }
-              ${
-                activeMeta?.peerProfile
-                  ? renderAvatarHTML(activeMeta.peerProfile, { size: 36 })
-                  : `<div class="avatar-badge">${activeRoom.room_type === 'group' ? 'SG' : '1:1'}</div>`
-              }
-              <div style="min-width:0;">
+              <span id="chat-header-avatar-slot" style="display:inline-flex;flex-shrink:0;">
+                ${renderRoomAvatarWithPresenceHTML(activeRoom, activeMeta, 36)}
+              </span>
+              <div style="min-width:0;flex:1;">
                 <h2 class="panel-title" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(
                   activeMeta ? activeMeta.title : activeRoom.name
                 )}</h2>
-                <span class="row-sub" style="display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(
-                  activeMeta ? activeMeta.subtitle : activeRoom.members_label || activeRoom.subject
-                )}</span>
+                <div id="chat-header-presence" style="display:flex;align-items:center;gap:0.35rem;min-width:0;overflow:hidden;">
+                  ${renderActiveRoomHeaderSubtitleHTML(activeRoom, activeMeta)}
+                </div>
               </div>
             </div>
             ${
@@ -5133,6 +5364,14 @@ function renderApp(opts = {}) {
 }
 
 function signOutToPortal(defaultTab = 'signin') {
+  const prevUid = sessionState.currentUserId;
+  if (prevUid && prevUid !== 'visitor') {
+    const prevProfile = (vaultState.profiles || []).find((p) => p.id === prevUid);
+    if (prevProfile) {
+      prevProfile.last_seen_at = new Date(Date.now() - 120000).toISOString();
+    }
+    reportPresenceOffline(prevUid);
+  }
   sessionState.currentUserId = null;
   saveSession(sessionState);
   ui.showAuthPortal = true;
@@ -7882,18 +8121,51 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
     navigator.serviceWorker
-      .register('/sw.js?v=23', { updateViaCache: 'none' })
+      .register('/sw.js?v=24', { updateViaCache: 'none' })
       .then((reg) => reg.update().catch(() => {}))
       .catch(() => {});
   }
 
-  const runLiveBackgroundSync = async () => {
+  const refreshPresenceBadgesInPlace = () => {
+    if (ui.showAuthPortal || ui.view !== 'messages' || document.hidden) return;
+    const user = getActiveUser();
+    if (!user || user.role === 'visitor') return;
+    const rooms = getVisibleRooms(user);
+    const activeRoom = getActiveRoom(user);
+    if (!activeRoom) return;
+    const activeMeta = getRoomDisplayMeta(activeRoom, user);
+    const headerPresEl = document.getElementById('chat-header-presence');
+    if (headerPresEl) {
+      headerPresEl.innerHTML = renderActiveRoomHeaderSubtitleHTML(activeRoom, activeMeta);
+    }
+    const headerAvatarEl = document.getElementById('chat-header-avatar-slot');
+    if (headerAvatarEl) {
+      headerAvatarEl.innerHTML = renderRoomAvatarWithPresenceHTML(activeRoom, activeMeta, 36);
+    }
+    const roomListContainer = document.getElementById('chat-room-list-items');
+    if (roomListContainer && rooms.length) {
+      roomListContainer.innerHTML = renderRoomListButtonsHTML(rooms, activeRoom, user);
+      roomListContainer.querySelectorAll('[data-room-id]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          ui.selectedRoomId = btn.getAttribute('data-room-id');
+          ui.mobileChatThreadOpen = true;
+          ui.editingMessageId = null;
+          renderApp();
+        });
+      });
+    }
+  };
+
+  const runLiveBackgroundSync = async (forcePresence = false) => {
     if (isOfflineActive() || document.hidden || document.getElementById('splash-screen')) return;
     const prevSig = getVaultSyncSignature(vaultState);
-    const res = await syncWithServer({ simulateOffline: false });
+    const res = await syncWithServer({ simulateOffline: false, forcePresence });
     if (!res.vault) return;
     const nextSig = getVaultSyncSignature(res.vault);
-    if (nextSig === prevSig) return;
+    if (nextSig === prevSig) {
+      refreshPresenceBadgesInPlace();
+      return;
+    }
 
     vaultState = res.vault;
     if (ui.showAuthPortal) return;
@@ -7907,19 +8179,21 @@ document.addEventListener('DOMContentLoaded', () => {
       updateActiveViewWithoutDroppingInput();
     } else if (!isTypingInField && !activeFloatingPopover && !ui.editingMessageId) {
       renderApp({ preserveScroll: true });
+    } else {
+      refreshPresenceBadgesInPlace();
     }
   };
 
   window.addEventListener('online', () => {
-    runLiveBackgroundSync();
+    runLiveBackgroundSync(true);
   });
 
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) runLiveBackgroundSync();
+    if (!document.hidden) runLiveBackgroundSync(true);
   });
 
   window.addEventListener('focus', () => {
-    runLiveBackgroundSync();
+    runLiveBackgroundSync(false);
   });
 
   // Poll every 4.5s while in Messages for near-instant multi-device chat, or every 18s elsewhere

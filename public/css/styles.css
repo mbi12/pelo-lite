@@ -4120,9 +4120,64 @@ select.is-itutor-upgraded {
   text-overflow: ellipsis;
 }
 
+/* ==========================================================================
+   LIVE ACTIVE PRESENCE DOTS & STATUS PILLS (CHATS & ACCOUNTS)
+   ========================================================================== */
 
+.avatar-presence-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
 
+.presence-dot {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 11px;
+  height: 11px;
+  border-radius: 999px;
+  border: 2px solid var(--surface-ivory);
+  background: #aba396;
+  pointer-events: none;
+  transition: background-color 0.2s ease, box-shadow 0.2s ease;
+}
 
+.presence-dot.is-online {
+  background: #16a34a;
+  box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.2);
+}
 
+.presence-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.34rem;
+  font-size: 0.74rem;
+  font-weight: 750;
+  color: var(--charcoal-muted);
+  line-height: 1.25;
+  white-space: nowrap;
+}
 
+.presence-pill-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #aba396;
+  flex-shrink: 0;
+}
 
+.presence-pill.is-online {
+  color: #15803d;
+}
+
+[data-theme='night'] .presence-pill.is-online {
+  color: #4ade80;
+}
+
+.presence-pill.is-online .presence-pill-dot {
+  background: #16a34a;
+  box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.2);
+}

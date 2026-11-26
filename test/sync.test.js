@@ -363,6 +363,24 @@ test('i-tutor v5: accounts, admissions, homework & chat media uploads (PDF/Photo
     });
     assert.ok(clonedVault.messages.some((m) => m.id === 'msg-inflight-1'));
 
+    // Verify live presence heartbeat (?uid=...) & explicit sign-out (/api/presence offline:true)
+    const resPresenceOn = await fetch(`${baseUrl}/api/sync?uid=tch-naledi`);
+    assert.equal(resPresenceOn.status, 200);
+    const snapPresOn = await resPresenceOn.json();
+    const nalediOn = snapPresOn.profiles.find((p) => p.id === 'tch-naledi');
+    assert.ok(nalediOn && nalediOn.last_seen_at);
+    assert.ok(Date.now() - Date.parse(nalediOn.last_seen_at) < 15000);
+
+    const resPresenceOff = await fetch(`${baseUrl}/api/presence`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: 'tch-naledi', offline: true })
+    });
+    assert.equal(resPresenceOff.status, 200);
+    const snapPresOff = await (await fetch(`${baseUrl}/api/sync`)).json();
+    const nalediOff = snapPresOff.profiles.find((p) => p.id === 'tch-naledi');
+    assert.ok(nalediOff && Date.now() - Date.parse(nalediOff.last_seen_at) >= 100000);
+
     // 6. Clean up temporary test entities
     await fetch(`${baseUrl}/api/sync`, {
       method: 'POST',

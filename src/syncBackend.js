@@ -112,6 +112,45 @@ function upsertInArray(arr, item, prepend = false) {
   }
 }
 
+const lastPresenceWriteByUser = new Map();
+
+export async function touchUserPresence(userId, { markOffline = false, force = false } = {}) {
+  const cleanId = String(userId || '').trim();
+  if (!cleanId || cleanId === 'visitor') return false;
+
+  const nowMs = Date.now();
+  const prevMs = lastPresenceWriteByUser.get(cleanId) || 0;
+  if (!force && !markOffline && nowMs - prevMs < 18000) {
+    return false;
+  }
+  lastPresenceWriteByUser.set(cleanId, nowMs);
+
+  const stamp = markOffline ? new Date(nowMs - 120000).toISOString() : new Date(nowMs).toISOString();
+  const mode = await detectMode();
+
+  if (mode === 'supabase') {
+    try {
+      await sbFetch(`itutor_v2_profiles?id=eq.${encodeURIComponent(cleanId)}`, {
+        method: 'PATCH',
+        prefer: 'return=minimal',
+        body: { last_seen_at: stamp }
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  const db = readLocalDb();
+  const prof = (db.profiles || []).find((p) => p.id === cleanId);
+  if (prof) {
+    prof.last_seen_at = stamp;
+    writeLocalDb(db);
+    return true;
+  }
+  return false;
+}
+
 export async function getFullSnapshot() {
   const mode = await detectMode();
   const fallback = createDefaultSnapshot();
@@ -221,7 +260,8 @@ export async function applyOutboxActions(actions = []) {
               linked_student_id: p.linked_student_id || '',
               notes: p.notes || '',
               avatar: p.avatar || '',
-              subject_notes: p.subject_notes && typeof p.subject_notes === 'object' ? p.subject_notes : {}
+              subject_notes: p.subject_notes && typeof p.subject_notes === 'object' ? p.subject_notes : {},
+              ...(p.last_seen_at ? { last_seen_at: p.last_seen_at } : {})
             }
           });
           break;
@@ -520,6 +560,9 @@ export async function applyOutboxActions(actions = []) {
               body: { updated_at: new Date().toISOString() }
             });
           }
+          if (act.type === 'SEND_MESSAGE' && p.sender_id) {
+            await touchUserPresence(p.sender_id, { force: true });
+          }
           break;
         }
 
@@ -699,9 +742,14 @@ export async function applyOutboxActions(actions = []) {
         db.messages = db.messages.filter((m) => m.room_id !== p.id);
         break;
       case 'SEND_MESSAGE':
-      case 'UPSERT_MESSAGE':
+      case 'UPSERT_MESSAGE': {
         upsertInArray(db.messages, p, false);
+        if (act.type === 'SEND_MESSAGE' && p.sender_id) {
+          const senderProf = (db.profiles || []).find((u) => u.id === p.sender_id);
+          if (senderProf) senderProf.last_seen_at = p.created_at || new Date().toISOString();
+        }
         break;
+      }
       case 'DELETE_MESSAGE':
         db.messages = db.messages.filter((m) => m.id !== p.id);
         break;

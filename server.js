@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import {
   getFullSnapshot,
   applyOutboxActions,
+  touchUserPresence,
   createSignedUploadTarget,
   uploadBinaryMedia,
   readLocalUploadedMedia
@@ -62,8 +63,25 @@ export function createApp() {
     res.json({ ok: true, backend: snap.backend, syncedAt: snap.syncedAt });
   });
 
-  app.get('/api/sync', async (_req, res) => {
+  app.post('/api/presence', async (req, res) => {
     try {
+      const userId = String(req.body?.userId || '').trim();
+      const offline = Boolean(req.body?.offline);
+      if (userId) {
+        await touchUserPresence(userId, { markOffline: offline, force: true });
+      }
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message || 'Presence update failed' });
+    }
+  });
+
+  app.get('/api/sync', async (req, res) => {
+    try {
+      const uid = String(req.query.uid || '').trim();
+      if (uid) {
+        await touchUserPresence(uid, { markOffline: req.query.offline === '1' });
+      }
       const snapshot = await getFullSnapshot();
       res.json(snapshot);
     } catch (err) {
@@ -74,6 +92,10 @@ export function createApp() {
   app.post('/api/sync', async (req, res) => {
     try {
       const actions = Array.isArray(req.body?.actions) ? req.body.actions : [];
+      const presenceUid = String(req.body?.presenceUserId || '').trim();
+      if (presenceUid) {
+        await touchUserPresence(presenceUid, { force: true });
+      }
       const snapshot = await applyOutboxActions(actions);
       res.json(snapshot);
     } catch (err) {
