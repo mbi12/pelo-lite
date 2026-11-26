@@ -387,10 +387,7 @@ function runAnimatedSplash(rootEl, onDone) {
 
 function renderAuthPortal(rootEl, { animateCard = true } = {}) {
   const plans = vaultState.tuitionInfo?.plans || [];
-  const pendingTotal = getPendingAdmissionsCount();
   const quickAccounts = [
-    { id: 'admin-1', tag: 'Super Admin', label: 'Kgomotso Dlamini' },
-    { id: 'adm-lerato', tag: `Admissions (${pendingTotal} Pending)`, label: 'Lerato Sithole' },
     { id: 'stu-thabo', tag: 'Student · Grade 12', label: 'Thabo Mokoena' },
     { id: 'tch-naledi', tag: 'Teacher · Maths', label: 'Ms. Naledi Khumalo' },
     { id: 'par-grace', tag: 'Parent Account', label: 'Mrs. Grace Mokoena' }
@@ -455,16 +452,16 @@ function renderAuthPortal(rootEl, { animateCard = true } = {}) {
               ? `
             <form class="form-stack animated-drop" id="account-signin-form">
               <label style="font-size:0.79rem;font-weight:750;">Email, Phone Number, or Full Name</label>
-              <input class="field-input" name="identifier" placeholder="e.g. admin@i-tutor.academy" required />
-              <label style="font-size:0.79rem;font-weight:750;">Password / Account PIN</label>
-              <input class="field-input" type="password" name="pin" placeholder="Enter PIN (Demo PIN: 1234)" required />
+              <input class="field-input" name="identifier" placeholder="e.g. itutor@gmail.com" required />
+              <label style="font-size:0.79rem;font-weight:750;">Password</label>
+              <input class="field-input" type="password" name="pin" placeholder="Enter your password" required />
               <button class="dark-cta-btn" type="submit" style="padding:0.72rem;width:100%;">Sign In →</button>
             </form>
 
             <details class="quiet-disclosure" id="demo-accounts-disclosure" ${ui.demoAccountsOpen ? 'open' : ''}>
               <summary class="quiet-disclosure-summary">
-                <span>Quick Demo Sign-In (Admin, Student, Teacher, Parent)</span>
-                <span class="muted-pill">5 Roles</span>
+                <span>Sample Preview Accounts (Student, Teacher, Parent)</span>
+                <span class="muted-pill">3 Roles</span>
               </summary>
               <div class="demo-accounts-grid" style="margin-top:0.65rem;">
                 ${quickAccounts

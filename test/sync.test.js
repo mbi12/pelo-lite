@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { createApp } from '../server.js';
+import { authenticateAccount } from '../public/js/offlineStore.js';
 
 test('i-tutor v5: accounts, admissions, homework & chat media uploads (PDF/Photo/Video), and built-in viewer assets', async () => {
   const app = createApp();
@@ -51,6 +52,11 @@ test('i-tutor v5: accounts, admissions, homework & chat media uploads (PDF/Photo
     const snap1 = await res1.json();
     assert.ok(snap1.profiles.some((p) => p.role === 'admissions'));
     assert.ok(snap1.profiles.some((p) => p.role === 'admin'));
+    const adminAuth = authenticateAccount(snap1, 'itutor@gmail.com', 'vinny@123');
+    assert.equal(adminAuth.ok, true);
+    assert.equal(adminAuth.profile.role, 'admin');
+    const badAuth = authenticateAccount(snap1, 'itutor@gmail.com', 'wrong-pass');
+    assert.equal(badAuth.ok, false);
     assert.ok(snap1.assignments.length >= 3);
     assert.equal(snap1.tuitionInfo.registration_fee, 'P100');
     assert.ok(snap1.tuitionInfo.contacts.address.includes('Francistown, Minestone Plot No. 1589'));

@@ -5,7 +5,7 @@ import { createDefaultSnapshot } from '../public/js/defaultSeed.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const LOCAL_DB_PATH = path.join(__dirname, '..', 'data', 'itutor-v3-local.json');
+const LOCAL_DB_PATH = path.join(__dirname, '..', 'data', 'itutor-v4-local.json');
 
 let resolvedMode = null; // 'supabase' | 'local'
 

@@ -12,6 +12,21 @@ export function createDefaultSnapshot() {
   return {
     profiles: [
       {
+        id: 'admin-itutor',
+        name: 'i-tutor Admin',
+        role: 'admin',
+        subtitle: 'Principal & Super Admin',
+        grade: 'All Levels',
+        pin: 'vinny@123',
+        email: 'itutor@gmail.com',
+        phone: '77 329 788',
+        status: 'active',
+        subjects: ['All Subjects'],
+        selected_plan: 'Executive Admin',
+        linked_student_id: '',
+        notes: 'Primary i-tutor Owner & Super Admin account.'
+      },
+      {
         id: 'stu-thabo',
         name: 'Thabo Mokoena',
         role: 'student',

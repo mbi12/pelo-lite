@@ -1,8 +1,8 @@
 import { createDefaultSnapshot, SUBJECT_LIST } from './defaultSeed.js';
 
-const VAULT_KEY = 'itutor_offline_vault_v6';
+const VAULT_KEY = 'itutor_offline_vault_v7';
 const PERSONAL_KEY = 'itutor_personal_study_v4';
-const OUTBOX_KEY = 'itutor_offline_outbox_v6';
+const OUTBOX_KEY = 'itutor_offline_outbox_v7';
 const SESSION_KEY = 'itutor_session_v4';
 
 const IDB_NAME = 'itutor_media_idb_v1';
@@ -436,7 +436,7 @@ export function authenticateAccount(vault, identifier, secret) {
   const cleanPin = String(secret || '').trim();
   if (!cleanId) return { ok: false, error: 'Please enter your email, phone, name, or account ID.' };
 
-  const match = (vault.profiles || []).find((p) => {
+  const candidates = (vault.profiles || []).filter((p) => {
     return (
       (p.id || '').toLowerCase() === cleanId ||
       (p.email || '').toLowerCase() === cleanId ||
@@ -445,12 +445,14 @@ export function authenticateAccount(vault, identifier, secret) {
     );
   });
 
-  if (!match) {
+  if (!candidates.length) {
     return { ok: false, error: 'Account not found. Check your email/name or Apply to Join first.' };
   }
 
+  const match = candidates.find((p) => String(p.pin || '1234') === cleanPin) || candidates[0];
+
   if (String(match.pin || '1234') !== cleanPin) {
-    return { ok: false, error: 'Incorrect password / PIN. (Demo accounts use PIN: 1234)' };
+    return { ok: false, error: 'Incorrect password. Please check your password and try again.' };
   }
 
   if (match.status === 'pending') {

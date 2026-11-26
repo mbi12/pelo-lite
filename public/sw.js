@@ -1,4 +1,4 @@
-const CACHE_NAME = 'itutor-standalone-v14';
+const CACHE_NAME = 'itutor-standalone-v15';
 const OFFLINE_ASSETS = [
   '/',
   '/index.html',
