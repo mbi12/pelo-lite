@@ -36,11 +36,12 @@ const VISITOR_PROFILE = {
 };
 
 const ui = {
+  showAuthPortal: false,
   authTab: 'signin', // signin | join
   authError: '',
   authSuccess: '',
   demoAccountsOpen: false,
-  view: 'overview', // overview | admissions | timetable | assignments | toolkit | messages | broadcasts | tuition | account
+  view: 'tuition', // tuition (default on app open!) | overview | admissions | timetable | assignments | toolkit | messages | broadcasts | account
   searchQuery: '',
   roleFilter: 'all',
 
@@ -149,10 +150,10 @@ function renderMoreMenu(itemsHtml) {
 }
 
 function getActiveUser() {
-  if (!sessionState.currentUserId) return null;
-  if (sessionState.currentUserId === 'visitor') return VISITOR_PROFILE;
+  if (ui.showAuthPortal) return null;
+  if (!sessionState.currentUserId || sessionState.currentUserId === 'visitor') return VISITOR_PROFILE;
   const found = (vaultState.profiles || []).find((p) => p.id === sessionState.currentUserId);
-  if (!found || found.status === 'suspended' || found.status === 'declined') return null;
+  if (!found || found.status === 'suspended' || found.status === 'declined') return VISITOR_PROFILE;
   return found;
 }
 
@@ -416,12 +417,12 @@ function renderAuthPortal(rootEl, { animateCard = true } = {}) {
           </p>
 
           <div class="auth-visitor-box">
-            <span class="auth-visitor-kicker">Exploring Tuition & Flyers?</span>
+            <span class="auth-visitor-kicker">Official Botswana Pula Prices</span>
             <p class="auth-visitor-copy">
-              View official Botswana Pula rates (Breakthrough Std 4–6, JCE, BGCSE / IGCSE + P100 registration), browse flyers, and contact us in Francistown.
+              Return anytime to view Breakthrough Std 4–6 (P500), JCE (from P200), BGCSE / IGCSE (P750 Best 6) + P100 Registration & Flyers.
             </p>
             <button class="gold-cta-btn auth-visitor-btn" id="btn-enter-visitor">
-              ${ICONS.tuition} <span>Flyers, Prices & Contacts</span>
+              ${ICONS.tuition} <span>← Back to Prices & Flyers</span>
             </button>
           </div>
         </section>
@@ -538,6 +539,7 @@ function renderAuthPortal(rootEl, { animateCard = true } = {}) {
     visitorBtn.addEventListener('click', () => {
       sessionState.currentUserId = 'visitor';
       saveSession(sessionState);
+      ui.showAuthPortal = false;
       ui.view = 'tuition';
       renderApp();
     });
@@ -550,9 +552,10 @@ function renderAuthPortal(rootEl, { animateCard = true } = {}) {
       if (target) {
         sessionState.currentUserId = target.id;
         saveSession(sessionState);
+        ui.showAuthPortal = false;
         ui.authError = '';
         ui.authSuccess = '';
-        ui.view = target.role === 'admissions' ? 'admissions' : 'overview';
+        ui.view = target.role === 'admissions' ? 'admissions' : 'tuition';
         showToast(`Signed in as ${target.name} (${target.role.toUpperCase()})`);
       }
     });
@@ -572,9 +575,10 @@ function renderAuthPortal(rootEl, { animateCard = true } = {}) {
       }
       sessionState.currentUserId = res.profile.id;
       saveSession(sessionState);
+      ui.showAuthPortal = false;
       ui.authError = '';
       ui.authSuccess = '';
-      ui.view = res.profile.role === 'admissions' ? 'admissions' : 'overview';
+      ui.view = res.profile.role === 'admissions' ? 'admissions' : 'tuition';
       showToast(`Welcome back, ${res.profile.name}!`);
     });
   }
@@ -2347,7 +2351,12 @@ function buildTuitionContactsStage(user) {
         </div>
         ${
           user.role === 'visitor'
-            ? `<div style="margin-top:0.35rem;"><button class="gold-cta-btn" id="visitor-apply-tuition">${ICONS.plus} <span>Apply to Join i-tutor</span></button></div>`
+            ? `
+          <div class="action-cluster" style="margin-top:0.35rem;">
+            <button class="gold-cta-btn" id="visitor-apply-tuition">${ICONS.plus} <span>Apply to Join</span></button>
+            <button class="outline-btn" id="visitor-signin-tuition" style="background:rgba(255,255,255,0.08);color:#FAF6F0;border-color:rgba(255,255,255,0.22);">${ICONS.user} <span>Sign In</span></button>
+          </div>
+        `
             : ''
         }
       </div>
@@ -2485,6 +2494,41 @@ function buildTuitionContactsStage(user) {
         : ''
     }
 
+    <!-- REAL BOTSWANA PULA TUITION PACKAGES & SUBJECT PRICES (FRONT & CENTER WHEN OPENING APP) -->
+    <div class="pricing-cards-grid">
+      ${plans
+        .map(
+          (plan) => `
+        <article class="tuition-plan-card ${plan.badge === 'Most Popular' ? 'popular' : ''}">
+          <div style="display:flex;flex-direction:column;gap:0.4rem;">
+            <div class="panel-head">
+              <span class="pill-badge">${esc(plan.badge)}</span>
+              ${
+                superEdit
+                  ? renderMoreMenu(`
+                      <button type="button" class="more-menu-item" data-edit-plan="${esc(plan.id)}">${ICONS.edit} Edit Price</button>
+                      ${
+                        plans.length > 1
+                          ? `<button type="button" class="more-menu-item is-danger" data-del-plan="${esc(plan.id)}">${ICONS.trash} Remove Price</button>`
+                          : ''
+                      }
+                    `)
+                  : ''
+              }
+            </div>
+            <h2 class="panel-title">${esc(plan.name)}</h2>
+            <div class="plan-price-big">${esc(plan.price)}</div>
+            <ul class="plan-bullets">
+              ${(plan.features || []).map((f) => `<li>${esc(f)}</li>`).join('')}
+            </ul>
+          </div>
+          <a href="#enquiry-form-card" class="outline-btn" style="text-decoration:none;">Enquire · Reg ${esc(regFeeLabel)}</a>
+        </article>
+      `
+        )
+        .join('')}
+    </div>
+
     <!-- OFFICIAL FLYERS & POSTERS GALLERY -->
     ${
       flyers.length > 0
@@ -2542,41 +2586,6 @@ function buildTuitionContactsStage(user) {
     `
         : ''
     }
-
-    <!-- REAL BOTSWANA PULA TUITION PACKAGES & SUBJECT PRICES -->
-    <div class="pricing-cards-grid">
-      ${plans
-        .map(
-          (plan) => `
-        <article class="tuition-plan-card ${plan.badge === 'Most Popular' ? 'popular' : ''}">
-          <div style="display:flex;flex-direction:column;gap:0.4rem;">
-            <div class="panel-head">
-              <span class="pill-badge">${esc(plan.badge)}</span>
-              ${
-                superEdit
-                  ? renderMoreMenu(`
-                      <button type="button" class="more-menu-item" data-edit-plan="${esc(plan.id)}">${ICONS.edit} Edit Price</button>
-                      ${
-                        plans.length > 1
-                          ? `<button type="button" class="more-menu-item is-danger" data-del-plan="${esc(plan.id)}">${ICONS.trash} Remove Price</button>`
-                          : ''
-                      }
-                    `)
-                  : ''
-              }
-            </div>
-            <h2 class="panel-title">${esc(plan.name)}</h2>
-            <div class="plan-price-big">${esc(plan.price)}</div>
-            <ul class="plan-bullets">
-              ${(plan.features || []).map((f) => `<li>${esc(f)}</li>`).join('')}
-            </ul>
-          </div>
-          <a href="#enquiry-form-card" class="outline-btn" style="text-decoration:none;">Enquire · Reg ${esc(regFeeLabel)}</a>
-        </article>
-      `
-        )
-        .join('')}
-    </div>
 
     <!-- BOTSWANA PULA FEE ESTIMATOR & FRANCISTOWN CONTACTS -->
     <div class="two-col-grid">
@@ -2674,7 +2683,8 @@ function renderApp(opts = {}) {
   lastAnimatedKey = routeKey;
 
   const navItems = [
-    { id: 'overview', label: 'Overview', icon: ICONS.home, badge: '' },
+    { id: 'tuition', label: 'Flyers & Prices', icon: ICONS.tuition, badge: '' },
+    { id: 'overview', label: 'Overview Hub', icon: ICONS.home, badge: '' },
     ...(superEdit
       ? [
           {
@@ -2690,7 +2700,6 @@ function renderApp(opts = {}) {
     { id: 'timetable', label: 'Schedule & Exams', icon: ICONS.timetable, badge: '' },
     { id: 'toolkit', label: 'Study Toolkit', icon: ICONS.toolkit, badge: '' },
     { id: 'broadcasts', label: 'Notices & Attendance', icon: ICONS.broadcast, badge: '' },
-    { id: 'tuition', label: 'Flyers & Prices', icon: ICONS.tuition, badge: '' },
     { id: 'account', label: user.role === 'visitor' ? 'Join / Sign In' : 'My Account', icon: ICONS.user, badge: '' }
   ];
 
@@ -2722,7 +2731,7 @@ function renderApp(opts = {}) {
       <!-- ZONE 1: CLEAN DESKTOP LEFT RAIL -->
       <aside class="sidebar-rail">
         <div>
-          <button class="brand-header-btn" data-nav="overview" title="Go to Overview">
+          <button class="brand-header-btn" data-nav="tuition" title="Flyers & Prices">
             <div class="sidebar-emblem-wrap">
               ${renderEmblemSVG({ animated: false, uid: 'sidebar', className: 'brand-emblem-svg' })}
             </div>
@@ -2754,7 +2763,7 @@ function renderApp(opts = {}) {
             </div>
             <div class="mini-btn-row">
               <button class="rail-mini-btn" data-action-night="1">${sessionState.theme === 'night' ? '☀ Light' : '☾ Night'}</button>
-              <button class="rail-mini-btn" data-action-signout="1">Switch</button>
+              <button class="rail-mini-btn" data-action-signout="1">${user.role === 'visitor' ? 'Sign In' : 'Switch'}</button>
             </div>
           </div>
         </div>
@@ -2768,7 +2777,7 @@ function renderApp(opts = {}) {
               ${ICONS.menu}
             </button>
 
-            <div class="mobile-brand-cluster" data-nav="overview" style="cursor:pointer;">
+            <div class="mobile-brand-cluster" data-nav="tuition" style="cursor:pointer;">
               <div class="mobile-emblem-mini">${renderEmblemSVG({ animated: false, uid: 'mob', className: 'brand-emblem-svg' })}</div>
               <strong class="mobile-brand-word"><span style="color:var(--gold-deep);">i</span>-tutor</strong>
             </div>
@@ -2800,9 +2809,11 @@ function renderApp(opts = {}) {
               <span>${offline ? (outboxCount ? `Offline (${outboxCount})` : 'Offline') : 'Synced'}</span>
             </button>
 
-            <button class="topbar-avatar-btn" data-nav="account" title="${esc(user.name)} — My Account">
-              ${esc(initials(user.name))}
-            </button>
+            ${
+              user.role === 'visitor'
+                ? `<button class="gold-cta-btn" data-action-signout="1" style="padding:0.38rem 0.72rem;font-size:0.75rem;" title="Sign In or Apply">Sign In</button>`
+                : `<button class="topbar-avatar-btn" data-nav="account" title="${esc(user.name)} — My Account">${esc(initials(user.name))}</button>`
+            }
           </div>
         </header>
 
@@ -2907,8 +2918,11 @@ function renderApp(opts = {}) {
       </div>
     </aside>
 
-    <!-- CLEAN 4-TAB MOBILE BOTTOM BAR (HUB · HOMEWORK · CHATS · PRICES — NO BOTTOM-CORNER MENU BUTTON) -->
+    <!-- CLEAN 4-TAB MOBILE BOTTOM BAR (PRICES · HUB · HOMEWORK · CHATS — NO BOTTOM-CORNER MENU BUTTON) -->
     <nav class="mobile-tabbar" aria-label="Mobile bottom navigation">
+      <button class="mob-tab-btn ${ui.view === 'tuition' ? 'is-active' : ''}" data-nav="tuition">
+        ${ICONS.tuition}<span>Prices</span>
+      </button>
       <button class="mob-tab-btn ${ui.view === 'overview' ? 'is-active' : ''}" data-nav="overview">
         ${ICONS.home}<span>Hub</span>
       </button>
@@ -2917,9 +2931,6 @@ function renderApp(opts = {}) {
       </button>
       <button class="mob-tab-btn ${ui.view === 'messages' ? 'is-active' : ''}" data-nav="messages">
         ${ICONS.messages}<span>Chats</span>
-      </button>
-      <button class="mob-tab-btn ${ui.view === 'tuition' ? 'is-active' : ''}" data-nav="tuition">
-        ${ICONS.tuition}<span>Prices</span>
       </button>
     </nav>
 
@@ -2938,6 +2949,7 @@ function renderApp(opts = {}) {
 function signOutToPortal(defaultTab = 'signin') {
   sessionState.currentUserId = null;
   saveSession(sessionState);
+  ui.showAuthPortal = true;
   ui.authTab = defaultTab;
   ui.authError = '';
   ui.authSuccess = '';
@@ -3067,7 +3079,7 @@ function bindWorkspaceEvents(user) {
     });
   });
 
-  ['btn-signout-main', 'btn-go-signin-portal'].forEach((id) => {
+  ['btn-signout-main', 'btn-go-signin-portal', 'visitor-signin-tuition'].forEach((id) => {
     document.getElementById(id)?.addEventListener('click', () => signOutToPortal('signin'));
   });
 
