@@ -1,53 +1,48 @@
-import { renderEmblemSVG, renderSunriseGaugeSVG, ICONS } from './emblem.js';
+import { renderEmblemSVG, ICONS } from './emblem.js';
 import {
-  SUBJECTS,
-  loadState,
-  saveState,
-  resetState,
-  getOverallConfidence,
-  getWeakestSubject,
-  getSubjectById
+  loadVault,
+  loadOutbox,
+  loadSession,
+  saveSession,
+  dispatchOfflineAction,
+  syncWithServer
 } from './offlineStore.js';
 
 const LOADING_DURATION_MS = 10000; // ~10 seconds
 
 const STATUS_PHASES = [
   { threshold: 0, text: 'Starting i-tutor…' },
-  { threshold: 25, text: 'Loading standalone offline engine…' },
-  { threshold: 55, text: 'Caching local workspace…' },
+  { threshold: 25, text: 'Loading offline storage vault…' },
+  { threshold: 55, text: 'Downloading timetables & assignments…' },
   { threshold: 82, text: 'Confidence in learning…' },
   { threshold: 100, text: 'Ready' }
 ];
 
-let state = loadState();
-let activeAnimationFrame = null;
+const DAYS = ['All', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-// UI Navigation & Ephemeral Session State
+let vault = loadVault();
+let session = loadSession();
+let activeAnimationFrame = null;
+let toastTimer = null;
+
 const ui = {
-  view: 'home', // 'home' | 'notes' | 'quiz' | 'flashcards' | 'planner' | 'timer' | 'goal' | 'library' | 'practice' | 'confidence'
+  view: 'home', // 'home' | 'timetables' | 'assignments' | 'messages' | 'broadcasts' | 'tuition' | 'account' | 'sync'
   dockIndex: 0,
-  subjectFilter: 'all',
-  focusNoteId: null,
-  showNewNoteForm: false,
-  showNewCardForm: false,
-  showNewExamForm: false,
-  // Quiz session
-  quizIndex: 0,
-  quizSelectedOption: null,
-  quizScore: 0,
-  quizFinished: false,
-  // Flashcard session
-  cardIndex: 0,
-  cardFlipped: false,
-  // Focus timer
-  timerModeMinutes: 25,
-  timerSecondsLeft: 25 * 60,
-  timerRunning: false,
-  timerIntervalId: null
+  dayFilter: 'All',
+  msgTab: 'teachers', // 'teachers' | 'groups'
+  activeRoomId: 'room-tch-naledi',
+  showTimetableForm: false,
+  showAssignmentForm: false,
+  showGroupForm: false,
+  showBroadcastForm: false,
+  showContactEditForm: false,
+  expandedAssignmentId: 'asg-1',
+  syncState: 'synced', // 'synced' | 'offline' | 'syncing'
+  toastMessage: ''
 };
 
 function applyTheme() {
-  document.documentElement.setAttribute('data-theme', state.theme === 'night' ? 'night' : 'light');
+  document.documentElement.setAttribute('data-theme', session.theme === 'night' ? 'night' : 'light');
 }
 
 function escapeHtml(str = '') {
@@ -58,10 +53,94 @@ function escapeHtml(str = '') {
     .replace(/"/g, '&quot;');
 }
 
-function formatTimer(totalSec) {
-  const mins = Math.floor(totalSec / 60);
-  const secs = totalSec % 60;
-  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+function initials(name = '') {
+  return name
+    .replace(/^(Ms\.|Mr\.|Mrs\.|Dr\.)\s+/i, '')
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((p) => p[0] || '')
+    .join('')
+    .toUpperCase();
+}
+
+function showToast(msg) {
+  ui.toastMessage = msg;
+  renderToastOnly();
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    ui.toastMessage = '';
+    renderToastOnly();
+  }, 3200);
+}
+
+function renderToastOnly() {
+  const existing = document.getElementById('toast-banner');
+  if (existing) existing.remove();
+  if (!ui.toastMessage) return;
+  const div = document.createElement('div');
+  div.id = 'toast-banner';
+  div.className = 'toast-banner';
+  div.textContent = ui.toastMessage;
+  document.body.appendChild(div);
+}
+
+function getCurrentUser() {
+  if (session.currentUserId === 'guest') {
+    return {
+      id: 'guest',
+      name: 'Visitor (Not Joined)',
+      role: 'guest',
+      subtitle: 'Viewing Tuition Prices & Contact Info'
+    };
+  }
+  return (
+    vault.profiles.find((p) => p.id === session.currentUserId) ||
+    vault.profiles[0] || {
+      id: 'stu-thabo',
+      name: 'Thabo Mokoena',
+      role: 'student',
+      subtitle: 'Grade 12 Student'
+    }
+  );
+}
+
+function isDeviceOffline() {
+  return Boolean(session.simulateOffline || (typeof navigator !== 'undefined' && navigator.onLine === false));
+}
+
+async function performSync({ silent = true } = {}) {
+  if (isDeviceOffline()) {
+    ui.syncState = 'offline';
+    if (!silent) showToast('Offline mode active — everything is safely stored on this device.');
+    renderAppShell();
+    return;
+  }
+
+  ui.syncState = 'syncing';
+  const result = await syncWithServer({ simulateOffline: session.simulateOffline });
+  vault = result.vault;
+  ui.syncState = result.status === 'synced' ? 'synced' : 'offline';
+  if (!silent) {
+    showToast(
+      ui.syncState === 'synced'
+        ? 'Downloaded latest timetables, assignments & messages for offline use!'
+        : 'Offline — changes saved locally and will auto-sync when online.'
+    );
+  }
+  renderAppShell();
+}
+
+function runActionAndSync(action, offlineMsg, onlineMsg) {
+  dispatchOfflineAction(vault, action);
+  if (isDeviceOffline()) {
+    ui.syncState = 'offline';
+    showToast(offlineMsg || 'Saved offline — will sync automatically once online.');
+    renderAppShell();
+  } else {
+    showToast(onlineMsg || 'Saved & synced!');
+    renderAppShell();
+    performSync({ silent: true });
+  }
 }
 
 /* ==========================================================================
@@ -92,7 +171,7 @@ function renderSplashScreenMarkup() {
         <div
           class="loader-panel"
           role="progressbar"
-          aria-label="Loading i-tutor standalone app"
+          aria-label="Loading i-tutor app"
           aria-valuemin="0"
           aria-valuemax="100"
           aria-valuenow="0"
@@ -112,174 +191,368 @@ function renderSplashScreenMarkup() {
 }
 
 /* ==========================================================================
-   2. HOME VIEW — EXACT SKETCH BUTTON MAP
+   2. HOME WORKSPACE & VISITOR SHOWCASE
    ========================================================================== */
 
-function renderHomeWorkspace() {
-  const confidence = getOverallConfidence(state);
-  const goalPct = Math.min(100, Math.round((state.dailyCompleted / Math.max(1, state.dailyGoalTarget)) * 100));
-  const openTasksCount = state.tasks.filter((t) => !t.done).length;
-  const masteredCards = state.flashcards.filter((c) => c.mastered).length;
-  const timerBadgeLabel = ui.timerRunning ? formatTimer(ui.timerSecondsLeft) : 'Timer';
+function renderPinnedBroadcastBanner() {
+  const latest = vault.broadcasts?.[0];
+  if (!latest) return '';
 
   return `
-    <!-- HERO CARD (Confidence + Timer Pill + Continue Studying) -->
-    <section class="layout-hero-card">
-      <div class="hero-top-row">
-        <div class="confidence-chip">
-          <span class="confidence-sun-dot" aria-hidden="true"></span>
-          <div class="confidence-readout">${confidence}% <span>Confidence</span></div>
-        </div>
-
-        <button type="button" class="timer-pill-btn" data-open-view="timer">
-          ${ICONS.timer}
-          <span>${timerBadgeLabel}</span>
-        </button>
-      </div>
-
-      <div class="hero-last-studied">
-        <span class="hero-eyebrow">Last studied</span>
-        <div class="hero-topic-title">${escapeHtml(state.lastStudied?.title || 'Mathematics — Trigonometry')}</div>
-      </div>
-
-      <button type="button" class="continue-btn" id="continue-study-btn">
-        <span class="play-accent">${ICONS.play}</span>
-        <span>Continue Studying</span>
-      </button>
-    </section>
-
-    <!-- 2x2 MAIN FEATURE BUTTONS -->
-    <section class="layout-grid">
-      <button type="button" class="feature-tile-btn" data-open-view="notes">
-        <div class="tile-top-row">
-          <div class="tile-icon-box">${ICONS.notes}</div>
-          <span class="tile-count-pill">${state.notes.length} notes</span>
-        </div>
-        <div class="tile-copy">
-          <div class="tile-title">Study Notes</div>
-          <div class="tile-sub">&amp; Formulas</div>
-        </div>
-      </button>
-
-      <button type="button" class="feature-tile-btn" data-open-view="quiz">
-        <div class="tile-top-row">
-          <div class="tile-icon-box">${ICONS.quiz}</div>
-          <span class="tile-count-pill">${state.quizzes.length} Qs</span>
-        </div>
-        <div class="tile-copy">
-          <div class="tile-title">Quick Quiz</div>
-          <div class="tile-sub">Auto-marked</div>
-        </div>
-      </button>
-
-      <button type="button" class="feature-tile-btn" data-open-view="flashcards">
-        <div class="tile-top-row">
-          <div class="tile-icon-box">${ICONS.flashcards}</div>
-          <span class="tile-count-pill">${masteredCards}/${state.flashcards.length}</span>
-        </div>
-        <div class="tile-copy">
-          <div class="tile-title">Flashcards</div>
-          <div class="tile-sub">Tap to flip</div>
-        </div>
-      </button>
-
-      <button type="button" class="feature-tile-btn" data-open-view="planner">
-        <div class="tile-top-row">
-          <div class="tile-icon-box">${ICONS.planner}</div>
-          <span class="tile-count-pill">${openTasksCount} left</span>
-        </div>
-        <div class="tile-copy">
-          <div class="tile-title">Study Planner</div>
-          <div class="tile-sub">&amp; Exam dates</div>
-        </div>
-      </button>
-    </section>
-
-    <!-- LOWER GOAL BAR BUTTON -->
-    <button type="button" class="goal-bar-btn" data-open-view="goal">
-      <div class="goal-ring-badge">${ICONS.target}</div>
-      <div class="goal-bar-body">
-        <div class="goal-bar-labels">
-          <span class="goal-bar-title">Today’s Goal</span>
-          <span class="goal-bar-count">${state.dailyCompleted} / ${state.dailyGoalTarget} done</span>
-        </div>
-        <div class="goal-track">
-          <div class="goal-track-fill" style="width: ${goalPct}%"></div>
-        </div>
+    <button type="button" class="broadcast-banner" data-open-view="broadcasts">
+      <div class="broadcast-icon-badge">${ICONS.broadcast}</div>
+      <div class="broadcast-banner-body">
+        <div class="broadcast-banner-eyebrow">App Broadcast · ${escapeHtml(latest.author_name)}</div>
+        <div class="broadcast-banner-title">${escapeHtml(latest.title)}</div>
+        <div class="broadcast-banner-text">${escapeHtml(latest.body)}</div>
       </div>
     </button>
   `;
 }
 
-/* ==========================================================================
-   3. INNER FEATURE VIEWS (100% OFFLINE)
-   ========================================================================== */
+function renderHomeWorkspace(user) {
+  // If Visitor (hasn't joined yet), show Tuition Prices & Contact Infos right away!
+  if (user.role === 'guest') {
+    return renderTuitionAndContactsView(user, { embeddedOnHome: true });
+  }
 
-function renderSubjectChips() {
+  const isStaff = user.role === 'teacher' || user.role === 'admin';
+  const nextSlot = vault.timetables[0];
+  const groupCount = vault.rooms.filter((r) => r.room_type === 'group').length;
+  const outboxCount = loadOutbox().length;
+
+  let primaryBtnLabel = 'Open Remote Assignments';
+  let primaryBtnTarget = 'assignments';
+  if (isStaff) {
+    primaryBtnLabel = user.role === 'admin' ? 'Send App-Wide Broadcast' : 'Send Remote Assignment';
+    primaryBtnTarget = user.role === 'admin' ? 'broadcasts' : 'assignments';
+  }
+
   return `
-    <div class="chip-row">
-      <button type="button" class="filter-chip ${ui.subjectFilter === 'all' ? 'is-active' : ''}" data-filter-sub="all">All</button>
-      ${SUBJECTS.map(
-        (s) => `
-          <button type="button" class="filter-chip ${ui.subjectFilter === s.id ? 'is-active' : ''}" data-filter-sub="${s.id}">
-            ${escapeHtml(s.short)}
-          </button>
-        `
-      ).join('')}
-    </div>
+    ${renderPinnedBroadcastBanner()}
+
+    <!-- HERO SNAPSHOT CARD -->
+    <section class="layout-hero-card">
+      <div class="hero-top-row">
+        <span class="offline-saved-badge">
+          ${ICONS.download}
+          <span>${isDeviceOffline() ? `Offline Mode${outboxCount ? ` · ${outboxCount} queued` : ' · Saved on Device'}` : 'Saved Offline · Auto-Sync On'}</span>
+        </span>
+        <span class="tile-count-pill">${escapeHtml(user.role.toUpperCase())}</span>
+      </div>
+
+      <div>
+        <div class="hero-eyebrow">Signed in as ${escapeHtml(user.name)}</div>
+        <div class="hero-topic-title">
+          ${nextSlot ? `Next: ${escapeHtml(nextSlot.subject)} (${escapeHtml(nextSlot.day_of_week)} ${escapeHtml(nextSlot.start_time)})` : 'All Offline Packs Downloaded'}
+        </div>
+        <div class="hero-subline">${escapeHtml(user.subtitle)}</div>
+      </div>
+
+      <button type="button" class="primary-dark-btn" data-open-view="${primaryBtnTarget}">
+        <span>${primaryBtnLabel}</span>
+      </button>
+    </section>
+
+    <!-- 2x2 MAIN FEATURE CARDS -->
+    <section class="layout-grid">
+      <button type="button" class="feature-tile-btn" data-open-view="timetables">
+        <div class="tile-top-row">
+          <div class="tile-icon-box">${ICONS.timetable}</div>
+          <span class="tile-count-pill">${vault.timetables.length} saved</span>
+        </div>
+        <div class="tile-copy">
+          <div class="tile-title">Timetable</div>
+          <div class="tile-sub">Saved offline</div>
+        </div>
+      </button>
+
+      <button type="button" class="feature-tile-btn" data-open-view="assignments">
+        <div class="tile-top-row">
+          <div class="tile-icon-box">${ICONS.assignment}</div>
+          <span class="tile-count-pill">${vault.assignments.length} tasks</span>
+        </div>
+        <div class="tile-copy">
+          <div class="tile-title">Assignments</div>
+          <div class="tile-sub">${isStaff ? 'Send & mark remotely' : 'Auto-downloaded'}</div>
+        </div>
+      </button>
+
+      <button type="button" class="feature-tile-btn" data-open-view="messages">
+        <div class="tile-top-row">
+          <div class="tile-icon-box">${ICONS.messages}</div>
+          <span class="tile-count-pill">${groupCount} groups</span>
+        </div>
+        <div class="tile-copy">
+          <div class="tile-title">Messages</div>
+          <div class="tile-sub">Teachers &amp; Study Groups</div>
+        </div>
+      </button>
+
+      <button type="button" class="feature-tile-btn" data-open-view="broadcasts">
+        <div class="tile-top-row">
+          <div class="tile-icon-box">${ICONS.broadcast}</div>
+          <span class="tile-count-pill">${vault.broadcasts.length} alerts</span>
+        </div>
+        <div class="tile-copy">
+          <div class="tile-title">Broadcasts</div>
+          <div class="tile-sub">${isStaff ? 'Post to whole app' : 'School & parent notices'}</div>
+        </div>
+      </button>
+    </section>
+
+    <!-- PUBLIC TUITION PRICES & CONTACTS CARD -->
+    <button type="button" class="wide-strip-btn" data-open-view="tuition">
+      <div class="wide-strip-left">
+        <div class="tile-icon-box">${ICONS.tuition}</div>
+        <div>
+          <div class="tile-title">Tuition Prices &amp; Contact Info</div>
+          <div class="tile-sub">Public packages &amp; admissions desk for new learners</div>
+        </div>
+      </div>
+      <span class="tile-count-pill">View →</span>
+    </button>
   `;
 }
 
-function renderNotesView() {
-  const filtered = state.notes.filter(
-    (n) => ui.subjectFilter === 'all' || n.subjectId === ui.subjectFilter
-  );
+/* ==========================================================================
+   3. TIMETABLES VIEW (OFFLINE SAVED + AUTO SYNC)
+   ========================================================================== */
+
+function renderTimetablesView(user) {
+  const isStaff = user.role === 'teacher' || user.role === 'admin';
+  const visibleSlots = vault.timetables.filter((slot) => {
+    const dayMatch = ui.dayFilter === 'All' || slot.day_of_week === ui.dayFilter;
+    const ownerMatch = slot.is_official || !slot.owner_id || slot.owner_id === user.id || isStaff;
+    return dayMatch && ownerMatch;
+  });
 
   return `
     <div class="subview-header">
       <button type="button" class="back-pill-btn" data-open-view="home">${ICONS.back} <span>Back</span></button>
-      <button type="button" class="action-pill-btn" id="toggle-new-note-btn">${ICONS.plus} <span>New Note</span></button>
+      <button type="button" class="action-pill-btn" id="toggle-tt-form-btn">
+        ${ICONS.plus}
+        <span>${isStaff ? 'Add Class Slot' : 'Save Study Slot'}</span>
+      </button>
     </div>
 
     <div class="subview-title-block">
-      <h2>Study Notes &amp; Formulas</h2>
-      <p>Saved directly on your device for offline revision.</p>
+      <h2>Saved Timetable</h2>
+      <p>Stored directly on your device for offline access — updates download automatically when online.</p>
     </div>
 
-    ${renderSubjectChips()}
+    <div class="chip-row">
+      ${DAYS.map(
+        (d) => `
+        <button type="button" class="filter-chip ${ui.dayFilter === d ? 'is-active' : ''}" data-day-filter="${d}">
+          ${d === 'All' ? 'All Days' : d.slice(0, 3)}
+        </button>
+      `
+      ).join('')}
+    </div>
 
     ${
-      ui.showNewNoteForm
+      ui.showTimetableForm
         ? `
-      <form class="content-card inline-form" id="new-note-form">
-        <select name="subjectId" class="input-field" required>
-          ${SUBJECTS.map((s) => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('')}
-        </select>
-        <input type="text" name="title" class="input-field" placeholder="Note title (e.g. Cosine Rule)" required />
-        <input type="text" name="formula" class="input-field" placeholder="Key formula (optional)" />
-        <textarea name="summary" rows="3" class="input-field" placeholder="Write your key study summary…" required></textarea>
-        <button type="submit" class="gold-btn">Save Offline Note</button>
+      <form class="content-card inline-form" id="add-timetable-form">
+        <h3 class="item-title">${isStaff ? 'Publish Official Class Timetable Slot' : 'Save Personal Offline Study Slot'}</h3>
+        <div class="form-row-2">
+          <select name="day_of_week" class="input-field" required>
+            ${DAYS.slice(1).map((d) => `<option value="${d}">${d}</option>`).join('')}
+          </select>
+          <input type="text" name="subject" class="input-field" placeholder="Subject (e.g. Mathematics)" required />
+        </div>
+        <div class="form-row-2">
+          <input type="time" name="start_time" class="input-field" value="16:00" required />
+          <input type="time" name="end_time" class="input-field" value="17:00" required />
+        </div>
+        <input type="text" name="topic" class="input-field" placeholder="Focus topic (e.g. Trigonometry Revision)" required />
+        <input type="text" name="location_mode" class="input-field" placeholder="Room or Mode (e.g. Room B2 / Home Study)" value="${isStaff ? 'Studio A · Auto-Saved Offline' : 'Personal Offline Revision'}" />
+        <button type="submit" class="gold-btn">Save to Offline Timetable</button>
       </form>
     `
         : ''
     }
 
-    <div class="note-list">
-      ${filtered
-        .map((note) => {
-          const sub = getSubjectById(note.subjectId);
+    <div class="stack-list">
+      ${visibleSlots
+        .map(
+          (slot) => `
+          <article class="content-card">
+            <div class="card-meta-row">
+              <span class="subject-tag">${escapeHtml(slot.day_of_week)} · ${escapeHtml(slot.start_time)} – ${escapeHtml(slot.end_time)}</span>
+              <span class="offline-saved-badge">${ICONS.check} <span>Saved Offline</span></span>
+            </div>
+            <h3 class="item-title">${escapeHtml(slot.subject)} — ${escapeHtml(slot.topic)}</h3>
+            <p class="item-desc">
+              ${slot.teacher_name ? `Educator: <strong>${escapeHtml(slot.teacher_name)}</strong> · ` : ''}
+              ${escapeHtml(slot.location_mode)} (${escapeHtml(slot.grade_group)})
+            </p>
+            ${
+              isStaff || slot.owner_id === user.id
+                ? `<div><button type="button" class="danger-link-btn" data-delete-tt="${slot.id}">Remove slot</button></div>`
+                : ''
+            }
+          </article>
+        `
+        )
+        .join('')}
+    </div>
+  `;
+}
+
+/* ==========================================================================
+   4. REMOTE ASSIGNMENTS VIEW (TEACHER REMOTE SEND + OFFLINE WORKSHEET + SUBMIT)
+   ========================================================================== */
+
+function renderAssignmentsView(user) {
+  const isStaff = user.role === 'teacher' || user.role === 'admin';
+  const targetStudentId = user.role === 'student' ? user.id : 'stu-thabo';
+
+  return `
+    <div class="subview-header">
+      <button type="button" class="back-pill-btn" data-open-view="home">${ICONS.back} <span>Back</span></button>
+      ${
+        isStaff
+          ? `
+        <button type="button" class="action-pill-btn" id="toggle-asg-form-btn">
+          ${ICONS.plus}
+          <span>Give Remote Assignment</span>
+        </button>
+      `
+          : `<span class="offline-saved-badge">${ICONS.download} <span>All Packs Downloaded</span></span>`
+      }
+    </div>
+
+    <div class="subview-title-block">
+      <h2>Remote Assignments</h2>
+      <p>
+        ${
+          isStaff
+            ? 'Send assignments to students from anywhere — packs download automatically to their phones when online.'
+            : 'Worksheets download automatically when online so you can read and complete them offline.'
+        }
+      </p>
+    </div>
+
+    ${
+      isStaff && ui.showAssignmentForm
+        ? `
+      <form class="content-card inline-form" id="create-assignment-form">
+        <h3 class="item-title">Send Remote Assignment to Students</h3>
+        <input type="text" name="title" class="input-field" placeholder="Assignment Title (e.g. Remote Algebra Drill 5)" required />
+        <div class="form-row-2">
+          <input type="text" name="subject" class="input-field" placeholder="Subject (e.g. Mathematics)" required />
+          <input type="text" name="grade_group" class="input-field" value="Grade 12" placeholder="Grade (e.g. Grade 12)" required />
+        </div>
+        <div class="form-row-2">
+          <input type="date" name="due_date" class="input-field" value="2026-12-05" required />
+          <input type="number" name="max_marks" class="input-field" value="30" min="5" max="200" required />
+        </div>
+        <textarea name="instructions" rows="2" class="input-field" placeholder="Instructions for students…" required></textarea>
+        <textarea name="offline_pack_content" rows="4" class="input-field" placeholder="Full Offline Worksheet Questions & Formulas (downloads to students’ phones so they can work without internet)…" required></textarea>
+        <button type="submit" class="gold-btn">Publish Remote Assignment</button>
+      </form>
+    `
+        : ''
+    }
+
+    <div class="stack-list">
+      ${vault.assignments
+        .map((asg) => {
+          const allSubs = vault.submissions.filter((s) => s.assignment_id === asg.id);
+          const mySub = allSubs.find((s) => s.student_id === targetStudentId);
+
           return `
-            <article class="content-card" data-note-card="${note.id}">
-              <div class="note-card-head">
-                <span class="subject-tag">${escapeHtml(sub.name)}</span>
+            <article class="content-card">
+              <div class="card-meta-row">
+                <span class="subject-tag">${escapeHtml(asg.subject)} · ${escapeHtml(asg.grade_group)}</span>
+                <span class="offline-saved-badge">${ICONS.download} <span>Available Offline · ${asg.max_marks} Marks</span></span>
               </div>
-              <h3 class="note-title">${escapeHtml(note.title)}</h3>
+
+              <h3 class="item-title">${escapeHtml(asg.title)}</h3>
+              <p class="item-desc">
+                By <strong>${escapeHtml(asg.teacher_name)}</strong> · Due <strong>${escapeHtml(asg.due_date)}</strong><br/>
+                ${escapeHtml(asg.instructions)}
+              </p>
+
               ${
-                note.keyFormulas?.length
-                  ? `<div class="formula-box">${note.keyFormulas.map((f) => `<div>${escapeHtml(f)}</div>`).join('')}</div>`
+                asg.offline_pack_content
+                  ? `<div class="worksheet-pack-box">${escapeHtml(asg.offline_pack_content)}</div>`
                   : ''
               }
-              <p class="note-summary">${escapeHtml(note.summary)}</p>
+
+              ${
+                user.role === 'student'
+                  ? mySub
+                    ? `
+                  <div class="worksheet-pack-box" style="border-left-color: #1E1F1D;">
+                    <strong>Your Submitted Work (${mySub.status === 'graded' ? `Graded: ${mySub.marks_awarded}/${asg.max_marks}` : 'Submitted · Saved Offline & Syncing'}):</strong>
+                    \n${escapeHtml(mySub.answer_text)}
+                    ${mySub.teacher_feedback ? `\n\nTeacher Feedback: "${escapeHtml(mySub.teacher_feedback)}"` : ''}
+                  </div>
+                `
+                    : `
+                  <form class="inline-form student-submit-form" data-asg-id="${asg.id}">
+                    <textarea name="answer_text" rows="3" class="input-field" placeholder="Write your solution steps here (works offline — auto-sends once online)…" required></textarea>
+                    <button type="submit" class="gold-btn">Submit Assignment ${isDeviceOffline() ? '(Save Offline)' : ''}</button>
+                  </form>
+                `
+                  : ''
+              }
+
+              ${
+                user.role === 'parent'
+                  ? mySub
+                    ? `
+                  <div class="worksheet-pack-box">
+                    <strong>Thabo’s Status:</strong> ${mySub.status === 'graded' ? `Graded — ${mySub.marks_awarded}/${asg.max_marks} marks` : 'Submitted to Teacher'}
+                    ${mySub.teacher_feedback ? `\nFeedback: "${escapeHtml(mySub.teacher_feedback)}"` : ''}
+                  </div>
+                `
+                    : `<span class="tile-count-pill">Pending completion by student</span>`
+                  : ''
+              }
+
+              ${
+                isStaff
+                  ? `
+                <div class="inline-form" style="margin-top: 0.35rem;">
+                  <strong style="font-size: 0.82rem;">Student Submissions (${allSubs.length})</strong>
+                  ${
+                    allSubs.length
+                      ? allSubs
+                          .map(
+                            (sub) => `
+                          <div class="worksheet-pack-box">
+                            <strong>${escapeHtml(sub.student_name)}</strong> — ${
+                              sub.status === 'graded'
+                                ? `Marked: ${sub.marks_awarded}/${asg.max_marks}`
+                                : 'Awaiting marks'
+                            }\n${escapeHtml(sub.answer_text)}
+                            ${
+                              sub.status !== 'graded'
+                                ? `
+                              <form class="inline-form grade-sub-form" data-sub-id="${sub.id}" style="margin-top: 0.55rem;">
+                                <div class="form-row-2">
+                                  <input type="number" name="marks_awarded" class="input-field" min="0" max="${asg.max_marks}" placeholder="Marks / ${asg.max_marks}" required />
+                                  <input type="text" name="teacher_feedback" class="input-field" placeholder="Feedback note…" required />
+                                </div>
+                                <button type="submit" class="secondary-btn">Save Grade &amp; Feedback</button>
+                              </form>
+                            `
+                                : `\nFeedback: "${escapeHtml(sub.teacher_feedback)}"`
+                            }
+                          </div>
+                        `
+                          )
+                          .join('')
+                      : `<p class="tile-sub">No student submissions yet.</p>`
+                  }
+                </div>
+              `
+                  : ''
+              }
             </article>
           `;
         })
@@ -288,460 +561,460 @@ function renderNotesView() {
   `;
 }
 
-function renderQuizView() {
-  const pool = state.quizzes.filter(
-    (q) => ui.subjectFilter === 'all' || q.subjectId === ui.subjectFilter
+/* ==========================================================================
+   5. IN-BUILT MESSAGES: 1-ON-1 TEACHER CHATS + FORMING STUDY GROUPS
+   ========================================================================== */
+
+function renderMessagesView(user) {
+  const filteredRooms = vault.rooms.filter((r) =>
+    ui.msgTab === 'teachers' ? r.room_type === 'direct' : r.room_type === 'group'
   );
 
-  if (!pool.length) {
-    return `
-      <div class="subview-header">
-        <button type="button" class="back-pill-btn" data-open-view="home">${ICONS.back} <span>Back</span></button>
-      </div>
-      ${renderSubjectChips()}
-      <div class="content-card"><p>No questions in this filter yet.</p></div>
-    `;
-  }
+  const activeRoom =
+    filteredRooms.find((r) => r.id === ui.activeRoomId) ||
+    filteredRooms[0] ||
+    vault.rooms[0];
 
-  if (ui.quizFinished) {
-    const pct = Math.round((ui.quizScore / pool.length) * 100);
-    return `
-      <div class="subview-header">
-        <button type="button" class="back-pill-btn" data-open-view="home">${ICONS.back} <span>Back</span></button>
-      </div>
-      <div class="content-card timer-dial-card">
-        <span class="subject-tag">Quiz Complete</span>
-        <div class="timer-digits">${pct}%</div>
-        <p class="note-summary">You got <strong>${ui.quizScore} out of ${pool.length}</strong> right. Your Confidence score has been updated offline.</p>
-        <div class="dual-btn-row" style="width:100%; margin-top: 0.6rem;">
-          <button type="button" class="secondary-btn" data-open-view="home">Home</button>
-          <button type="button" class="gold-btn" id="restart-quiz-btn">Try Again</button>
-        </div>
-      </div>
-    `;
-  }
-
-  const safeIdx = Math.min(ui.quizIndex, pool.length - 1);
-  const currentQ = pool[safeIdx];
-  const sub = getSubjectById(currentQ.subjectId);
-  const answered = ui.quizSelectedOption !== null;
+  const roomMessages = activeRoom
+    ? vault.messages.filter((m) => m.room_id === activeRoom.id)
+    : [];
 
   return `
     <div class="subview-header">
       <button type="button" class="back-pill-btn" data-open-view="home">${ICONS.back} <span>Back</span></button>
-      <span class="tile-count-pill">Question ${safeIdx + 1} / ${pool.length}</span>
+      <button type="button" class="action-pill-btn" id="toggle-group-form-btn">
+        ${ICONS.plus}
+        <span>Form Study Group</span>
+      </button>
     </div>
 
     <div class="subview-title-block">
-      <h2>Quick Quiz</h2>
-      <p>Instant offline marking &amp; explanation.</p>
-    </div>
-
-    ${renderSubjectChips()}
-
-    <div class="content-card">
-      <div class="note-card-head">
-        <span class="subject-tag">${escapeHtml(sub.name)} · ${escapeHtml(currentQ.topic)}</span>
-      </div>
-      <h3 class="note-title">${escapeHtml(currentQ.question)}</h3>
-
-      <div class="inline-form">
-        ${currentQ.options
-          .map((opt, idx) => {
-            let stateCls = '';
-            if (answered) {
-              if (idx === currentQ.correctIndex) stateCls = 'is-correct';
-              else if (idx === ui.quizSelectedOption) stateCls = 'is-wrong';
-            }
-            return `
-              <button
-                type="button"
-                class="quiz-option-btn ${stateCls}"
-                data-quiz-opt="${idx}"
-                ${answered ? 'disabled' : ''}
-              >
-                ${escapeHtml(opt)}
-              </button>
-            `;
-          })
-          .join('')}
-      </div>
-
-      ${
-        answered
-          ? `
-        <div class="quiz-explain">
-          <strong>${ui.quizSelectedOption === currentQ.correctIndex ? 'Correct!' : 'Keep going:'}</strong>
-          ${escapeHtml(currentQ.explanation)}
-        </div>
-        <button type="button" class="gold-btn" id="next-quiz-btn">
-          ${safeIdx + 1 < pool.length ? 'Next Question →' : 'See Results'}
-        </button>
-      `
-          : ''
-      }
-    </div>
-  `;
-}
-
-function renderFlashcardsView() {
-  const deck = state.flashcards.filter(
-    (c) => ui.subjectFilter === 'all' || c.subjectId === ui.subjectFilter
-  );
-
-  const safeIdx = deck.length ? ui.cardIndex % deck.length : 0;
-  const card = deck[safeIdx];
-  const sub = card ? getSubjectById(card.subjectId) : SUBJECTS[0];
-
-  return `
-    <div class="subview-header">
-      <button type="button" class="back-pill-btn" data-open-view="home">${ICONS.back} <span>Back</span></button>
-      <button type="button" class="action-pill-btn" id="toggle-new-card-btn">${ICONS.plus} <span>Add Card</span></button>
-    </div>
-
-    <div class="subview-title-block">
-      <h2>Flashcards</h2>
-      <p>Tap the card to flip between question and answer.</p>
-    </div>
-
-    ${renderSubjectChips()}
-
-    ${
-      ui.showNewCardForm
-        ? `
-      <form class="content-card inline-form" id="new-card-form">
-        <select name="subjectId" class="input-field" required>
-          ${SUBJECTS.map((s) => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('')}
-        </select>
-        <input type="text" name="front" class="input-field" placeholder="Front (Question or Prompt)" required />
-        <textarea name="back" rows="2" class="input-field" placeholder="Back (Answer or Formula)" required></textarea>
-        <button type="submit" class="gold-btn">Save Flashcard</button>
-      </form>
-    `
-        : ''
-    }
-
-    ${
-      card
-        ? `
-      <div class="flashcard-stage" id="flashcard-flip-box">
-        <span class="flashcard-side-label">${escapeHtml(sub.short)} · ${ui.cardFlipped ? 'Answer' : 'Question'} (${safeIdx + 1}/${deck.length})</span>
-        <div class="flashcard-text">${escapeHtml(ui.cardFlipped ? card.back : card.front)}</div>
-        <span class="tile-sub">${ui.cardFlipped ? 'Tap to see question' : 'Tap card to reveal answer'}</span>
-      </div>
-
-      <div class="dual-btn-row">
-        <button type="button" class="secondary-btn" id="fc-practice-btn">Need Practice</button>
-        <button type="button" class="gold-btn" id="fc-gotit-btn">Got It ✓</button>
-      </div>
-    `
-        : `<div class="content-card"><p>No flashcards in this subject yet.</p></div>`
-    }
-  `;
-}
-
-function renderPlannerView() {
-  return `
-    <div class="subview-header">
-      <button type="button" class="back-pill-btn" data-open-view="home">${ICONS.back} <span>Back</span></button>
-      <button type="button" class="action-pill-btn" id="toggle-exam-form-btn">${ICONS.plus} <span>Exam Date</span></button>
-    </div>
-
-    <div class="subview-title-block">
-      <h2>Study Planner &amp; Exams</h2>
-      <p>Offline daily study checklist and upcoming countdowns.</p>
-    </div>
-
-    <div class="content-card">
-      <h3 class="note-title">Today’s Study Checklist</h3>
-      <form class="inline-form" id="add-task-form" style="flex-direction: row;">
-        <input type="text" name="title" class="input-field" placeholder="Add study task…" required />
-        <button type="submit" class="gold-btn" style="white-space: nowrap;">Add</button>
-      </form>
-
-      <div class="inline-form">
-        ${state.tasks
-          .map(
-            (t) => `
-            <div class="task-item ${t.done ? 'is-done' : ''}" data-toggle-task="${t.id}">
-              <div class="task-check">${t.done ? ICONS.check : ''}</div>
-              <span class="task-label">${escapeHtml(t.title)}</span>
-            </div>
-          `
-          )
-          .join('')}
-      </div>
-    </div>
-
-    ${
-      ui.showNewExamForm
-        ? `
-      <form class="content-card inline-form" id="add-exam-form">
-        <input type="text" name="title" class="input-field" placeholder="Exam paper name (e.g. Maths Paper 1)" required />
-        <input type="number" name="daysAway" min="1" max="365" class="input-field" placeholder="Days remaining (e.g. 14)" required />
-        <button type="submit" class="gold-btn">Save Countdown</button>
-      </form>
-    `
-        : ''
-    }
-
-    <div class="content-card">
-      <h3 class="note-title">Exam Countdowns</h3>
-      <div class="inline-form">
-        ${state.exams
-          .map(
-            (ex) => `
-            <div class="exam-row">
-              <span class="task-label">${escapeHtml(ex.title)}</span>
-              <span class="exam-days-badge">${Number(ex.daysAway)} days left</span>
-            </div>
-          `
-          )
-          .join('')}
-      </div>
-    </div>
-  `;
-}
-
-function renderTimerView() {
-  return `
-    <div class="subview-header">
-      <button type="button" class="back-pill-btn" data-open-view="home">${ICONS.back} <span>Back</span></button>
-      <span class="tile-count-pill">${state.focusMinutesToday} mins today</span>
-    </div>
-
-    <div class="subview-title-block">
-      <h2>Offline Focus Timer</h2>
-      <p>Stay locked in without distractions or internet.</p>
+      <h2>Messages &amp; Study Groups</h2>
+      <p>Talk directly with teachers or study together with classmates. Chats stay saved offline.</p>
     </div>
 
     <div class="chip-row">
-      ${[25, 15, 5]
+      <button type="button" class="filter-chip ${ui.msgTab === 'teachers' ? 'is-active' : ''}" data-msg-tab="teachers">
+        Teachers (1-on-1)
+      </button>
+      <button type="button" class="filter-chip ${ui.msgTab === 'groups' ? 'is-active' : ''}" data-msg-tab="groups">
+        Study Groups (${vault.rooms.filter((r) => r.room_type === 'group').length})
+      </button>
+    </div>
+
+    ${
+      ui.showGroupForm
+        ? `
+      <form class="content-card inline-form" id="create-group-form">
+        <h3 class="item-title">Form a New Study Group</h3>
+        <input type="text" name="name" class="input-field" placeholder="Study Group Name (e.g. Grade 12 Calculus Revision)" required />
+        <input type="text" name="subject" class="input-field" placeholder="Subject (e.g. Mathematics)" required />
+        <input type="text" name="members" class="input-field" placeholder="Invite classmates / teacher (e.g. Amahle, Liam, Ms. Khumalo)" required />
+        <button type="submit" class="gold-btn">Create Study Group</button>
+      </form>
+    `
+        : ''
+    }
+
+    <!-- Room Selector List -->
+    <div class="stack-list">
+      ${filteredRooms
         .map(
-          (m) => `
-          <button type="button" class="filter-chip ${ui.timerModeMinutes === m ? 'is-active' : ''}" data-timer-preset="${m}">
-            ${m === 5 ? '5m Break' : `${m}m Focus`}
+          (room) => `
+          <button type="button" class="room-item-btn ${activeRoom?.id === room.id ? 'is-active' : ''}" data-select-room="${room.id}">
+            <div class="wide-strip-left">
+              <div class="room-avatar">${escapeHtml(initials(room.name))}</div>
+              <div>
+                <div class="tile-title">${escapeHtml(room.name)}</div>
+                <div class="tile-sub">${escapeHtml(room.members_label || room.subject)}</div>
+              </div>
+            </div>
+            <span class="tile-count-pill">${escapeHtml(room.subject)}</span>
           </button>
         `
         )
         .join('')}
     </div>
 
-    <div class="content-card timer-dial-card">
-      <span class="subject-tag">${ui.timerRunning ? 'Focus Session Active' : 'Ready to Focus'}</span>
-      <div class="timer-digits" id="timer-live-readout">${formatTimer(ui.timerSecondsLeft)}</div>
-      <div class="dual-btn-row" style="width: 100%; margin-top: 0.6rem;">
-        <button type="button" class="secondary-btn" id="timer-reset-btn">Reset</button>
-        <button type="button" class="gold-btn" id="timer-toggle-btn">
-          ${ui.timerRunning ? 'Pause' : 'Start Timer'}
-        </button>
-      </div>
-    </div>
+    <!-- Active Chat Thread -->
+    ${
+      activeRoom
+        ? `
+      <section class="content-card">
+        <div class="card-meta-row">
+          <h3 class="item-title">${escapeHtml(activeRoom.name)}</h3>
+          <span class="offline-saved-badge">${escapeHtml(activeRoom.room_type === 'group' ? 'Study Group' : 'Direct Teacher Chat')}</span>
+        </div>
+
+        <div class="chat-feed-box" id="chat-feed-box">
+          ${
+            roomMessages.length
+              ? roomMessages
+                  .map((m) => {
+                    const mine = m.sender_id === user.id;
+                    return `
+                      <div class="chat-bubble ${mine ? 'is-mine' : ''}">
+                        <span class="chat-sender">${escapeHtml(m.sender_name)} (${escapeHtml(m.sender_role)})</span>
+                        <p class="chat-text">${escapeHtml(m.body)}</p>
+                      </div>
+                    `;
+                  })
+                  .join('')
+              : `<p class="tile-sub">No messages yet — say hello to start the conversation!</p>`
+          }
+        </div>
+
+        <form class="chat-composer-row" id="send-chat-form" data-room-id="${activeRoom.id}">
+          <input type="text" name="body" class="input-field" placeholder="Write a message (queues offline if no signal)…" required />
+          <button type="submit" class="gold-btn" aria-label="Send">${ICONS.send}</button>
+        </form>
+      </section>
+    `
+        : ''
+    }
   `;
 }
 
-function renderGoalView() {
-  const weakest = getWeakestSubject(state);
-  const goalPct = Math.min(100, Math.round((state.dailyCompleted / Math.max(1, state.dailyGoalTarget)) * 100));
+/* ==========================================================================
+   6. APP-WIDE BROADCASTS VIEW (ADMIN & TEACHERS -> STUDENTS & PARENTS)
+   ========================================================================== */
+
+function renderBroadcastsView(user) {
+  const canBroadcast = user.role === 'admin' || user.role === 'teacher';
 
   return `
     <div class="subview-header">
       <button type="button" class="back-pill-btn" data-open-view="home">${ICONS.back} <span>Back</span></button>
-      <span class="tile-count-pill">${state.streakDays}-day streak</span>
-    </div>
-
-    <div class="subview-title-block">
-      <h2>Today’s Goal &amp; Weak Spot</h2>
-      <p>Complete quizzes, flashcards, or focus blocks to fill your daily ring.</p>
-    </div>
-
-    <div class="content-card">
-      <div class="goal-bar-labels">
-        <span class="goal-bar-title">Daily Sessions Completed</span>
-        <span class="goal-bar-count">${state.dailyCompleted} / ${state.dailyGoalTarget}</span>
-      </div>
-      <div class="goal-track" style="height: 11px;">
-        <div class="goal-track-fill" style="width: ${goalPct}%"></div>
-      </div>
-
-      <div class="chip-row" style="margin-top: 0.35rem;">
-        ${[3, 4, 5, 6]
-          .map(
-            (target) => `
-            <button type="button" class="filter-chip ${state.dailyGoalTarget === target ? 'is-active' : ''}" data-goal-target="${target}">
-              Goal: ${target}/day
-            </button>
-          `
-          )
-          .join('')}
-      </div>
-    </div>
-
-    <div class="content-card">
-      <span class="subject-tag">Recommended Focus Next</span>
-      <h3 class="note-title">${escapeHtml(weakest.subject.name)} (${weakest.score}% Confidence)</h3>
-      <p class="note-summary">This is currently your lowest-confidence subject. A quick 3-minute quiz will lift it immediately.</p>
-      <button type="button" class="continue-btn" id="practice-weakspot-btn" data-sub="${weakest.subject.id}">
-        <span class="play-accent">${ICONS.play}</span>
-        <span>Practice ${escapeHtml(weakest.subject.short)} Now</span>
-      </button>
-    </div>
-  `;
-}
-
-function renderLibraryHubView() {
-  return `
-    <div class="subview-title-block">
-      <h2>Study Library</h2>
-      <p>Your offline notes, formulas, and flashcard decks.</p>
-    </div>
-    <section class="layout-grid">
-      <button type="button" class="feature-tile-btn" data-open-view="notes">
-        <div class="tile-top-row">
-          <div class="tile-icon-box">${ICONS.notes}</div>
-          <span class="tile-count-pill">${state.notes.length} notes</span>
-        </div>
-        <div class="tile-copy">
-          <div class="tile-title">Study Notes</div>
-          <div class="tile-sub">Formulas &amp; guides</div>
-        </div>
-      </button>
-
-      <button type="button" class="feature-tile-btn" data-open-view="flashcards">
-        <div class="tile-top-row">
-          <div class="tile-icon-box">${ICONS.flashcards}</div>
-          <span class="tile-count-pill">${state.flashcards.length} cards</span>
-        </div>
-        <div class="tile-copy">
-          <div class="tile-title">Flashcards</div>
-          <div class="tile-sub">Active recall deck</div>
-        </div>
-      </button>
-    </section>
-  `;
-}
-
-function renderPracticeHubView() {
-  return `
-    <div class="subview-title-block">
-      <h2>Practice &amp; Focus</h2>
-      <p>Test yourself offline, run a study timer, or plan exams.</p>
-    </div>
-    <section class="layout-grid">
-      <button type="button" class="feature-tile-btn" data-open-view="quiz">
-        <div class="tile-top-row">
-          <div class="tile-icon-box">${ICONS.quiz}</div>
-          <span class="tile-count-pill">${state.quizzes.length} Qs</span>
-        </div>
-        <div class="tile-copy">
-          <div class="tile-title">Quick Quiz</div>
-          <div class="tile-sub">Instant marking</div>
-        </div>
-      </button>
-
-      <button type="button" class="feature-tile-btn" data-open-view="timer">
-        <div class="tile-top-row">
-          <div class="tile-icon-box">${ICONS.timer}</div>
-          <span class="tile-count-pill">25m</span>
-        </div>
-        <div class="tile-copy">
-          <div class="tile-title">Focus Timer</div>
-          <div class="tile-sub">Study sprints</div>
-        </div>
-      </button>
-
-      <button type="button" class="feature-tile-btn" data-open-view="planner" style="grid-column: span 2; min-height: 112px;">
-        <div class="tile-top-row">
-          <div class="tile-icon-box">${ICONS.planner}</div>
-          <span class="tile-count-pill">${state.exams.length} exams</span>
-        </div>
-        <div class="tile-copy">
-          <div class="tile-title">Study Planner &amp; Exam Dates</div>
-          <div class="tile-sub">Daily checklist &amp; countdowns</div>
-        </div>
-      </button>
-    </section>
-  `;
-}
-
-function renderConfidenceSettingsView() {
-  const overall = getOverallConfidence(state);
-
-  return `
-    <div class="subview-title-block">
-      <h2>Confidence &amp; App Settings</h2>
-      <p>100% standalone — all progress lives privately on this device.</p>
-    </div>
-
-    <div class="content-card gauge-box">
-      ${renderSunriseGaugeSVG(overall)}
-      <div class="gauge-big-num">${overall}%</div>
-      <span class="tile-sub">Overall Sunrise Confidence</span>
-    </div>
-
-    <div class="content-card">
-      <h3 class="note-title">Subject Confidence</h3>
-      ${SUBJECTS.map((s) => {
-        const sc = Number(state.subjectConfidence?.[s.id] ?? 75);
-        return `
-          <div class="subject-meter-row">
-            <div class="subject-meter-top">
-              <span>${escapeHtml(s.name)}</span>
-              <span>${sc}%</span>
-            </div>
-            <div class="goal-track">
-              <div class="goal-track-fill" style="width: ${sc}%"></div>
-            </div>
-          </div>
-        `;
-      }).join('')}
-    </div>
-
-    <div class="content-card">
-      <h3 class="note-title">Standalone Controls</h3>
-      <div class="dual-btn-row">
-        <button type="button" class="secondary-btn" id="toggle-theme-btn">
-          ${state.theme === 'night' ? '☀️ Cream Mode' : '🌙 Night Mode'}
+      ${
+        canBroadcast
+          ? `
+        <button type="button" class="action-pill-btn" id="toggle-bc-form-btn">
+          ${ICONS.plus}
+          <span>Broadcast Message</span>
         </button>
-        <button type="button" class="secondary-btn" id="replay-intro-btn">
-          ↻ 10s Intro
-        </button>
-      </div>
-      <div class="dual-btn-row">
-        <button type="button" class="secondary-btn" id="export-backup-btn">Export Backup</button>
-        <button type="button" class="secondary-btn" id="reset-data-btn">Reset Demo</button>
-      </div>
+      `
+          : `<span class="tile-count-pill">Students &amp; Parents Feed</span>`
+      }
+    </div>
+
+    <div class="subview-title-block">
+      <h2>App-Wide Broadcasts</h2>
+      <p>
+        ${
+          canBroadcast
+            ? 'Announcements posted here appear across the entire app for all Students and Parents.'
+            : 'Official announcements from i-tutor Admin and Teachers — saved for offline reading.'
+        }
+      </p>
+    </div>
+
+    ${
+      canBroadcast && ui.showBroadcastForm
+        ? `
+      <form class="content-card inline-form" id="send-broadcast-form">
+        <h3 class="item-title">Broadcast to Students &amp; Parents</h3>
+        <input type="text" name="title" class="input-field" placeholder="Headline (e.g. Friday Extra Maths Session at 15:00)" required />
+        <select name="audience" class="input-field">
+          <option value="students_parents">Students &amp; Parents</option>
+          <option value="all">Everyone (Including Visitors)</option>
+        </select>
+        <textarea name="body" rows="3" class="input-field" placeholder="Write announcement message…" required></textarea>
+        <button type="submit" class="gold-btn">Broadcast Throughout App</button>
+      </form>
+    `
+        : ''
+    }
+
+    <div class="stack-list">
+      ${vault.broadcasts
+        .map(
+          (bc) => `
+          <article class="content-card">
+            <div class="card-meta-row">
+              <span class="subject-tag">${escapeHtml(bc.author_role === 'admin' ? 'Admin Broadcast' : 'Teacher Broadcast')}</span>
+              <span class="tile-count-pill">To: Students &amp; Parents</span>
+            </div>
+            <h3 class="item-title">${escapeHtml(bc.title)}</h3>
+            <p class="item-desc">${escapeHtml(bc.body)}</p>
+            <span class="tile-sub">Posted by ${escapeHtml(bc.author_name)}</span>
+          </article>
+        `
+        )
+        .join('')}
     </div>
   `;
 }
 
 /* ==========================================================================
-   4. MAIN SHELL RENDERER & EVENT WIRING
+   7. PUBLIC TUITION PRICES & CONTACT INFO (FOR THOSE NOT YET JOINED)
    ========================================================================== */
 
-function renderWorkspaceByView() {
+function renderTuitionAndContactsView(user, { embeddedOnHome = false } = {}) {
+  const plans = vault.tuitionInfo?.plans || [];
+  const contacts = vault.tuitionInfo?.contacts || {};
+  const isAdmin = user.role === 'admin';
+
+  return `
+    ${
+      embeddedOnHome
+        ? ''
+        : `
+      <div class="subview-header">
+        <button type="button" class="back-pill-btn" data-open-view="home">${ICONS.back} <span>Back</span></button>
+        ${
+          isAdmin
+            ? `<button type="button" class="action-pill-btn" id="toggle-contact-edit-btn">Edit Contacts</button>`
+            : `<button type="button" class="action-pill-btn" data-open-view="account">${ICONS.user} <span>Member Sign In</span></button>`
+        }
+      </div>
+    `
+    }
+
+    <section class="layout-hero-card">
+      <div class="hero-top-row">
+        <span class="offline-saved-badge">Open Admissions · Grades 8 – 12</span>
+        ${
+          embeddedOnHome
+            ? `<button type="button" class="action-pill-btn" data-open-view="account">${ICONS.user} <span>Member Sign In</span></button>`
+            : ''
+        }
+      </div>
+      <div>
+        <div class="hero-eyebrow">Welcome to i-tutor · Confidence in learning</div>
+        <div class="hero-topic-title">Tuition Packages &amp; Contact Info</div>
+        <div class="hero-subline">
+          Not yet enrolled? Explore our monthly &amp; 1-on-1 tuition rates below or contact admissions directly.
+        </div>
+      </div>
+    </section>
+
+    <div class="pricing-grid">
+      ${plans
+        .map(
+          (plan, idx) => `
+          <article class="price-card ${idx === 1 ? 'is-featured' : ''}">
+            <div>
+              <span class="subject-tag">${escapeHtml(plan.badge)}</span>
+              <h3 class="item-title" style="margin-top: 0.55rem;">${escapeHtml(plan.name)}</h3>
+              <div class="price-amount" style="margin-top: 0.25rem;">${escapeHtml(plan.price)}</div>
+            </div>
+            <ul class="price-feature-list">
+              ${(plan.features || []).map((f) => `<li>${escapeHtml(f)}</li>`).join('')}
+            </ul>
+          </article>
+        `
+        )
+        .join('')}
+    </div>
+
+    ${
+      isAdmin && ui.showContactEditForm
+        ? `
+      <form class="content-card inline-form" id="edit-contacts-form">
+        <h3 class="item-title">Update Public Contact Info</h3>
+        <input type="text" name="phone" class="input-field" value="${escapeHtml(contacts.phone || '')}" placeholder="Phone" required />
+        <input type="text" name="whatsapp" class="input-field" value="${escapeHtml(contacts.whatsapp || '')}" placeholder="WhatsApp" required />
+        <input type="email" name="email" class="input-field" value="${escapeHtml(contacts.email || '')}" placeholder="Email" required />
+        <input type="text" name="address" class="input-field" value="${escapeHtml(contacts.address || '')}" placeholder="Address" required />
+        <input type="text" name="hours" class="input-field" value="${escapeHtml(contacts.hours || '')}" placeholder="Hours" required />
+        <button type="submit" class="gold-btn">Save Contact Details</button>
+      </form>
+    `
+        : ''
+    }
+
+    <!-- Contact Infos Card -->
+    <section class="content-card">
+      <h3 class="item-title">Contact i-tutor Admissions</h3>
+      <div class="form-row-2">
+        <div class="contact-row">
+          <span class="contact-label">Phone Desk</span>
+          <span class="contact-val">${escapeHtml(contacts.phone || '')}</span>
+        </div>
+        <div class="contact-row">
+          <span class="contact-label">WhatsApp</span>
+          <span class="contact-val">${escapeHtml(contacts.whatsapp || '')}</span>
+        </div>
+      </div>
+      <div class="contact-row">
+        <span class="contact-label">Email</span>
+        <span class="contact-val">${escapeHtml(contacts.email || '')}</span>
+      </div>
+      <div class="contact-row">
+        <span class="contact-label">Campus Address</span>
+        <span class="contact-val">${escapeHtml(contacts.address || '')}</span>
+      </div>
+      <div class="contact-row">
+        <span class="contact-label">Operating Hours</span>
+        <span class="contact-val">${escapeHtml(contacts.hours || '')}</span>
+      </div>
+    </section>
+
+    <!-- Prospective Learner Enquiry Form -->
+    <form class="content-card inline-form" id="submit-enquiry-form">
+      <h3 class="item-title">Enquire to Join i-tutor</h3>
+      <div class="form-row-2">
+        <input type="text" name="full_name" class="input-field" placeholder="Your Full Name" required />
+        <input type="text" name="contact_detail" class="input-field" placeholder="Phone or WhatsApp Number" required />
+      </div>
+      <div class="form-row-2">
+        <input type="text" name="student_grade" class="input-field" placeholder="Grade (e.g. Grade 11)" required />
+        <select name="selected_plan" class="input-field">
+          ${plans.map((p) => `<option value="${escapeHtml(p.name)}">${escapeHtml(p.name)} (${escapeHtml(p.price)})</option>`).join('')}
+        </select>
+      </div>
+      <textarea name="message" rows="2" class="input-field" placeholder="Subjects needed or questions…"></textarea>
+      <button type="submit" class="gold-btn">Send Admissions Enquiry</button>
+    </form>
+
+    ${
+      isAdmin && vault.enquiries?.length
+        ? `
+      <section class="content-card">
+        <h3 class="item-title">Recent Admissions Enquiries (${vault.enquiries.length})</h3>
+        ${vault.enquiries
+          .map(
+            (eq) => `
+            <div class="worksheet-pack-box">
+              <strong>${escapeHtml(eq.full_name)}</strong> (${escapeHtml(eq.student_grade)}) · ${escapeHtml(eq.contact_detail)}
+              \nPackage: ${escapeHtml(eq.selected_plan)}
+              ${eq.message ? `\nNote: ${escapeHtml(eq.message)}` : ''}
+            </div>
+          `
+          )
+          .join('')}
+      </section>
+    `
+        : ''
+    }
+  `;
+}
+
+/* ==========================================================================
+   8. ACCOUNT / ROLE SWITCHER & OFFLINE SYNC CONTROLS
+   ========================================================================== */
+
+function renderAccountView(user) {
+  return `
+    <div class="subview-header">
+      <button type="button" class="back-pill-btn" data-open-view="home">${ICONS.back} <span>Back</span></button>
+    </div>
+
+    <div class="subview-title-block">
+      <h2>Switch View / Sign In</h2>
+      <p>Preview how Visitors, Students, Parents, Teachers, and Admins use i-tutor.</p>
+    </div>
+
+    <section class="content-card">
+      <h3 class="item-title">Not Yet Joined (Public View)</h3>
+      <button
+        type="button"
+        class="role-choice-btn ${user.id === 'guest' ? 'is-selected' : ''}"
+        data-switch-user="guest"
+        style="width: 100%;"
+      >
+        <span class="tile-title">Visitor — Tuition Prices &amp; Contact Info</span>
+        <span class="tile-sub">What people see before joining the app</span>
+      </button>
+    </section>
+
+    <section class="content-card">
+      <h3 class="item-title">Enrolled Members, Teachers &amp; Admin</h3>
+      <div class="role-grid">
+        ${vault.profiles
+          .map(
+            (p) => `
+            <button
+              type="button"
+              class="role-choice-btn ${user.id === p.id ? 'is-selected' : ''}"
+              data-switch-user="${p.id}"
+            >
+              <span class="subject-tag" style="align-self: flex-start;">${escapeHtml(p.role.toUpperCase())}</span>
+              <span class="tile-title" style="margin-top: 0.25rem;">${escapeHtml(p.name)}</span>
+              <span class="tile-sub">${escapeHtml(p.subtitle)}</span>
+            </button>
+          `
+          )
+          .join('')}
+      </div>
+    </section>
+
+    <section class="content-card">
+      <h3 class="item-title">Appearance &amp; Intro</h3>
+      <div class="form-row-2">
+        <button type="button" class="secondary-btn" id="toggle-theme-btn">
+          ${session.theme === 'night' ? '☀️ Cream Mode' : '🌙 Night Study Mode'}
+        </button>
+        <button type="button" class="secondary-btn" id="replay-intro-btn">
+          ↻ Replay 10s Intro
+        </button>
+      </div>
+    </section>
+  `;
+}
+
+function renderSyncCenterView() {
+  const outbox = loadOutbox();
+  const offline = isDeviceOffline();
+
+  return `
+    <div class="subview-header">
+      <button type="button" class="back-pill-btn" data-open-view="home">${ICONS.back} <span>Back</span></button>
+    </div>
+
+    <div class="subview-title-block">
+      <h2>Offline Storage &amp; Auto-Download</h2>
+      <p>Everything below is stored on your device so you can keep working without internet.</p>
+    </div>
+
+    <section class="content-card">
+      <div class="card-meta-row">
+        <span class="subject-tag">${offline ? 'Currently Offline' : 'Online · Auto-Download Active'}</span>
+        <span class="tile-count-pill">${outbox.length} queued offline</span>
+      </div>
+      <div class="contact-row">
+        <span class="contact-label">Downloaded &amp; Stored on Device</span>
+        <span class="contact-val">
+          ${vault.timetables.length} Timetables · ${vault.assignments.length} Assignments · ${vault.messages.length} Messages · ${vault.broadcasts.length} Broadcasts
+        </span>
+      </div>
+
+      <div class="form-row-2">
+        <button type="button" class="gold-btn" id="manual-sync-btn">
+          ${ICONS.sync}
+          <span>Sync &amp; Download Now</span>
+        </button>
+        <button type="button" class="secondary-btn" id="toggle-offline-sim-btn">
+          ${session.simulateOffline ? 'Go Back Online' : 'Test Offline Mode'}
+        </button>
+      </div>
+    </section>
+  `;
+}
+
+/* ==========================================================================
+   9. SHELL RENDER & EVENTS
+   ========================================================================== */
+
+function renderCurrentView(user) {
   switch (ui.view) {
-    case 'notes':
-      return renderNotesView();
-    case 'quiz':
-      return renderQuizView();
-    case 'flashcards':
-      return renderFlashcardsView();
-    case 'planner':
-      return renderPlannerView();
-    case 'timer':
-      return renderTimerView();
-    case 'goal':
-      return renderGoalView();
-    case 'library':
-      return renderLibraryHubView();
-    case 'practice':
-      return renderPracticeHubView();
-    case 'confidence':
-      return renderConfidenceSettingsView();
+    case 'timetables':
+      return renderTimetablesView(user);
+    case 'assignments':
+      return renderAssignmentsView(user);
+    case 'messages':
+      return renderMessagesView(user);
+    case 'broadcasts':
+      return renderBroadcastsView(user);
+    case 'tuition':
+      return renderTuitionAndContactsView(user);
+    case 'account':
+      return renderAccountView(user);
+    case 'sync':
+      return renderSyncCenterView();
     case 'home':
     default:
-      return renderHomeWorkspace();
+      return renderHomeWorkspace(user);
   }
 }
 
@@ -750,492 +1023,470 @@ function renderAppShell() {
   if (!appEl) return;
 
   applyTheme();
+  const user = getCurrentUser();
+  const offline = isDeviceOffline();
+  const outboxCount = loadOutbox().length;
+
+  const roleShort =
+    user.role === 'guest'
+      ? 'Not Joined'
+      : user.role.charAt(0).toUpperCase() + user.role.slice(1);
 
   appEl.innerHTML = `
     <div class="app-layout" id="app-layout">
-      <!-- Top Bar with Emblem-Only Logo (Zero Letters in Header) -->
+      <!-- Top Bar: Sync Pill | Emblem-Only Logo | Role Switcher -->
       <header class="app-topbar">
-        <button type="button" class="topbar-emblem-btn" id="topbar-logo" aria-label="Home">
-          ${renderEmblemSVG({ animated: false, uid: 'header' })}
-        </button>
+        <div class="topbar-inner">
+          <div class="topbar-left">
+            <button type="button" class="sync-pill-btn" data-open-view="sync">
+              <span class="status-dot ${offline ? 'is-offline' : ''}"></span>
+              <span>${offline ? `Offline${outboxCount ? ` (${outboxCount})` : ''}` : 'Synced'}</span>
+            </button>
+          </div>
+
+          <button type="button" class="topbar-emblem-btn" id="topbar-logo" aria-label="Home">
+            ${renderEmblemSVG({ animated: false, uid: 'header' })}
+          </button>
+
+          <div class="topbar-right">
+            <button type="button" class="role-pill-btn" data-open-view="account">
+              ${ICONS.user}
+              <span>${escapeHtml(roleShort)}</span>
+            </button>
+          </div>
+        </div>
       </header>
 
       <main class="app-workspace">
-        ${renderWorkspaceByView()}
+        ${renderCurrentView(user)}
       </main>
 
-      <!-- Bottom Floating Icon-Only Dock -->
+      <!-- Floating Bottom Charcoal Dock -->
       <nav class="app-bottom-dock" aria-label="Primary Navigation">
         <button type="button" class="dock-slot ${ui.dockIndex === 0 ? 'is-active' : ''}" data-dock-tab="0" aria-label="Home">
           ${ICONS.homeDock}
         </button>
-        <button type="button" class="dock-slot ${ui.dockIndex === 1 ? 'is-active' : ''}" data-dock-tab="1" aria-label="Library">
-          ${ICONS.libraryDock}
+        <button type="button" class="dock-slot ${ui.dockIndex === 1 ? 'is-active' : ''}" data-dock-tab="1" aria-label="Timetable">
+          ${ICONS.timetableDock}
         </button>
-        <button type="button" class="dock-slot ${ui.dockIndex === 2 ? 'is-active' : ''}" data-dock-tab="2" aria-label="Practice">
-          ${ICONS.practiceDock}
+        <button type="button" class="dock-slot ${ui.dockIndex === 2 ? 'is-active' : ''}" data-dock-tab="2" aria-label="Messages">
+          ${ICONS.messagesDock}
         </button>
-        <button type="button" class="dock-slot ${ui.dockIndex === 3 ? 'is-active' : ''}" data-dock-tab="3" aria-label="Confidence">
-          ${ICONS.confidenceDock}
+        <button type="button" class="dock-slot ${ui.dockIndex === 3 ? 'is-active' : ''}" data-dock-tab="3" aria-label="Broadcasts and Tuition">
+          ${ICONS.infoDock}
         </button>
       </nav>
     </div>
   `;
 
-  bindAppEvents();
+  renderToastOnly();
+  bindEvents(user);
 }
 
-function openView(targetView) {
-  ui.view = targetView;
-  if (targetView === 'home') ui.dockIndex = 0;
-  else if (targetView === 'library' || targetView === 'notes' || targetView === 'flashcards') ui.dockIndex = 1;
-  else if (targetView === 'practice' || targetView === 'quiz' || targetView === 'timer' || targetView === 'planner') ui.dockIndex = 2;
-  else if (targetView === 'confidence' || targetView === 'goal') ui.dockIndex = 3;
-
-  if (targetView === 'quiz') {
-    ui.quizIndex = 0;
-    ui.quizSelectedOption = null;
-    ui.quizScore = 0;
-    ui.quizFinished = false;
-  }
+function openView(target) {
+  ui.view = target;
+  if (target === 'home') ui.dockIndex = 0;
+  else if (target === 'timetables' || target === 'assignments') ui.dockIndex = 1;
+  else if (target === 'messages') ui.dockIndex = 2;
+  else if (target === 'broadcasts' || target === 'tuition') ui.dockIndex = 3;
 
   window.scrollTo({ top: 0, behavior: 'smooth' });
   renderAppShell();
 }
 
-function bindAppEvents() {
-  // Top emblem: single click -> Home, double click -> replay 10s intro
+function bindEvents(user) {
   const topLogo = document.getElementById('topbar-logo');
   if (topLogo) {
-    topLogo.addEventListener('click', () => {
-      if (ui.view !== 'home') openView('home');
-    });
+    topLogo.addEventListener('click', () => openView('home'));
     topLogo.addEventListener('dblclick', () => startTenSecondLoadingSequence());
   }
 
-  // View navigation buttons
   document.querySelectorAll('[data-open-view]').forEach((btn) => {
     btn.addEventListener('click', () => {
-      const next = btn.getAttribute('data-open-view');
-      if (next) openView(next);
+      const target = btn.getAttribute('data-open-view');
+      if (target) openView(target);
     });
   });
 
-  // Bottom Dock Tabs
-  const dockViews = ['home', 'library', 'practice', 'confidence'];
+  // Bottom Dock
   document.querySelectorAll('[data-dock-tab]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const idx = Number(btn.getAttribute('data-dock-tab') || 0);
       ui.dockIndex = idx;
-      ui.view = dockViews[idx] || 'home';
+      if (idx === 0) ui.view = 'home';
+      else if (idx === 1) ui.view = user.role === 'guest' ? 'tuition' : 'timetables';
+      else if (idx === 2) ui.view = user.role === 'guest' ? 'tuition' : 'messages';
+      else ui.view = user.role === 'guest' ? 'tuition' : 'broadcasts';
       renderAppShell();
     });
   });
 
-  // Continue Studying button on Hero Card
-  const continueBtn = document.getElementById('continue-study-btn');
-  if (continueBtn) {
-    continueBtn.addEventListener('click', () => {
-      const lastSub = state.lastStudied?.subjectId || 'maths';
-      ui.subjectFilter = lastSub;
-      if (state.lastStudied?.type === 'quiz') openView('quiz');
-      else if (state.lastStudied?.type === 'flashcard') openView('flashcards');
-      else openView('notes');
-    });
-  }
-
-  // Subject filter chips
-  document.querySelectorAll('[data-filter-sub]').forEach((chip) => {
-    chip.addEventListener('click', () => {
-      ui.subjectFilter = chip.getAttribute('data-filter-sub') || 'all';
-      ui.quizIndex = 0;
-      ui.quizSelectedOption = null;
-      ui.quizFinished = false;
-      ui.cardIndex = 0;
-      ui.cardFlipped = false;
-      renderAppShell();
-    });
-  });
-
-  // --- Notes Events ---
-  const toggleNoteBtn = document.getElementById('toggle-new-note-btn');
-  if (toggleNoteBtn) {
-    toggleNoteBtn.addEventListener('click', () => {
-      ui.showNewNoteForm = !ui.showNewNoteForm;
-      renderAppShell();
-    });
-  }
-
-  const newNoteForm = document.getElementById('new-note-form');
-  if (newNoteForm) {
-    newNoteForm.addEventListener('submit', (e) => {
-      e.preventDefault();
-      const fd = new FormData(newNoteForm);
-      const subjectId = String(fd.get('subjectId') || 'maths');
-      const title = String(fd.get('title') || '').trim();
-      const formula = String(fd.get('formula') || '').trim();
-      const summary = String(fd.get('summary') || '').trim();
-      if (!title || !summary) return;
-
-      const sub = getSubjectById(subjectId);
-      const newNote = {
-        id: `note-${Date.now()}`,
-        subjectId,
-        title,
-        topic: sub.short,
-        keyFormulas: formula ? [formula] : [],
-        summary,
-        bookmarked: true
-      };
-      state.notes.unshift(newNote);
-      state.lastStudied = {
-        type: 'note',
-        id: newNote.id,
-        subjectId,
-        title: `${sub.name} — ${title}`
-      };
-      saveState(state);
-      ui.showNewNoteForm = false;
-      renderAppShell();
-    });
-  }
-
-  document.querySelectorAll('[data-note-card]').forEach((cardEl) => {
-    cardEl.addEventListener('click', () => {
-      const id = cardEl.getAttribute('data-note-card');
-      const found = state.notes.find((n) => n.id === id);
-      if (found) {
-        const sub = getSubjectById(found.subjectId);
-        state.lastStudied = {
-          type: 'note',
-          id: found.id,
-          subjectId: found.subjectId,
-          title: `${sub.name} — ${found.topic || found.title}`
-        };
-        saveState(state);
-      }
-    });
-  });
-
-  // --- Quick Quiz Events ---
-  const pool = state.quizzes.filter(
-    (q) => ui.subjectFilter === 'all' || q.subjectId === ui.subjectFilter
-  );
-  document.querySelectorAll('[data-quiz-opt]').forEach((optBtn) => {
-    optBtn.addEventListener('click', () => {
-      const chosen = Number(optBtn.getAttribute('data-quiz-opt'));
-      const currentQ = pool[Math.min(ui.quizIndex, pool.length - 1)];
-      if (!currentQ) return;
-
-      ui.quizSelectedOption = chosen;
-      const sub = getSubjectById(currentQ.subjectId);
-      state.lastStudied = {
-        type: 'quiz',
-        id: currentQ.id,
-        subjectId: currentQ.subjectId,
-        title: `${sub.name} — ${currentQ.topic}`
-      };
-
-      if (chosen === currentQ.correctIndex) {
-        ui.quizScore += 1;
-        state.subjectConfidence[currentQ.subjectId] = Math.min(
-          100,
-          Number(state.subjectConfidence[currentQ.subjectId] || 75) + 2
-        );
-      } else {
-        state.subjectConfidence[currentQ.subjectId] = Math.max(
-          40,
-          Number(state.subjectConfidence[currentQ.subjectId] || 75) - 1
-        );
-      }
-      saveState(state);
-      renderAppShell();
-    });
-  });
-
-  const nextQuizBtn = document.getElementById('next-quiz-btn');
-  if (nextQuizBtn) {
-    nextQuizBtn.addEventListener('click', () => {
-      if (ui.quizIndex + 1 < pool.length) {
-        ui.quizIndex += 1;
-        ui.quizSelectedOption = null;
-      } else {
-        ui.quizFinished = true;
-        state.dailyCompleted += 1;
-        saveState(state);
-      }
-      renderAppShell();
-    });
-  }
-
-  const restartQuizBtn = document.getElementById('restart-quiz-btn');
-  if (restartQuizBtn) {
-    restartQuizBtn.addEventListener('click', () => {
-      ui.quizIndex = 0;
-      ui.quizSelectedOption = null;
-      ui.quizScore = 0;
-      ui.quizFinished = false;
-      renderAppShell();
-    });
-  }
-
-  // --- Flashcards Events ---
-  const flipBox = document.getElementById('flashcard-flip-box');
-  if (flipBox) {
-    flipBox.addEventListener('click', () => {
-      ui.cardFlipped = !ui.cardFlipped;
-      renderAppShell();
-    });
-  }
-
-  const toggleNewCardBtn = document.getElementById('toggle-new-card-btn');
-  if (toggleNewCardBtn) {
-    toggleNewCardBtn.addEventListener('click', () => {
-      ui.showNewCardForm = !ui.showNewCardForm;
-      renderAppShell();
-    });
-  }
-
-  const newCardForm = document.getElementById('new-card-form');
-  if (newCardForm) {
-    newCardForm.addEventListener('submit', (e) => {
-      e.preventDefault();
-      const fd = new FormData(newCardForm);
-      const subjectId = String(fd.get('subjectId') || 'maths');
-      const front = String(fd.get('front') || '').trim();
-      const back = String(fd.get('back') || '').trim();
-      if (!front || !back) return;
-      state.flashcards.unshift({
-        id: `fc-${Date.now()}`,
-        subjectId,
-        front,
-        back,
-        mastered: false
-      });
-      saveState(state);
-      ui.showNewCardForm = false;
-      ui.cardIndex = 0;
-      ui.cardFlipped = false;
-      renderAppShell();
-    });
-  }
-
-  const deck = state.flashcards.filter(
-    (c) => ui.subjectFilter === 'all' || c.subjectId === ui.subjectFilter
-  );
-  const fcPracticeBtn = document.getElementById('fc-practice-btn');
-  if (fcPracticeBtn && deck.length) {
-    fcPracticeBtn.addEventListener('click', () => {
-      const card = deck[ui.cardIndex % deck.length];
-      card.mastered = false;
-      ui.cardIndex = (ui.cardIndex + 1) % deck.length;
-      ui.cardFlipped = false;
-      saveState(state);
-      renderAppShell();
-    });
-  }
-
-  const fcGotItBtn = document.getElementById('fc-gotit-btn');
-  if (fcGotItBtn && deck.length) {
-    fcGotItBtn.addEventListener('click', () => {
-      const card = deck[ui.cardIndex % deck.length];
-      if (!card.mastered) {
-        card.mastered = true;
-        state.subjectConfidence[card.subjectId] = Math.min(
-          100,
-          Number(state.subjectConfidence[card.subjectId] || 75) + 1
-        );
-      }
-      const sub = getSubjectById(card.subjectId);
-      state.lastStudied = {
-        type: 'flashcard',
-        id: card.id,
-        subjectId: card.subjectId,
-        title: `${sub.name} — Flashcards`
-      };
-      ui.cardIndex = (ui.cardIndex + 1) % deck.length;
-      ui.cardFlipped = false;
-      saveState(state);
-      renderAppShell();
-    });
-  }
-
-  // --- Study Planner Events ---
-  document.querySelectorAll('[data-toggle-task]').forEach((el) => {
-    el.addEventListener('click', () => {
-      const id = el.getAttribute('data-toggle-task');
-      const task = state.tasks.find((t) => t.id === id);
-      if (task) {
-        task.done = !task.done;
-        if (task.done) state.dailyCompleted += 1;
-        saveState(state);
-        renderAppShell();
-      }
-    });
-  });
-
-  const addTaskForm = document.getElementById('add-task-form');
-  if (addTaskForm) {
-    addTaskForm.addEventListener('submit', (e) => {
-      e.preventDefault();
-      const fd = new FormData(addTaskForm);
-      const title = String(fd.get('title') || '').trim();
-      if (!title) return;
-      state.tasks.unshift({
-        id: `t-${Date.now()}`,
-        title,
-        subjectId: 'maths',
-        done: false
-      });
-      saveState(state);
-      renderAppShell();
-    });
-  }
-
-  const toggleExamFormBtn = document.getElementById('toggle-exam-form-btn');
-  if (toggleExamFormBtn) {
-    toggleExamFormBtn.addEventListener('click', () => {
-      ui.showNewExamForm = !ui.showNewExamForm;
-      renderAppShell();
-    });
-  }
-
-  const addExamForm = document.getElementById('add-exam-form');
-  if (addExamForm) {
-    addExamForm.addEventListener('submit', (e) => {
-      e.preventDefault();
-      const fd = new FormData(addExamForm);
-      const title = String(fd.get('title') || '').trim();
-      const daysAway = Number(fd.get('daysAway') || 7);
-      if (!title) return;
-      state.exams.push({
-        id: `ex-${Date.now()}`,
-        subjectId: 'maths',
-        title,
-        daysAway
-      });
-      state.exams.sort((a, b) => a.daysAway - b.daysAway);
-      saveState(state);
-      ui.showNewExamForm = false;
-      renderAppShell();
-    });
-  }
-
-  // --- Focus Timer Events ---
-  document.querySelectorAll('[data-timer-preset]').forEach((btn) => {
+  // Role Switcher
+  document.querySelectorAll('[data-switch-user]').forEach((btn) => {
     btn.addEventListener('click', () => {
-      const mins = Number(btn.getAttribute('data-timer-preset') || 25);
-      stopFocusTimer();
-      ui.timerModeMinutes = mins;
-      ui.timerSecondsLeft = mins * 60;
+      const nextId = btn.getAttribute('data-switch-user') || 'stu-thabo';
+      session.currentUserId = nextId;
+      saveSession(session);
+      ui.view = 'home';
+      ui.dockIndex = 0;
+      const switchedUser = getCurrentUser();
+      showToast(`Viewing as ${switchedUser.name}`);
       renderAppShell();
     });
   });
 
-  const timerToggleBtn = document.getElementById('timer-toggle-btn');
-  if (timerToggleBtn) {
-    timerToggleBtn.addEventListener('click', () => {
-      if (ui.timerRunning) {
-        stopFocusTimer();
-      } else {
-        startFocusTimer();
-      }
-      renderAppShell();
-    });
-  }
-
-  const timerResetBtn = document.getElementById('timer-reset-btn');
-  if (timerResetBtn) {
-    timerResetBtn.addEventListener('click', () => {
-      stopFocusTimer();
-      ui.timerSecondsLeft = ui.timerModeMinutes * 60;
-      renderAppShell();
-    });
-  }
-
-  // --- Goal & Weak-Spot Events ---
-  document.querySelectorAll('[data-goal-target]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      state.dailyGoalTarget = Number(btn.getAttribute('data-goal-target') || 4);
-      saveState(state);
-      renderAppShell();
-    });
-  });
-
-  const weakSpotBtn = document.getElementById('practice-weakspot-btn');
-  if (weakSpotBtn) {
-    weakSpotBtn.addEventListener('click', () => {
-      ui.subjectFilter = weakSpotBtn.getAttribute('data-sub') || 'all';
-      openView('quiz');
-    });
-  }
-
-  // --- Confidence & Settings Events ---
+  // Theme & Intro Replay
   const themeBtn = document.getElementById('toggle-theme-btn');
   if (themeBtn) {
     themeBtn.addEventListener('click', () => {
-      state.theme = state.theme === 'night' ? 'light' : 'night';
-      saveState(state);
+      session.theme = session.theme === 'night' ? 'light' : 'night';
+      saveSession(session);
       renderAppShell();
     });
   }
 
-  const replayIntroBtn = document.getElementById('replay-intro-btn');
-  if (replayIntroBtn) {
-    replayIntroBtn.addEventListener('click', () => startTenSecondLoadingSequence());
+  const replayBtn = document.getElementById('replay-intro-btn');
+  if (replayBtn) {
+    replayBtn.addEventListener('click', () => startTenSecondLoadingSequence());
   }
 
-  const exportBackupBtn = document.getElementById('export-backup-btn');
-  if (exportBackupBtn) {
-    exportBackupBtn.addEventListener('click', () => {
-      const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'i-tutor-offline-backup.json';
-      a.click();
-      URL.revokeObjectURL(url);
+  // Offline Sync Controls
+  const manualSyncBtn = document.getElementById('manual-sync-btn');
+  if (manualSyncBtn) {
+    manualSyncBtn.addEventListener('click', () => performSync({ silent: false }));
+  }
+
+  const toggleOfflineSimBtn = document.getElementById('toggle-offline-sim-btn');
+  if (toggleOfflineSimBtn) {
+    toggleOfflineSimBtn.addEventListener('click', () => {
+      session.simulateOffline = !session.simulateOffline;
+      saveSession(session);
+      if (!session.simulateOffline) {
+        showToast('Back online — syncing queued offline items & downloading updates…');
+        performSync({ silent: true });
+      } else {
+        ui.syncState = 'offline';
+        showToast('Simulated Offline Mode ON — try saving timetables, assignments, or messages!');
+        renderAppShell();
+      }
     });
   }
 
-  const resetDataBtn = document.getElementById('reset-data-btn');
-  if (resetDataBtn) {
-    resetDataBtn.addEventListener('click', () => {
-      state = resetState();
+  // --- Timetable Events ---
+  document.querySelectorAll('[data-day-filter]').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      ui.dayFilter = chip.getAttribute('data-day-filter') || 'All';
+      renderAppShell();
+    });
+  });
+
+  const toggleTtFormBtn = document.getElementById('toggle-tt-form-btn');
+  if (toggleTtFormBtn) {
+    toggleTtFormBtn.addEventListener('click', () => {
+      ui.showTimetableForm = !ui.showTimetableForm;
       renderAppShell();
     });
   }
-}
 
-function startFocusTimer() {
-  if (ui.timerIntervalId) clearInterval(ui.timerIntervalId);
-  ui.timerRunning = true;
-  ui.timerIntervalId = setInterval(() => {
-    if (ui.timerSecondsLeft > 0) {
-      ui.timerSecondsLeft -= 1;
-      const liveEl = document.getElementById('timer-live-readout');
-      if (liveEl) liveEl.textContent = formatTimer(ui.timerSecondsLeft);
-    } else {
-      stopFocusTimer();
-      state.focusMinutesToday += ui.timerModeMinutes;
-      state.dailyCompleted += 1;
-      saveState(state);
-      ui.timerSecondsLeft = ui.timerModeMinutes * 60;
+  const addTtForm = document.getElementById('add-timetable-form');
+  if (addTtForm) {
+    addTtForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const fd = new FormData(addTtForm);
+      const isStaff = user.role === 'teacher' || user.role === 'admin';
+      const slot = {
+        id: `tt-${Date.now()}`,
+        day_of_week: String(fd.get('day_of_week') || 'Monday'),
+        start_time: String(fd.get('start_time') || '16:00'),
+        end_time: String(fd.get('end_time') || '17:00'),
+        subject: String(fd.get('subject') || '').trim(),
+        topic: String(fd.get('topic') || '').trim(),
+        teacher_name: isStaff ? user.name : '',
+        location_mode: String(fd.get('location_mode') || 'Saved Offline').trim(),
+        grade_group: user.grade || 'Grade 12',
+        owner_id: isStaff ? null : user.id,
+        is_official: isStaff
+      };
+      ui.showTimetableForm = false;
+      runActionAndSync(
+        { type: 'ADD_TIMETABLE', payload: slot },
+        'Timetable saved offline on device — will sync when online!',
+        'Timetable saved offline & synced!'
+      );
+    });
+  }
+
+  document.querySelectorAll('[data-delete-tt]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.getAttribute('data-delete-tt');
+      if (!id) return;
+      runActionAndSync(
+        { type: 'DELETE_TIMETABLE', payload: { id } },
+        'Removed offline — will sync when online.',
+        'Timetable slot removed.'
+      );
+    });
+  });
+
+  // --- Remote Assignment Events ---
+  const toggleAsgBtn = document.getElementById('toggle-asg-form-btn');
+  if (toggleAsgBtn) {
+    toggleAsgBtn.addEventListener('click', () => {
+      ui.showAssignmentForm = !ui.showAssignmentForm;
       renderAppShell();
-    }
-  }, 1000);
-}
+    });
+  }
 
-function stopFocusTimer() {
-  ui.timerRunning = false;
-  if (ui.timerIntervalId) {
-    clearInterval(ui.timerIntervalId);
-    ui.timerIntervalId = null;
+  const createAsgForm = document.getElementById('create-assignment-form');
+  if (createAsgForm) {
+    createAsgForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const fd = new FormData(createAsgForm);
+      const asg = {
+        id: `asg-${Date.now()}`,
+        title: String(fd.get('title') || '').trim(),
+        subject: String(fd.get('subject') || '').trim(),
+        grade_group: String(fd.get('grade_group') || 'Grade 12').trim(),
+        teacher_id: user.id,
+        teacher_name: user.name,
+        due_date: String(fd.get('due_date') || '2026-12-05'),
+        max_marks: Number(fd.get('max_marks') || 30),
+        instructions: String(fd.get('instructions') || '').trim(),
+        offline_pack_content: String(fd.get('offline_pack_content') || '').trim()
+      };
+      ui.showAssignmentForm = false;
+      runActionAndSync(
+        { type: 'CREATE_ASSIGNMENT', payload: asg },
+        'Assignment saved offline — will auto-send to students once online!',
+        'Remote assignment sent! It will auto-download to students’ phones.'
+      );
+    });
+  }
+
+  document.querySelectorAll('.student-submit-form').forEach((form) => {
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const asgId = form.getAttribute('data-asg-id');
+      const fd = new FormData(form);
+      const answerText = String(fd.get('answer_text') || '').trim();
+      if (!asgId || !answerText) return;
+
+      const submission = {
+        id: `subm-${asgId}-${user.id}`,
+        assignment_id: asgId,
+        student_id: user.id,
+        student_name: user.name,
+        answer_text: answerText,
+        status: 'submitted',
+        submitted_at: new Date().toISOString()
+      };
+      runActionAndSync(
+        { type: 'SUBMIT_ASSIGNMENT', payload: submission },
+        'Saved offline! Your assignment will submit automatically when online.',
+        'Assignment submitted to teacher!'
+      );
+    });
+  });
+
+  document.querySelectorAll('.grade-sub-form').forEach((form) => {
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const subId = form.getAttribute('data-sub-id');
+      const fd = new FormData(form);
+      runActionAndSync(
+        {
+          type: 'GRADE_SUBMISSION',
+          payload: {
+            id: subId,
+            marks_awarded: Number(fd.get('marks_awarded') || 0),
+            teacher_feedback: String(fd.get('teacher_feedback') || '').trim()
+          }
+        },
+        'Grade saved offline — will sync to student once online.',
+        'Marks & feedback sent to student!'
+      );
+    });
+  });
+
+  // --- Messages & Study Group Events ---
+  document.querySelectorAll('[data-msg-tab]').forEach((tab) => {
+    tab.addEventListener('click', () => {
+      ui.msgTab = tab.getAttribute('data-msg-tab') || 'teachers';
+      const matching = vault.rooms.filter((r) =>
+        ui.msgTab === 'teachers' ? r.room_type === 'direct' : r.room_type === 'group'
+      );
+      if (matching[0]) ui.activeRoomId = matching[0].id;
+      renderAppShell();
+    });
+  });
+
+  document.querySelectorAll('[data-select-room]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      ui.activeRoomId = btn.getAttribute('data-select-room') || '';
+      renderAppShell();
+      const feed = document.getElementById('chat-feed-box');
+      if (feed) feed.scrollTop = feed.scrollHeight;
+    });
+  });
+
+  const toggleGroupBtn = document.getElementById('toggle-group-form-btn');
+  if (toggleGroupBtn) {
+    toggleGroupBtn.addEventListener('click', () => {
+      ui.showGroupForm = !ui.showGroupForm;
+      renderAppShell();
+    });
+  }
+
+  const createGroupForm = document.getElementById('create-group-form');
+  if (createGroupForm) {
+    createGroupForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const fd = new FormData(createGroupForm);
+      const name = String(fd.get('name') || '').trim();
+      const subject = String(fd.get('subject') || '').trim();
+      const members = String(fd.get('members') || '').trim();
+      if (!name) return;
+
+      const newRoom = {
+        id: `room-grp-${Date.now()}`,
+        room_type: 'group',
+        name,
+        subject: subject || 'Study Group',
+        participant_ids: [user.id],
+        members_label: `Members: ${user.name}, ${members}`,
+        created_by_name: user.name
+      };
+      ui.showGroupForm = false;
+      ui.msgTab = 'groups';
+      ui.activeRoomId = newRoom.id;
+      runActionAndSync(
+        { type: 'CREATE_STUDY_GROUP', payload: newRoom },
+        'Study group created offline — will sync once online!',
+        'New Study Group created!'
+      );
+    });
+  }
+
+  const sendChatForm = document.getElementById('send-chat-form');
+  if (sendChatForm) {
+    sendChatForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const roomId = sendChatForm.getAttribute('data-room-id');
+      const fd = new FormData(sendChatForm);
+      const body = String(fd.get('body') || '').trim();
+      if (!roomId || !body) return;
+
+      const msg = {
+        id: `msg-${Date.now()}`,
+        room_id: roomId,
+        sender_id: user.id,
+        sender_name: user.name,
+        sender_role: user.role,
+        body,
+        created_at: new Date().toISOString()
+      };
+      runActionAndSync(
+        { type: 'SEND_MESSAGE', payload: msg },
+        'Message saved offline — will deliver automatically once online!',
+        'Message sent!'
+      );
+      const feed = document.getElementById('chat-feed-box');
+      if (feed) feed.scrollTop = feed.scrollHeight;
+    });
+  }
+
+  // --- Broadcast Events ---
+  const toggleBcBtn = document.getElementById('toggle-bc-form-btn');
+  if (toggleBcBtn) {
+    toggleBcBtn.addEventListener('click', () => {
+      ui.showBroadcastForm = !ui.showBroadcastForm;
+      renderAppShell();
+    });
+  }
+
+  const sendBcForm = document.getElementById('send-broadcast-form');
+  if (sendBcForm) {
+    sendBcForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const fd = new FormData(sendBcForm);
+      const bc = {
+        id: `bc-${Date.now()}`,
+        title: String(fd.get('title') || '').trim(),
+        body: String(fd.get('body') || '').trim(),
+        author_name: `${user.name} (${user.role === 'admin' ? 'Admin' : 'Teacher'})`,
+        author_role: user.role === 'admin' ? 'admin' : 'teacher',
+        audience: String(fd.get('audience') || 'students_parents'),
+        priority: 'important',
+        created_at: new Date().toISOString()
+      };
+      ui.showBroadcastForm = false;
+      runActionAndSync(
+        { type: 'SEND_BROADCAST', payload: bc },
+        'Broadcast queued offline — will publish across the app once online!',
+        'Broadcast sent throughout the app to Students & Parents!'
+      );
+    });
+  }
+
+  // --- Tuition Contacts & Enquiry Events ---
+  const toggleContactEditBtn = document.getElementById('toggle-contact-edit-btn');
+  if (toggleContactEditBtn) {
+    toggleContactEditBtn.addEventListener('click', () => {
+      ui.showContactEditForm = !ui.showContactEditForm;
+      renderAppShell();
+    });
+  }
+
+  const editContactsForm = document.getElementById('edit-contacts-form');
+  if (editContactsForm) {
+    editContactsForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const fd = new FormData(editContactsForm);
+      const nextContacts = {
+        phone: String(fd.get('phone') || '').trim(),
+        whatsapp: String(fd.get('whatsapp') || '').trim(),
+        email: String(fd.get('email') || '').trim(),
+        address: String(fd.get('address') || '').trim(),
+        hours: String(fd.get('hours') || '').trim()
+      };
+      ui.showContactEditForm = false;
+      runActionAndSync(
+        {
+          type: 'UPDATE_TUITION_INFO',
+          payload: { plans: vault.tuitionInfo.plans, contacts: nextContacts }
+        },
+        'Contact info updated offline — will sync when online.',
+        'Public contact info updated!'
+      );
+    });
+  }
+
+  const enquiryForm = document.getElementById('submit-enquiry-form');
+  if (enquiryForm) {
+    enquiryForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const fd = new FormData(enquiryForm);
+      const eq = {
+        id: `eq-${Date.now()}`,
+        full_name: String(fd.get('full_name') || '').trim(),
+        contact_detail: String(fd.get('contact_detail') || '').trim(),
+        student_grade: String(fd.get('student_grade') || '').trim(),
+        selected_plan: String(fd.get('selected_plan') || '').trim(),
+        message: String(fd.get('message') || '').trim(),
+        created_at: new Date().toISOString()
+      };
+      enquiryForm.reset();
+      runActionAndSync(
+        { type: 'SUBMIT_ENQUIRY', payload: eq },
+        'Enquiry saved offline — will send to Admissions automatically once online!',
+        'Thank you! Admissions received your enquiry.'
+      );
+    });
   }
 }
 
 /* ==========================================================================
-   5. BOOT WITH 10-SECOND LOADING SEQUENCE
+   10. BOOT SEQUENCE (10s ANIMATED INTRO + AUTOMATIC OFFLINE SYNC LISTENERS)
    ========================================================================== */
 
 function startTenSecondLoadingSequence() {
@@ -1248,6 +1499,14 @@ function startTenSecondLoadingSequence() {
   }
 
   appEl.innerHTML = renderSplashScreenMarkup();
+
+  // Trigger background auto-download of latest timetables, assignments, messages & broadcasts during splash
+  if (!isDeviceOffline()) {
+    syncWithServer({ simulateOffline: session.simulateOffline }).then((res) => {
+      vault = res.vault;
+      ui.syncState = res.status === 'synced' ? 'synced' : 'offline';
+    });
+  }
 
   const splashEl = document.getElementById('splash-screen');
   const fillEl = document.getElementById('loader-fill');
@@ -1271,9 +1530,7 @@ function startTenSecondLoadingSequence() {
 
     let currentPhase = STATUS_PHASES[0].text;
     for (const phase of STATUS_PHASES) {
-      if (pct >= phase.threshold) {
-        currentPhase = phase.text;
-      }
+      if (pct >= phase.threshold) currentPhase = phase.text;
     }
     if (statusEl && currentPhase !== lastStatusText) {
       lastStatusText = currentPhase;
@@ -1302,14 +1559,37 @@ function startTenSecondLoadingSequence() {
   activeAnimationFrame = requestAnimationFrame(tick);
 }
 
-function registerOfflineServiceWorker() {
-  if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('/sw.js').catch(() => {});
+// Automatic reconnect listener: downloads new assignments/timetables & pushes queued offline work automatically!
+window.addEventListener('online', () => {
+  if (!session.simulateOffline) {
+    showToast('Connection restored — auto-downloading assignments & syncing offline work…');
+    performSync({ silent: true });
+  }
+});
+
+window.addEventListener('offline', () => {
+  ui.syncState = 'offline';
+  showToast('You are offline — your saved timetables & assignments remain available.');
+  if (!activeAnimationFrame) renderAppShell();
+});
+
+// Gentle background auto-download every 20s when online so remote teacher assignments & broadcasts arrive automatically
+setInterval(() => {
+  if (!activeAnimationFrame && !isDeviceOffline() && document.visibilityState === 'visible') {
+    syncWithServer({ simulateOffline: session.simulateOffline }).then((res) => {
+      if (res.status === 'synced') {
+        vault = res.vault;
+        ui.syncState = 'synced';
+      }
     });
   }
+}, 20000);
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  });
 }
 
 applyTheme();
-registerOfflineServiceWorker();
 startTenSecondLoadingSequence();

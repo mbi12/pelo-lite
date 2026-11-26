@@ -1,14 +1,14 @@
 {
   "name": "i-tutor-standalone",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "module",
-  "description": "i-tutor — Confidence in learning. Standalone offline-first application.",
+  "description": "i-tutor — Confidence in learning. Offline-first tuition app with auto-sync.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "build": "node -e \"console.log('i-tutor standalone offline bundle ready')\"",
-    "test": "node --check server.js && node --check public/js/app.js && node --check public/js/emblem.js && node --check public/js/offlineStore.js"
+    "build": "node -e \"console.log('i-tutor offline-sync bundle ready')\"",
+    "test": "node --check server.js && node --check public/js/app.js && node --test test/sync.test.js"
   },
   "engines": {
     "node": ">=20.0.0"

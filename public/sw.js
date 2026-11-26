@@ -1,4 +1,4 @@
-const CACHE_NAME = 'itutor-standalone-v5';
+const CACHE_NAME = 'itutor-standalone-v6';
 const OFFLINE_ASSETS = [
   '/',
   '/index.html',
@@ -6,6 +6,7 @@ const OFFLINE_ASSETS = [
   '/js/app.js',
   '/js/emblem.js',
   '/js/offlineStore.js',
+  '/js/defaultSeed.js',
   '/icon.svg',
   '/manifest.webmanifest',
   '/assets/itutor-logo.jpg'
@@ -33,7 +34,8 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   const { request } = event;
-  if (request.method !== 'GET') return;
+  const url = new URL(request.url);
+  if (request.method !== 'GET' || url.pathname.startsWith('/api/')) return;
 
   event.respondWith(
     caches.match(request).then((cached) => {

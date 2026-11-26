@@ -1,5 +1,5 @@
 /**
- * Custom 3D i-tutor Emblem, Sunrise Confidence Gauge, and Crisp Offline Vector Icons
+ * Custom 3D i-tutor Emblem and Crisp Offline Vector Icons
  * Zero external icon libraries or internet dependencies.
  */
 
@@ -160,62 +160,48 @@ export function renderEmblemSVG({ animated = true, uid = 'main' } = {}) {
   `;
 }
 
-export function renderSunriseGaugeSVG(score = 78) {
-  const clamped = Math.max(0, Math.min(100, Math.round(score)));
-  const arcLen = 220;
-  const offset = (arcLen * (1 - clamped / 100)).toFixed(1);
-
-  return `
-    <svg viewBox="0 0 180 106" class="sunrise-arc-svg" aria-hidden="true">
-      <defs>
-        <linearGradient id="sunriseArcGold" x1="18" y1="92" x2="162" y2="24" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stop-color="#B57A0D" />
-          <stop offset="55%" stop-color="#F2B728" />
-          <stop offset="100%" stop-color="#FCE078" />
-        </linearGradient>
-      </defs>
-      <path d="M 20 92 A 70 70 0 0 1 160 92" fill="none" stroke="currentColor" stroke-opacity="0.11" stroke-width="11" stroke-linecap="round" />
-      <path d="M 20 92 A 70 70 0 0 1 160 92" fill="none" stroke="url(#sunriseArcGold)" stroke-width="11" stroke-linecap="round" stroke-dasharray="${arcLen}" stroke-dashoffset="${offset}" />
-      <path d="M 58 92 A 32 32 0 0 1 122 92 Z" fill="#F2B728" fill-opacity="0.22" />
-    </svg>
-  `;
-}
-
 export const ICONS = {
-  notes: `
+  timetable: `
     <svg viewBox="0 0 24 24" class="ui-svg-icon" aria-hidden="true">
-      <path d="M3 5.5C7 4.2 10.2 5 12 6.8 13.8 5 17 4.2 21 5.5v13c-4-1.3-7.2-.5-9 1.3-1.8-1.8-5-2.6-9-1.3v-13z" />
-      <path d="M12 6.8v13" />
+      <rect x="3.5" y="4.5" width="17" height="16" rx="2.8" />
+      <path d="M8 3v3.5M16 3v3.5M3.5 9.5h17" />
+      <path d="M8 13.5h3.5M13.5 13.5H16M8 17h5" />
     </svg>
   `,
-  quiz: `
+  assignment: `
     <svg viewBox="0 0 24 24" class="ui-svg-icon" aria-hidden="true">
-      <path d="M13 2L4.5 13.5h6.2L9.8 22l9.7-12h-6.3L13 2z" />
+      <path d="M8 4h8a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" />
+      <path d="M9.5 9h5M9.5 13h5M9.5 17h3" />
     </svg>
   `,
-  flashcards: `
+  messages: `
     <svg viewBox="0 0 24 24" class="ui-svg-icon" aria-hidden="true">
-      <rect x="6" y="3.5" width="14" height="15" rx="2.6" />
-      <path d="M4 7.5v11A2.5 2.5 0 0 0 6.5 21H16" />
-      <path d="M9.5 9.5h7M9.5 13h4.5" />
+      <path d="M4 5.5h16a2 2 0 0 1 2 2v8.5a2 2 0 0 1-2 2H8.5L4 21v-3H4a2 2 0 0 1-2-2V7.5a2 2 0 0 1 2-2z" />
+      <path d="M8 10.5h8M8 14h5" />
     </svg>
   `,
-  planner: `
+  broadcast: `
     <svg viewBox="0 0 24 24" class="ui-svg-icon" aria-hidden="true">
-      <rect x="3.5" y="5" width="17" height="15.5" rx="2.8" />
-      <path d="M8 3v4M16 3v4M3.5 9.5h17" />
-      <path d="M8.5 14l2.2 2.2 4.8-4.8" />
+      <path d="M4 10.5v3a1.5 1.5 0 0 0 1.5 1.5H8l6.5 4V5L8 9H5.5A1.5 1.5 0 0 0 4 10.5z" />
+      <path d="M18 9.2a4.2 4.2 0 0 1 0 5.6M20.5 6.8a7.5 7.5 0 0 1 0 10.4" />
     </svg>
   `,
-  timer: `
+  tuition: `
+    <svg viewBox="0 0 24 24" class="ui-svg-icon" aria-hidden="true">
+      <path d="M12 3L2.5 8 12 13l9.5-5L12 3z" />
+      <path d="M6 10.2v5.3c0 1.8 2.7 3.5 6 3.5s6-1.7 6-3.5v-5.3" />
+    </svg>
+  `,
+  download: `
     <svg viewBox="0 0 24 24" class="ui-svg-icon-sm" aria-hidden="true">
-      <circle cx="12" cy="13" r="7.5" />
-      <path d="M10 3h4M12 9.5v3.8l2.4 1.6" />
+      <path d="M12 4v11M8 11.5l4 4 4-4" />
+      <path d="M4.5 19h15" />
     </svg>
   `,
-  play: `
-    <svg viewBox="0 0 24 24" class="ui-svg-icon-sm fill-current" aria-hidden="true">
-      <polygon points="7,5 19,12 7,19" fill="currentColor" stroke="none" />
+  sync: `
+    <svg viewBox="0 0 24 24" class="ui-svg-icon-sm" aria-hidden="true">
+      <path d="M20 11a8 8 0 0 0-14.5-4.6L4 8M4 4v4h4" />
+      <path d="M4 13a8 8 0 0 0 14.5 4.6L20 16M20 20v-4h-4" />
     </svg>
   `,
   back: `
@@ -233,11 +219,16 @@ export const ICONS = {
       <path d="M5 12.5l4.5 4.5L19 7.5" />
     </svg>
   `,
-  target: `
+  send: `
     <svg viewBox="0 0 24 24" class="ui-svg-icon-sm" aria-hidden="true">
-      <circle cx="12" cy="12" r="8.5" />
-      <circle cx="12" cy="12" r="4.5" />
-      <circle cx="12" cy="12" r="1.5" fill="currentColor" />
+      <path d="M21 3L10 14" />
+      <path d="M21 3l-7 18-4-7-7-4 18-7z" />
+    </svg>
+  `,
+  user: `
+    <svg viewBox="0 0 24 24" class="ui-svg-icon-sm" aria-hidden="true">
+      <circle cx="12" cy="8" r="3.8" />
+      <path d="M5 20c1.5-3.4 4.2-5 7-5s5.5 1.6 7 5" />
     </svg>
   `,
   homeDock: `
@@ -246,24 +237,21 @@ export const ICONS = {
       <path d="M5.5 9.5V20h13V9.5" />
     </svg>
   `,
-  libraryDock: `
+  timetableDock: `
     <svg class="dock-icon" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M2 5.5C6.5 4 10 5 12 7c2-2 5.5-3 10-1.5v13C17.5 17 14 18 12 20c-2-2-5.5-3-10-1.5v-13z" />
-      <path d="M12 7v13" />
+      <rect x="3.5" y="4.5" width="17" height="16" rx="2.8" />
+      <path d="M8 3v3.5M16 3v3.5M3.5 9.5h17" />
     </svg>
   `,
-  practiceDock: `
+  messagesDock: `
     <svg class="dock-icon" viewBox="0 0 24 24" aria-hidden="true">
-      <rect x="3.5" y="3.5" width="7" height="7" rx="2" />
-      <rect x="13.5" y="3.5" width="7" height="7" rx="2" />
-      <rect x="3.5" y="13.5" width="7" height="7" rx="2" />
-      <rect x="13.5" y="13.5" width="7" height="7" rx="2" />
+      <path d="M4 5.5h16a2 2 0 0 1 2 2v8.5a2 2 0 0 1-2 2H8.5L4 21v-3H4a2 2 0 0 1-2-2V7.5a2 2 0 0 1 2-2z" />
     </svg>
   `,
-  confidenceDock: `
+  infoDock: `
     <svg class="dock-icon" viewBox="0 0 24 24" aria-hidden="true">
-      <circle cx="12" cy="12" r="4" />
-      <path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M18.4 5.6l-1.8 1.8M7.4 16.6l-1.8 1.8" />
+      <path d="M4 10.5v3a1.5 1.5 0 0 0 1.5 1.5H8l6.5 4V5L8 9H5.5A1.5 1.5 0 0 0 4 10.5z" />
+      <path d="M18 9.2a4.2 4.2 0 0 1 0 5.6" />
     </svg>
   `
 };
