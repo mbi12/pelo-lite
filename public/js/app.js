@@ -102,6 +102,21 @@ const ui = {
   editingFlyerId: null,
   stagedFlyerAttachment: null,
 
+  // Teacher & Admin Subject Studio (Students & Notes organized by Subject)
+  studioSubject: '',
+  studioGroupFilter: 'All',
+  showEnrollStudentBar: false,
+  editingStudentNoteId: null,
+  showStudioNoteForm: false,
+  editingStudioNoteId: null,
+  stagedNoteAttachments: [],
+
+  // Editable Profile Icon staging (per account)
+  stagedMyAvatar: null,
+  stagedMyAvatarAttachment: null,
+  stagedAccAvatar: null,
+  stagedAccAvatarAttachment: null,
+
   // Mobile responsive shell state
   mobileDrawerOpen: false,
   mobileSearchOpen: false,
@@ -135,6 +150,103 @@ function initials(name = 'IT') {
     .slice(0, 2)
     .map((w) => w[0].toUpperCase())
     .join('');
+}
+
+const PROFILE_ICON_PRESETS = ['🎓', '📚', '🧮', '🔬', '🌟', '🚀', '👑', '🦁', '🦉', '🏆', '💡', '💛', '🎨', '🌍'];
+
+function isAvatarImageUrl(val = '') {
+  const s = String(val || '').trim();
+  return (
+    s.startsWith('http://') ||
+    s.startsWith('https://') ||
+    s.startsWith('/') ||
+    s.startsWith('blob:') ||
+    s.startsWith('data:image/')
+  );
+}
+
+function renderAvatarHTML(profile, { size = 38, className = 'account-avatar-gold', overrideAvatar = null } = {}) {
+  const av = overrideAvatar !== null ? String(overrideAvatar || '') : String(profile?.avatar || '');
+  const dim = `width:${size}px;height:${size}px;min-width:${size}px;`;
+  if (isAvatarImageUrl(av)) {
+    return `<span class="${className} is-photo-avatar" style="${dim}"><img src="${esc(av)}" alt="${esc(
+      profile?.name || 'Profile'
+    )}" class="avatar-img-fill" /></span>`;
+  }
+  if (av) {
+    return `<span class="${className} is-icon-avatar" style="${dim}font-size:${Math.round(size * 0.52)}px;">${esc(av)}</span>`;
+  }
+  return `<span class="${className}" style="${dim}font-size:${Math.max(11, Math.round(size * 0.36))}px;">${esc(
+    initials(profile?.name || 'IT')
+  )}</span>`;
+}
+
+function renderAvatarPickerHTML({ profile, stagedAvatar, scope = 'self' }) {
+  const currentAv = stagedAvatar !== null ? stagedAvatar : String(profile?.avatar || '');
+  const uploading = ui.uploadingTarget === `avatar:${scope}`;
+  return `
+    <div class="avatar-editor-box">
+      <div class="avatar-editor-top">
+        <div style="display:flex;align-items:center;gap:0.75rem;">
+          ${renderAvatarHTML(profile || { name: 'Account' }, { size: 52, overrideAvatar: currentAv })}
+          <div>
+            <strong style="font-size:0.86rem;display:block;">Profile Icon / Photo</strong>
+            <span class="row-sub">Pick an icon below or upload a custom photo for this account.</span>
+          </div>
+        </div>
+        <div class="action-cluster">
+          <label class="gold-cta-btn upload-picker-label" style="padding:0.42rem 0.78rem;font-size:0.76rem;">
+            ${ICONS.photo}
+            <span>${uploading ? 'Uploading...' : 'Upload Photo'}</span>
+            <input type="file" id="avatar-file-${esc(scope)}" accept="image/*" hidden />
+          </label>
+          ${
+            currentAv
+              ? `<button type="button" class="outline-btn" style="padding:0.42rem 0.72rem;font-size:0.75rem;" data-avatar-clear="${esc(
+                  scope
+                )}">Use Initials</button>`
+              : ''
+          }
+        </div>
+      </div>
+
+      <div class="avatar-preset-row" role="group" aria-label="Choose profile icon">
+        ${PROFILE_ICON_PRESETS.map(
+          (ic) => `
+          <button
+            type="button"
+            class="avatar-preset-btn ${currentAv === ic ? 'is-selected' : ''}"
+            data-avatar-pick="${esc(ic)}"
+            data-avatar-scope="${esc(scope)}"
+            title="Select ${esc(ic)}"
+          >${esc(ic)}</button>
+        `
+        ).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function getAllKnownSubjects() {
+  const set = new Set(SUBJECT_LIST);
+  for (const p of vaultState.profiles || []) {
+    for (const s of p.subjects || []) {
+      if (s && s !== 'All Subjects') set.add(s);
+    }
+  }
+  for (const n of vaultState.notes || []) {
+    if (n.subject) set.add(n.subject);
+  }
+  return Array.from(set);
+}
+
+function getEditableSubjectsForUser(user) {
+  if (canEditEverything(user)) return getAllKnownSubjects();
+  if (user?.role === 'teacher') {
+    const mine = (user.subjects || []).filter((s) => s && s !== 'All Subjects');
+    return mine.length ? mine : [SUBJECT_LIST[0]];
+  }
+  return getAllKnownSubjects();
 }
 
 /* Quiet single-button ⋯ action menu — replaces cluttered side-by-side Edit/Delete button pairs */
@@ -552,7 +664,8 @@ function renderAuthPortal(rootEl, { animateCard = true } = {}) {
         ui.showAuthPortal = false;
         ui.authError = '';
         ui.authSuccess = '';
-        ui.view = target.role === 'admissions' ? 'admissions' : 'tuition';
+        ui.view =
+          target.role === 'admissions' ? 'admissions' : target.role === 'teacher' ? 'subjects' : 'tuition';
         showToast(`Signed in as ${target.name} (${target.role.toUpperCase()})`);
       }
     });
@@ -575,7 +688,8 @@ function renderAuthPortal(rootEl, { animateCard = true } = {}) {
       ui.showAuthPortal = false;
       ui.authError = '';
       ui.authSuccess = '';
-      ui.view = res.profile.role === 'admissions' ? 'admissions' : 'tuition';
+      ui.view =
+        res.profile.role === 'admissions' ? 'admissions' : res.profile.role === 'teacher' ? 'subjects' : 'tuition';
       showToast(`Welcome back, ${res.profile.name}!`);
     });
   }
@@ -660,6 +774,11 @@ function buildAdmissionsStage(user) {
           <button type="button" class="outline-btn" id="btn-cancel-account-edit">Cancel</button>
         </div>
         <input type="hidden" name="id" value="${esc(editingAcc?.id || '')}" />
+        ${renderAvatarPickerHTML({
+          profile: editingAcc || { name: 'New Account' },
+          stagedAvatar: ui.stagedAccAvatar,
+          scope: 'admin'
+        })}
         <div class="form-grid-2">
           <input class="field-input" name="name" value="${esc(editingAcc?.name || '')}" placeholder="Full Name" required />
           <select class="field-input" name="role" required>
@@ -816,15 +935,18 @@ function buildAdmissionsStage(user) {
           .map(
             (acc) => `
           <div class="list-row">
-            <div class="list-row-col">
-              <span class="row-title">
-                ${esc(acc.name)}
-                <span class="muted-pill">${esc(acc.role.toUpperCase())}</span>
-                <span class="status-chip ${esc(acc.status || 'active')}">${esc(acc.status || 'active')}</span>
-              </span>
-              <span class="row-sub">${esc(acc.subtitle || acc.grade)} · ${esc(acc.email || '—')} · PIN: <code>${esc(
-              acc.pin || '1234'
-            )}</code></span>
+            <div style="display:flex;align-items:center;gap:0.72rem;min-width:0;flex:1;">
+              ${renderAvatarHTML(acc, { size: 38 })}
+              <div class="list-row-col">
+                <span class="row-title">
+                  ${esc(acc.name)}
+                  <span class="muted-pill">${esc(acc.role.toUpperCase())}</span>
+                  <span class="status-chip ${esc(acc.status || 'active')}">${esc(acc.status || 'active')}</span>
+                </span>
+                <span class="row-sub">${esc(acc.subtitle || acc.grade)} · ${esc(acc.email || '—')} · Subjects: ${esc(
+              (acc.subjects || []).join(', ') || '—'
+            )}</span>
+              </div>
             </div>
             <div class="action-cluster">
               ${
@@ -880,13 +1002,15 @@ function buildMyAccountStage(user) {
     <form class="panel-card form-stack" id="my-profile-form">
       <div class="panel-head">
         <div style="display:flex;align-items:center;gap:0.75rem;">
-          <div class="account-avatar-gold" style="width:44px;height:44px;font-size:0.98rem;">${esc(initials(user.name))}</div>
+          ${renderAvatarHTML(user, { size: 46, overrideAvatar: ui.stagedMyAvatar })}
           <div>
             <h2 class="panel-title">${esc(user.name)}</h2>
             <span class="status-chip active">${esc(user.role.toUpperCase())}</span>
           </div>
         </div>
       </div>
+
+      ${renderAvatarPickerHTML({ profile: user, stagedAvatar: ui.stagedMyAvatar, scope: 'self' })}
 
       <div class="form-grid-2">
         <div>
@@ -967,16 +1091,20 @@ function buildOverviewStage(user) {
   let kpis = [];
   if (canEditEverything(user)) {
     kpis = [
-      { label: 'Admissions', value: `${pendingAdmissions} Pending`, foot: '1-click approvals', go: 'admissions' },
+      { label: 'Admissions & Icons', value: `${pendingAdmissions} Pending`, foot: 'Accounts & profile icons', go: 'admissions' },
+      { label: 'Subjects & Students', value: `${getAllKnownSubjects().length} Subjects`, foot: 'Control all teachers, students & notes', go: 'subjects' },
       { label: 'Flyers & Prices', value: `${(vaultState.tuitionInfo.flyers || []).length} Flyer · ${(vaultState.tuitionInfo.plans || []).length} Plans`, foot: 'Add flyers & prices at will', go: 'tuition' },
-      { label: 'Homework Packs', value: `${vaultState.assignments.length} Active`, foot: 'Upload PDFs, Photos & Videos', go: 'assignments' },
-      { label: 'Chats & Groups', value: `${visibleRooms.length} Rooms`, foot: 'Share media & messages', go: 'messages' }
+      { label: 'Homework Packs', value: `${vaultState.assignments.length} Active`, foot: 'Upload PDFs, Photos & Videos', go: 'assignments' }
     ];
   } else if (user.role === 'teacher') {
+    const mySubjects = getEditableSubjectsForUser(user);
+    const myStudentCount = (vaultState.profiles || []).filter(
+      (p) => p.role === 'student' && p.status === 'active' && (p.subjects || []).some((s) => mySubjects.includes(s))
+    ).length;
     kpis = [
+      { label: 'My Subjects & Notes', value: `${myStudentCount} Students`, foot: `${mySubjects.join(', ')}`, go: 'subjects' },
       { label: 'Homework & Media', value: `${ungradedCount} To Mark`, foot: 'Post PDFs, Photos & Videos', go: 'assignments' },
       { label: 'Class Schedule', value: `${vaultState.timetables.length} Slots`, foot: 'Weekly timetable', go: 'timetable' },
-      { label: 'Attendance', value: `${presentRatio}%`, foot: 'Lesson recaps', go: 'broadcasts' },
       { label: 'Chats & Groups', value: `${visibleRooms.length} Open`, foot: 'Send media & notes', go: 'messages' }
     ];
   } else if (user.role === 'parent') {
@@ -1509,6 +1637,470 @@ function buildAssignmentsStage(user) {
 }
 
 /* ==========================================================================
+   7B. TEACHER & ADMIN SUBJECT STUDIO (STUDENTS & NOTES ORGANIZED BY SUBJECT)
+   ========================================================================== */
+
+function buildSubjectStudioStage(user) {
+  if (!isStaff(user)) {
+    return `<section class="panel-card"><p class="row-sub">Subject Studio is available to Teachers, Admissions & Admin staff.</p></section>`;
+  }
+
+  const superEdit = canEditEverything(user);
+  const allKnownSubjects = getAllKnownSubjects();
+  const availableSubjects = getEditableSubjectsForUser(user);
+  const activeSubj = availableSubjects.includes(ui.studioSubject)
+    ? ui.studioSubject
+    : availableSubjects[0] || SUBJECT_LIST[0];
+
+  if (ui.studioSubject !== activeSubj) {
+    ui.studioSubject = activeSubj;
+  }
+
+  const allProfiles = vaultState.profiles || [];
+  const allStudents = allProfiles.filter((p) => p.role === 'student' && p.status !== 'declined');
+  const allTeachers = allProfiles.filter((p) => p.role === 'teacher' && p.status === 'active');
+
+  const q = ui.searchQuery.trim().toLowerCase();
+
+  // Teachers assigned to activeSubj
+  const assignedTeachers = allTeachers.filter(
+    (t) => (t.subjects || []).includes(activeSubj) || (t.subjects || []).includes('All Subjects')
+  );
+  const unassignedTeachers = allTeachers.filter(
+    (t) => !(t.subjects || []).includes(activeSubj) && !(t.subjects || []).includes('All Subjects')
+  );
+
+  // Students enrolled in activeSubj
+  const enrolledAll = allStudents.filter((s) => (s.subjects || []).includes(activeSubj));
+  const unenrolledStudents = allStudents.filter((s) => !(s.subjects || []).includes(activeSubj));
+
+  // Unique study group tags inside activeSubj
+  const groupTags = [
+    'All',
+    ...new Set(
+      enrolledAll
+        .map((s) => s.subject_notes?.[activeSubj]?.group)
+        .filter(Boolean)
+    )
+  ];
+  const activeGroupFilter = groupTags.includes(ui.studioGroupFilter) ? ui.studioGroupFilter : 'All';
+
+  const visibleStudents = enrolledAll.filter((s) => {
+    const grp = s.subject_notes?.[activeSubj]?.group || '';
+    const grpOk = activeGroupFilter === 'All' || grp === activeGroupFilter;
+    const searchOk =
+      !q ||
+      (s.name || '').toLowerCase().includes(q) ||
+      (s.grade || '').toLowerCase().includes(q) ||
+      grp.toLowerCase().includes(q) ||
+      (s.subject_notes?.[activeSubj]?.note || '').toLowerCase().includes(q);
+    return grpOk && searchOk;
+  });
+
+  // Notes organized under activeSubj
+  const subjectNotes = (vaultState.notes || []).filter((n) => {
+    const subjOk = n.subject === activeSubj;
+    const searchOk =
+      !q ||
+      (n.title || '').toLowerCase().includes(q) ||
+      (n.summary || '').toLowerCase().includes(q) ||
+      (n.grade_group || '').toLowerCase().includes(q);
+    return subjOk && searchOk;
+  });
+
+  const editingStudioNote = ui.editingStudioNoteId
+    ? (vaultState.notes || []).find((n) => n.id === ui.editingStudioNoteId)
+    : null;
+  const activeNoteAtts = ui.stagedNoteAttachments;
+
+  // Homework count for activeSubj
+  const subjAssignments = (vaultState.assignments || []).filter((a) => a.subject === activeSubj);
+  const allSubmissions = vaultState.submissions || [];
+
+  // Other subjects a Teacher could add to their own teaching list
+  const extraTeacherSubjects =
+    user.role === 'teacher' ? allKnownSubjects.filter((s) => !availableSubjects.includes(s)) : [];
+
+  return `
+    <div class="page-header-row">
+      <div>
+        <h1>${superEdit ? 'Subjects, Teachers, Students & Notes' : 'My Subjects, Students & Notes'}</h1>
+        <p>${
+          superEdit
+            ? 'Full Admin control over every subject, teacher assignment, student group, and subject note.'
+            : 'Organize your students into study groups and publish structured notes & resources for your subjects.'
+        }</p>
+      </div>
+      <div class="action-cluster">
+        ${
+          extraTeacherSubjects.length > 0
+            ? `
+          <select class="field-input compact-select" id="teacher-claim-subj-select" aria-label="Add subject to my teaching">
+            <option value="">+ Add Subject to My Teaching...</option>
+            ${extraTeacherSubjects.map((s) => `<option value="${esc(s)}">${esc(s)}</option>`).join('')}
+          </select>
+        `
+            : ''
+        }
+      </div>
+    </div>
+
+    <!-- SUBJECT TABS BAR -->
+    <div class="subject-pills-bar" role="tablist" aria-label="Subjects">
+      ${availableSubjects
+        .map((subj) => {
+          const sCount = allStudents.filter((st) => (st.subjects || []).includes(subj)).length;
+          const nCount = (vaultState.notes || []).filter((nt) => nt.subject === subj).length;
+          return `
+            <button
+              type="button"
+              class="subject-tab-pill ${activeSubj === subj ? 'is-active' : ''}"
+              data-studio-subj="${esc(subj)}"
+            >
+              <span>${esc(subj)}</span>
+              <span class="subj-pill-meta">${sCount}S · ${nCount}N</span>
+            </button>
+          `;
+        })
+        .join('')}
+    </div>
+
+    <!-- SUBJECT HEADER & TEACHER ASSIGNMENT STRIP (FULL ADMIN CONTROL) -->
+    <section class="panel-card subject-control-banner">
+      <div class="subject-banner-left">
+        <span class="pill-badge">${superEdit ? 'Admin Master Control' : 'Active Subject'}</span>
+        <h2 class="panel-title" style="font-size:1.15rem;">${esc(activeSubj)}</h2>
+        <div class="teacher-chips-wrap">
+          <span class="row-sub" style="font-weight:750;">Educators:</span>
+          ${
+            assignedTeachers.length === 0
+              ? `<span class="muted-pill">No teacher assigned yet</span>`
+              : assignedTeachers
+                  .map(
+                    (t) => `
+                <span class="teacher-chip-badge">
+                  ${renderAvatarHTML(t, { size: 22 })}
+                  <span>${esc(t.name)}</span>
+                  ${
+                    superEdit && !(t.subjects || []).includes('All Subjects')
+                      ? `<button type="button" class="chip-x-btn" data-unassign-teacher="${esc(
+                          t.id
+                        )}" title="Remove ${esc(t.name)} from ${esc(activeSubj)}">×</button>`
+                      : ''
+                  }
+                </span>
+              `
+                  )
+                  .join('')
+          }
+        </div>
+      </div>
+
+      ${
+        superEdit && unassignedTeachers.length > 0
+          ? `
+        <div class="action-cluster">
+          <select class="field-input compact-select" id="admin-assign-teacher-select" aria-label="Assign teacher to subject">
+            <option value="">+ Assign Teacher to ${esc(activeSubj)}...</option>
+            ${unassignedTeachers.map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('')}
+          </select>
+        </div>
+      `
+          : ''
+      }
+    </section>
+
+    <!-- TWO-COLUMN ORGANIZED WORKSPACE: [1] STUDENTS IN SUBJECT | [2] NOTES IN SUBJECT -->
+    <div class="two-col-grid subject-studio-cols">
+      <!-- COLUMN 1: ORGANIZE STUDENTS IN THIS SUBJECT -->
+      <section class="panel-card">
+        <div class="panel-head">
+          <div>
+            <h2 class="panel-title">Students in ${esc(activeSubj)} (${visibleStudents.length})</h2>
+            <p class="row-sub">Group learners by stream and track per-subject progress notes.</p>
+          </div>
+          <button type="button" class="dark-cta-btn" id="btn-toggle-enroll-student">
+            ${ICONS.plus} ${ui.showEnrollStudentBar ? 'Close' : 'Add Student'}
+          </button>
+        </div>
+
+        ${
+          groupTags.length > 1
+            ? `
+          <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+            <span class="row-sub" style="font-weight:750;">Filter Group:</span>
+            <select class="field-input compact-select" id="studio-group-filter">
+              ${groupTags
+                .map(
+                  (g) =>
+                    `<option value="${esc(g)}" ${activeGroupFilter === g ? 'selected' : ''}>${
+                      g === 'All' ? 'All Study Groups' : esc(g)
+                    }</option>`
+                )
+                .join('')}
+            </select>
+          </div>
+        `
+            : ''
+        }
+
+        ${
+          ui.showEnrollStudentBar
+            ? `
+          <div class="worksheet-box form-stack">
+            ${
+              unenrolledStudents.length > 0
+                ? `
+              <form class="form-stack" id="assign-existing-student-form">
+                <strong style="font-size:0.82rem;">Add Existing Academy Student to ${esc(activeSubj)}</strong>
+                <select class="field-input" name="student_id" required>
+                  ${unenrolledStudents
+                    .map((st) => `<option value="${esc(st.id)}">${esc(st.name)} (${esc(st.grade || 'Student')})</option>`)
+                    .join('')}
+                </select>
+                <input class="field-input" name="group_tag" placeholder="Study Group (e.g. Group A · Exam Sprint / JCE Core)" />
+                <button class="gold-cta-btn" type="submit">${ICONS.plus} <span>Add to ${esc(activeSubj)}</span></button>
+              </form>
+            `
+                : `<p class="row-sub">All existing students are already in ${esc(activeSubj)}. You can register a new student below:</p>`
+            }
+
+            <details class="quiet-disclosure">
+              <summary class="quiet-disclosure-summary">
+                <span>+ Create & Enroll Brand-New Student in ${esc(activeSubj)}</span>
+              </summary>
+              <form class="form-stack" id="quick-create-student-subj-form" style="margin-top:0.65rem;">
+                <div class="form-grid-2">
+                  <input class="field-input" name="name" placeholder="Student Full Name" required />
+                  <input class="field-input" name="grade" placeholder="Level (e.g. Std 6 / JCE / Form 4)" required />
+                </div>
+                <div class="form-grid-2">
+                  <input class="field-input" name="phone" placeholder="Phone / WhatsApp" />
+                  <input class="field-input" name="group_tag" placeholder="Study Group (e.g. Breakthrough Pod)" />
+                </div>
+                <button class="dark-cta-btn" type="submit">${ICONS.check} Create & Add Student</button>
+              </form>
+            </details>
+          </div>
+        `
+            : ''
+        }
+
+        <div class="form-stack">
+          ${
+            visibleStudents.length === 0
+              ? `<p class="row-sub">No students matched in ${esc(activeSubj)} yet. Tap "+ Add Student" above to assign learners.</p>`
+              : visibleStudents
+                  .map((stu) => {
+                    const subjMeta = stu.subject_notes?.[activeSubj] || {};
+                    const completedSubjHw = subjAssignments.filter((a) =>
+                      allSubmissions.some((sub) => sub.assignment_id === a.id && sub.student_id === stu.id)
+                    ).length;
+
+                    if (ui.editingStudentNoteId === stu.id) {
+                      return `
+                        <form class="panel-card form-stack org-student-subj-form" data-stu-id="${esc(
+                          stu.id
+                        )}" style="padding:0.85rem;background:var(--surface-recessed);">
+                          <div style="display:flex;align-items:center;gap:0.65rem;">
+                            ${renderAvatarHTML(stu, { size: 36 })}
+                            <div>
+                              <strong style="font-size:0.88rem;">${esc(stu.name)}</strong>
+                              <span class="row-sub" style="display:block;">Organize in ${esc(activeSubj)}</span>
+                            </div>
+                          </div>
+                          <input
+                            class="field-input"
+                            name="group"
+                            value="${esc(subjMeta.group || '')}"
+                            placeholder="Study Group / Stream (e.g. Group A · Exam Sprint, JCE Core, Std 4–6)"
+                          />
+                          <textarea
+                            class="field-input"
+                            name="note"
+                            rows="2"
+                            placeholder="Progress note for ${esc(activeSubj)} (strengths, topics to revise, homework notes)..."
+                          >${esc(subjMeta.note || '')}</textarea>
+                          <div class="action-cluster">
+                            <button class="dark-cta-btn" type="submit">${ICONS.check} Save</button>
+                            <button class="outline-btn" type="button" data-cancel-org-stu>Cancel</button>
+                          </div>
+                        </form>
+                      `;
+                    }
+
+                    return `
+                      <div class="list-row" style="align-items:flex-start;">
+                        <div style="display:flex;align-items:flex-start;gap:0.72rem;min-width:0;flex:1;">
+                          ${renderAvatarHTML(stu, { size: 40 })}
+                          <div class="list-row-col">
+                            <span class="row-title">
+                              ${esc(stu.name)}
+                              <span class="muted-pill">${esc(stu.grade || 'Student')}</span>
+                              ${subjMeta.group ? `<span class="pill-badge">${esc(subjMeta.group)}</span>` : ''}
+                            </span>
+                            <span class="row-sub">
+                              ${esc(stu.selected_plan || 'Enrolled')} · Homework: <strong>${completedSubjHw}/${
+                      subjAssignments.length
+                    }</strong> done
+                            </span>
+                            ${
+                              subjMeta.note
+                                ? `<div class="stu-subj-note-box">📝 ${esc(subjMeta.note)}</div>`
+                                : `<span class="row-sub" style="font-style:italic;">No ${esc(
+                                    activeSubj
+                                  )} progress note yet — tap ⋯ to organize group & note.</span>`
+                            }
+                          </div>
+                        </div>
+                        ${renderMoreMenu(`
+                          <button type="button" class="more-menu-item" data-org-stu="${esc(stu.id)}">${ICONS.edit} Group & Progress Note</button>
+                          ${
+                            superEdit
+                              ? `<button type="button" class="more-menu-item" data-jump-edit-acc="${esc(stu.id)}">${ICONS.user} Edit Full Account & Icon</button>`
+                              : ''
+                          }
+                          <button type="button" class="more-menu-item is-danger" data-unassign-stu="${esc(stu.id)}">${ICONS.trash} Remove from ${esc(
+                          activeSubj
+                        )}</button>
+                        `)}
+                      </div>
+                    `;
+                  })
+                  .join('')
+          }
+        </div>
+      </section>
+
+      <!-- COLUMN 2: ORGANIZE SUBJECT NOTES & ATTACHMENTS -->
+      <section class="panel-card">
+        <div class="panel-head">
+          <div>
+            <h2 class="panel-title">${esc(activeSubj)} Notes (${subjectNotes.length})</h2>
+            <p class="row-sub">Structured subject notes, formulas & PDF/Photo handouts for learners.</p>
+          </div>
+          <button type="button" class="gold-cta-btn" id="btn-toggle-studio-note">
+            ${ICONS.plus} <span>${ui.showStudioNoteForm || editingStudioNote ? 'Close' : 'Add Note'}</span>
+          </button>
+        </div>
+
+        ${
+          ui.showStudioNoteForm || editingStudioNote
+            ? `
+          <form class="worksheet-box form-stack" id="upsert-studio-note-form">
+            <div class="panel-head">
+              <strong style="font-size:0.9rem;">${
+                editingStudioNote ? `Edit Note · ${esc(editingStudioNote.title)}` : `New ${esc(activeSubj)} Note`
+              }</strong>
+              <button type="button" class="outline-btn" id="btn-cancel-studio-note">Cancel</button>
+            </div>
+            <input type="hidden" name="id" value="${esc(editingStudioNote?.id || '')}" />
+            <div class="form-grid-2">
+              <input
+                class="field-input"
+                name="title"
+                value="${esc(editingStudioNote?.title || '')}"
+                placeholder="Note Title (e.g. Trig Identities Summary)"
+                required
+              />
+              <select class="field-input" name="subject">
+                ${(superEdit ? allKnownSubjects : availableSubjects)
+                  .map(
+                    (s) =>
+                      `<option value="${esc(s)}" ${(editingStudioNote?.subject || activeSubj) === s ? 'selected' : ''}>${esc(
+                        s
+                      )}</option>`
+                  )
+                  .join('')}
+              </select>
+            </div>
+            <input
+              class="field-input"
+              name="grade_group"
+              value="${esc(editingStudioNote?.grade_group || 'BGCSE / Form 4')}"
+              placeholder="Level / Group (e.g. Standard 4 – 6, JCE, BGCSE / Form 4, All Levels)"
+            />
+            <textarea
+              class="field-input"
+              name="summary"
+              rows="3"
+              placeholder="Key lesson explanation & exam tips..."
+              required
+            >${esc(editingStudioNote?.summary || '')}</textarea>
+            <textarea
+              class="field-input"
+              name="formulasRaw"
+              rows="3"
+              placeholder="Key formulas, rules, or bullet points (one per line)..."
+            >${esc((editingStudioNote?.formulas || []).join('\n'))}</textarea>
+
+            <div class="media-upload-zone">
+              <div class="media-upload-head">
+                <div>
+                  <strong style="font-size:0.82rem;">Attach Handout (PDF, Photo, or Video)</strong>
+                  <p class="row-sub">Students open attachments inside the built-in full-screen viewer.</p>
+                </div>
+                <label class="outline-btn upload-picker-label">
+                  ${ICONS.paperclip}
+                  <span>${ui.uploadingTarget === 'studio-note' ? 'Uploading...' : 'Attach File'}</span>
+                  <input
+                    type="file"
+                    id="studio-note-media-input"
+                    accept="image/*,application/pdf,.pdf,video/*"
+                    multiple
+                    hidden
+                  />
+                </label>
+              </div>
+              ${renderAttachmentGalleryHTML(activeNoteAtts, { removablePrefix: 'studio-note' })}
+            </div>
+
+            <button class="dark-cta-btn" type="submit">${ICONS.check} ${
+                editingStudioNote ? 'Update Subject Note' : `Save ${esc(activeSubj)} Note`
+              }</button>
+          </form>
+        `
+            : ''
+        }
+
+        <div class="form-stack">
+          ${
+            subjectNotes.length === 0
+              ? `<p class="row-sub">No notes posted under ${esc(activeSubj)} yet. Tap "+ Add Note" to share revision summaries or PDFs.</p>`
+              : subjectNotes
+                  .map(
+                    (n) => `
+                <article class="panel-card" style="padding:0.9rem;background:var(--surface-recessed);">
+                  <div class="panel-head">
+                    <div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">
+                      <span class="pill-badge">${esc(n.grade_group || 'All Levels')}</span>
+                      <span class="muted-pill">By ${esc(n.author_name || 'Educator')}</span>
+                    </div>
+                    ${renderMoreMenu(`
+                      <button type="button" class="more-menu-item" data-edit-studio-note="${esc(n.id)}">${ICONS.edit} Edit Note</button>
+                      <button type="button" class="more-menu-item is-danger" data-del-note="${esc(n.id)}">${ICONS.trash} Delete Note</button>
+                    `)}
+                  </div>
+                  <h3 class="panel-title">${esc(n.title)}</h3>
+                  <p style="font-size:0.85rem;line-height:1.52;color:var(--charcoal-soft);">${esc(n.summary)}</p>
+                  ${
+                    (n.formulas || []).length
+                      ? `<div class="formula-list-box">${n.formulas.map((f) => `<div>• ${esc(f)}</div>`).join('')}</div>`
+                      : ''
+                  }
+                  ${(n.attachments || []).length ? renderAttachmentGalleryHTML(n.attachments) : ''}
+                </article>
+              `
+                  )
+                  .join('')
+          }
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+/* ==========================================================================
    8. OFFLINE STUDY TOOLKIT (CLEAN SUBJECT SELECT + QUIET ⋯ MENUS)
    ========================================================================== */
 
@@ -1631,12 +2223,14 @@ function buildNotesSubstage(user) {
                 </div>
               </div>
               <h3 class="panel-title">${esc(n.title)}</h3>
+              ${n.grade_group ? `<span class="muted-pill" style="align-self:flex-start;">${esc(n.grade_group)}</span>` : ''}
               <p style="font-size:0.85rem;line-height:1.55;color:var(--charcoal-soft);">${esc(n.summary)}</p>
               ${
                 (n.formulas || []).length
                   ? `<div class="formula-list-box">${n.formulas.map((f) => `<div>• ${esc(f)}</div>`).join('')}</div>`
                   : ''
               }
+              ${(n.attachments || []).length ? renderAttachmentGalleryHTML(n.attachments) : ''}
               <span class="row-sub">By ${esc(n.author_name || 'i-tutor')}</span>
             </article>
           `;
@@ -2682,11 +3276,21 @@ function renderApp(opts = {}) {
   const navItems = [
     { id: 'tuition', label: 'Flyers & Prices', icon: ICONS.tuition, badge: '' },
     { id: 'overview', label: 'Overview Hub', icon: ICONS.home, badge: '' },
+    ...(isStaff(user)
+      ? [
+          {
+            id: 'subjects',
+            label: superEdit ? 'Subjects & Students' : 'My Subjects & Notes',
+            icon: ICONS.toolkit,
+            badge: String(getEditableSubjectsForUser(user).length)
+          }
+        ]
+      : []),
     ...(superEdit
       ? [
           {
             id: 'admissions',
-            label: 'Admissions',
+            label: 'Admissions & Accounts',
             icon: ICONS.users,
             badge: pendingAdmissions ? `${pendingAdmissions}` : ''
           }
@@ -2697,11 +3301,12 @@ function renderApp(opts = {}) {
     { id: 'timetable', label: 'Schedule & Exams', icon: ICONS.timetable, badge: '' },
     { id: 'toolkit', label: 'Study Toolkit', icon: ICONS.toolkit, badge: '' },
     { id: 'broadcasts', label: 'Notices & Attendance', icon: ICONS.broadcast, badge: '' },
-    { id: 'account', label: user.role === 'visitor' ? 'Join / Sign In' : 'My Account', icon: ICONS.user, badge: '' }
+    { id: 'account', label: user.role === 'visitor' ? 'Join / Sign In' : 'My Account & Icon', icon: ICONS.user, badge: '' }
   ];
 
   let centerHTML = '';
   if (ui.view === 'overview') centerHTML = buildOverviewStage(user);
+  else if (ui.view === 'subjects') centerHTML = buildSubjectStudioStage(user);
   else if (ui.view === 'admissions') centerHTML = buildAdmissionsStage(user);
   else if (ui.view === 'timetable') centerHTML = buildTimetableStage(user);
   else if (ui.view === 'assignments') centerHTML = buildAssignmentsStage(user);
@@ -2745,8 +3350,8 @@ function renderApp(opts = {}) {
 
         <div class="sidebar-footer">
           <div class="account-rail-card">
-            <div class="account-rail-top" data-nav="account" style="cursor:pointer;" title="Account settings">
-              <div class="account-avatar-gold">${esc(initials(user.name))}</div>
+            <div class="account-rail-top" data-nav="account" style="cursor:pointer;" title="Edit profile & icon">
+              ${renderAvatarHTML(user, { size: 38 })}
               <div style="min-width:0;flex:1;">
                 <div style="font-size:0.82rem;font-weight:800;color:#F8F3EC;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
                   ${esc(user.name)}
@@ -2809,7 +3414,12 @@ function renderApp(opts = {}) {
             ${
               user.role === 'visitor'
                 ? `<button class="gold-cta-btn" data-action-signout="1" style="padding:0.38rem 0.72rem;font-size:0.75rem;" title="Sign In or Apply">Sign In</button>`
-                : `<button class="topbar-avatar-btn" data-nav="account" title="${esc(user.name)} — My Account">${esc(initials(user.name))}</button>`
+                : `<button class="topbar-avatar-btn" data-nav="account" title="${esc(
+                    user.name
+                  )} — Edit My Account & Profile Icon" style="padding:0;overflow:hidden;">${renderAvatarHTML(user, {
+                    size: 34,
+                    className: 'topbar-avatar-inner'
+                  })}</button>`
             }
           </div>
         </header>
@@ -2915,14 +3525,24 @@ function renderApp(opts = {}) {
       </div>
     </aside>
 
-    <!-- CLEAN 4-TAB MOBILE BOTTOM BAR (PRICES · HUB · HOMEWORK · CHATS — NO BOTTOM-CORNER MENU BUTTON) -->
+    <!-- CLEAN 4-TAB MOBILE BOTTOM BAR (NO BOTTOM-CORNER MENU BUTTON) -->
     <nav class="mobile-tabbar" aria-label="Mobile bottom navigation">
       <button class="mob-tab-btn ${ui.view === 'tuition' ? 'is-active' : ''}" data-nav="tuition">
         ${ICONS.tuition}<span>Prices</span>
       </button>
-      <button class="mob-tab-btn ${ui.view === 'overview' ? 'is-active' : ''}" data-nav="overview">
-        ${ICONS.home}<span>Hub</span>
-      </button>
+      ${
+        user.role === 'teacher'
+          ? `
+        <button class="mob-tab-btn ${ui.view === 'subjects' ? 'is-active' : ''}" data-nav="subjects">
+          ${ICONS.toolkit}<span>Subjects</span>
+        </button>
+      `
+          : `
+        <button class="mob-tab-btn ${ui.view === 'overview' ? 'is-active' : ''}" data-nav="overview">
+          ${ICONS.home}<span>Hub</span>
+        </button>
+      `
+      }
       <button class="mob-tab-btn ${ui.view === 'assignments' ? 'is-active' : ''}" data-nav="assignments">
         ${ICONS.assignment}<span>Homework</span>
       </button>
@@ -3006,6 +3626,8 @@ function bindWorkspaceEvents(user) {
         ui.stagedAssignAttachments.splice(idx, 1);
       } else if (prefix === 'chat') {
         ui.stagedChatAttachments.splice(idx, 1);
+      } else if (prefix === 'studio-note') {
+        ui.stagedNoteAttachments.splice(idx, 1);
       } else if (prefix?.startsWith('sub:')) {
         const asgId = prefix.slice(4);
         const cur = [...(ui.stagedSubmissionAttachments[asgId] || [])];
@@ -3043,7 +3665,12 @@ function bindWorkspaceEvents(user) {
 
   document.querySelectorAll('[data-nav]').forEach((el) => {
     el.addEventListener('click', () => {
-      ui.view = el.getAttribute('data-nav');
+      const nextView = el.getAttribute('data-nav');
+      if (nextView === 'account' && ui.view !== 'account') {
+        ui.stagedMyAvatar = null;
+        ui.stagedMyAvatarAttachment = null;
+      }
+      ui.view = nextView;
       ui.mobileDrawerOpen = false;
       renderApp({ preserveScroll: false });
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -3170,6 +3797,62 @@ function bindWorkspaceEvents(user) {
     });
   });
 
+  // --- PROFILE ICON / AVATAR PICKER EVENTS (SELF & ADMIN) ---
+  document.querySelectorAll('[data-avatar-pick]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const icon = btn.getAttribute('data-avatar-pick') || '';
+      const scope = btn.getAttribute('data-avatar-scope') || 'self';
+      if (scope === 'admin') {
+        ui.stagedAccAvatar = icon;
+        ui.stagedAccAvatarAttachment = null;
+      } else {
+        ui.stagedMyAvatar = icon;
+        ui.stagedMyAvatarAttachment = null;
+      }
+      renderApp({ preserveScroll: true });
+    });
+  });
+
+  document.querySelectorAll('[data-avatar-clear]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const scope = btn.getAttribute('data-avatar-clear') || 'self';
+      if (scope === 'admin') {
+        ui.stagedAccAvatar = '';
+        ui.stagedAccAvatarAttachment = null;
+      } else {
+        ui.stagedMyAvatar = '';
+        ui.stagedMyAvatarAttachment = null;
+      }
+      renderApp({ preserveScroll: true });
+    });
+  });
+
+  document.getElementById('avatar-file-self')?.addEventListener('change', async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    ui.uploadingTarget = 'avatar:self';
+    renderApp({ preserveScroll: true });
+    const uploaded = await uploadAndCacheMediaFile(file, { simulateOffline: isOfflineActive() });
+    ui.uploadingTarget = '';
+    ui.stagedMyAvatar = uploaded.thumbUrl || uploaded.url || '';
+    ui.stagedMyAvatarAttachment = uploaded;
+    renderApp({ preserveScroll: true });
+    showToast('Profile photo ready — tap Save Changes to apply!');
+  });
+
+  document.getElementById('avatar-file-admin')?.addEventListener('change', async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    ui.uploadingTarget = 'avatar:admin';
+    renderApp({ preserveScroll: true });
+    const uploaded = await uploadAndCacheMediaFile(file, { simulateOffline: isOfflineActive() });
+    ui.uploadingTarget = '';
+    ui.stagedAccAvatar = uploaded.thumbUrl || uploaded.url || '';
+    ui.stagedAccAvatarAttachment = uploaded;
+    renderApp({ preserveScroll: true });
+    showToast('Account profile photo ready — tap Save Account!');
+  });
+
   // --- ADMISSIONS & ACCOUNT EVENTS ---
   document.getElementById('role-filter-select')?.addEventListener('change', (e) => {
     ui.roleFilter = e.target.value;
@@ -3180,8 +3863,12 @@ function bindWorkspaceEvents(user) {
     if (ui.editingAccountId || ui.showNewAccountForm) {
       ui.editingAccountId = null;
       ui.showNewAccountForm = false;
+      ui.stagedAccAvatar = null;
+      ui.stagedAccAvatarAttachment = null;
     } else {
       ui.showNewAccountForm = true;
+      ui.stagedAccAvatar = null;
+      ui.stagedAccAvatarAttachment = null;
     }
     renderApp();
   });
@@ -3189,6 +3876,8 @@ function bindWorkspaceEvents(user) {
   document.getElementById('btn-cancel-account-edit')?.addEventListener('click', () => {
     ui.editingAccountId = null;
     ui.showNewAccountForm = false;
+    ui.stagedAccAvatar = null;
+    ui.stagedAccAvatarAttachment = null;
     renderApp();
   });
 
@@ -3196,6 +3885,8 @@ function bindWorkspaceEvents(user) {
     btn.addEventListener('click', () => {
       ui.editingAccountId = btn.getAttribute('data-edit-acc');
       ui.showNewAccountForm = false;
+      ui.stagedAccAvatar = null;
+      ui.stagedAccAvatarAttachment = null;
       renderApp();
       window.scrollTo({ top: 0, behavior: 'smooth' });
     });
@@ -3239,6 +3930,8 @@ function bindWorkspaceEvents(user) {
         .split(',')
         .map((s) => s.trim())
         .filter(Boolean);
+      const resolvedAvatar =
+        ui.stagedAccAvatar !== null ? ui.stagedAccAvatar : String(prev?.avatar || '');
       const profile = {
         ...(prev || {}),
         id: existingId || `acc-${Date.now()}`,
@@ -3252,10 +3945,14 @@ function bindWorkspaceEvents(user) {
         subtitle: fd.get('subtitle') || `${fd.get('grade')} · ${fd.get('role')}`,
         subjects,
         selected_plan: fd.get('selected_plan'),
-        notes: fd.get('notes')
+        notes: fd.get('notes'),
+        avatar: ui.stagedAccAvatarAttachment?.url || resolvedAvatar,
+        ...(ui.stagedAccAvatarAttachment ? { avatarAttachment: ui.stagedAccAvatarAttachment } : {})
       };
       ui.editingAccountId = null;
       ui.showNewAccountForm = false;
+      ui.stagedAccAvatar = null;
+      ui.stagedAccAvatarAttachment = null;
       await performActionAndSync('UPSERT_ACCOUNT', profile);
       if (profile.status === 'active') {
         await enrollAcceptedUserInRooms(profile);
@@ -3334,7 +4031,7 @@ function bindWorkspaceEvents(user) {
     });
   });
 
-  // My Account self-update
+  // My Account self-update (including Profile Icon / Photo)
   const myProfileForm = document.getElementById('my-profile-form');
   if (myProfileForm) {
     myProfileForm.addEventListener('submit', (e) => {
@@ -3344,6 +4041,12 @@ function bindWorkspaceEvents(user) {
         .split(',')
         .map((s) => s.trim())
         .filter(Boolean);
+      const nextAvatar =
+        ui.stagedMyAvatarAttachment?.url ||
+        (ui.stagedMyAvatar !== null ? ui.stagedMyAvatar : String(user.avatar || ''));
+      const avatarAtt = ui.stagedMyAvatarAttachment;
+      ui.stagedMyAvatar = null;
+      ui.stagedMyAvatarAttachment = null;
       performActionAndSync(
         'UPSERT_ACCOUNT',
         {
@@ -3354,9 +4057,274 @@ function bindWorkspaceEvents(user) {
           pin: fd.get('pin') || '1234',
           grade: fd.get('grade'),
           subtitle: fd.get('subtitle'),
-          subjects
+          subjects,
+          avatar: nextAvatar,
+          ...(avatarAtt ? { avatarAttachment: avatarAtt } : {})
         },
-        'Account profile saved!'
+        'Profile & icon saved!'
+      );
+    });
+  }
+
+  // --- TEACHER & ADMIN SUBJECT STUDIO EVENTS ---
+  document.querySelectorAll('[data-studio-subj]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      ui.studioSubject = btn.getAttribute('data-studio-subj') || '';
+      ui.studioGroupFilter = 'All';
+      ui.editingStudentNoteId = null;
+      ui.showEnrollStudentBar = false;
+      ui.showStudioNoteForm = false;
+      ui.editingStudioNoteId = null;
+      ui.stagedNoteAttachments = [];
+      renderApp({ preserveScroll: true });
+    });
+  });
+
+  document.getElementById('studio-group-filter')?.addEventListener('change', (e) => {
+    ui.studioGroupFilter = e.target.value;
+    renderApp({ preserveScroll: true });
+  });
+
+  document.getElementById('teacher-claim-subj-select')?.addEventListener('change', async (e) => {
+    const subj = e.target.value;
+    if (!subj) return;
+    const nextSubjs = Array.from(new Set([...(user.subjects || []), subj]));
+    ui.studioSubject = subj;
+    await performActionAndSync(
+      'UPSERT_ACCOUNT',
+      { ...user, subjects: nextSubjs },
+      `Added ${subj} to your subjects!`
+    );
+  });
+
+  document.getElementById('admin-assign-teacher-select')?.addEventListener('change', async (e) => {
+    const tchId = e.target.value;
+    if (!tchId) return;
+    const tch = (vaultState.profiles || []).find((p) => p.id === tchId);
+    if (!tch) return;
+    const activeSubj = ui.studioSubject || SUBJECT_LIST[0];
+    const nextSubjs = Array.from(new Set([...(tch.subjects || []), activeSubj]));
+    await performActionAndSync(
+      'UPSERT_ACCOUNT',
+      { ...tch, subjects: nextSubjs },
+      `Assigned ${tch.name} to ${activeSubj}!`
+    );
+  });
+
+  document.querySelectorAll('[data-unassign-teacher]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const tchId = btn.getAttribute('data-unassign-teacher');
+      const tch = (vaultState.profiles || []).find((p) => p.id === tchId);
+      if (!tch) return;
+      const activeSubj = ui.studioSubject || SUBJECT_LIST[0];
+      const nextSubjs = (tch.subjects || []).filter((s) => s !== activeSubj);
+      await performActionAndSync(
+        'UPSERT_ACCOUNT',
+        { ...tch, subjects: nextSubjs },
+        `Removed ${tch.name} from ${activeSubj}.`
+      );
+    });
+  });
+
+  document.getElementById('btn-toggle-enroll-student')?.addEventListener('click', () => {
+    ui.showEnrollStudentBar = !ui.showEnrollStudentBar;
+    renderApp({ preserveScroll: true });
+  });
+
+  const assignExistingStuForm = document.getElementById('assign-existing-student-form');
+  if (assignExistingStuForm) {
+    assignExistingStuForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = new FormData(assignExistingStuForm);
+      const stuId = fd.get('student_id');
+      const groupTag = String(fd.get('group_tag') || '').trim();
+      const stu = (vaultState.profiles || []).find((p) => p.id === stuId);
+      if (!stu) return;
+      const activeSubj = ui.studioSubject || SUBJECT_LIST[0];
+      const nextSubjs = Array.from(new Set([...(stu.subjects || []), activeSubj]));
+      const nextSubjNotes = { ...(stu.subject_notes || {}) };
+      if (groupTag) {
+        nextSubjNotes[activeSubj] = { ...(nextSubjNotes[activeSubj] || {}), group: groupTag };
+      }
+      ui.showEnrollStudentBar = false;
+      await performActionAndSync(
+        'UPSERT_ACCOUNT',
+        { ...stu, subjects: nextSubjs, subject_notes: nextSubjNotes },
+        `Added ${stu.name} to ${activeSubj}!`
+      );
+    });
+  }
+
+  const quickCreateStuSubjForm = document.getElementById('quick-create-student-subj-form');
+  if (quickCreateStuSubjForm) {
+    quickCreateStuSubjForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = new FormData(quickCreateStuSubjForm);
+      const activeSubj = ui.studioSubject || SUBJECT_LIST[0];
+      const name = String(fd.get('name') || '').trim();
+      const grade = String(fd.get('grade') || 'Student').trim();
+      const groupTag = String(fd.get('group_tag') || '').trim();
+      const newStu = {
+        id: `stu-${Date.now()}`,
+        name,
+        role: 'student',
+        subtitle: `${grade} · ${activeSubj}`,
+        grade,
+        pin: '1234',
+        email: `${name.toLowerCase().replace(/[^a-z0-9]/g, '.')}@student.i-tutor.academy`,
+        phone: String(fd.get('phone') || '').trim(),
+        status: 'active',
+        subjects: [activeSubj],
+        selected_plan: 'Enrolled',
+        linked_student_id: '',
+        notes: '',
+        avatar: '🎓',
+        subject_notes: groupTag ? { [activeSubj]: { group: groupTag, note: '' } } : {}
+      };
+      ui.showEnrollStudentBar = false;
+      await performActionAndSync('UPSERT_ACCOUNT', newStu);
+      await enrollAcceptedUserInRooms(newStu);
+      showToast(`Created & added ${newStu.name} to ${activeSubj}!`);
+    });
+  }
+
+  document.querySelectorAll('[data-org-stu]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      ui.editingStudentNoteId = btn.getAttribute('data-org-stu');
+      renderApp({ preserveScroll: true });
+    });
+  });
+
+  document.querySelectorAll('[data-cancel-org-stu]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      ui.editingStudentNoteId = null;
+      renderApp({ preserveScroll: true });
+    });
+  });
+
+  document.querySelectorAll('.org-student-subj-form').forEach((form) => {
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const stuId = form.getAttribute('data-stu-id');
+      const stu = (vaultState.profiles || []).find((p) => p.id === stuId);
+      if (!stu) return;
+      const fd = new FormData(form);
+      const activeSubj = ui.studioSubject || SUBJECT_LIST[0];
+      const nextSubjNotes = {
+        ...(stu.subject_notes || {}),
+        [activeSubj]: {
+          group: String(fd.get('group') || '').trim(),
+          note: String(fd.get('note') || '').trim()
+        }
+      };
+      ui.editingStudentNoteId = null;
+      await performActionAndSync(
+        'UPSERT_ACCOUNT',
+        { ...stu, subject_notes: nextSubjNotes },
+        `Saved ${activeSubj} notes for ${stu.name}!`
+      );
+    });
+  });
+
+  document.querySelectorAll('[data-unassign-stu]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const stuId = btn.getAttribute('data-unassign-stu');
+      const stu = (vaultState.profiles || []).find((p) => p.id === stuId);
+      if (!stu) return;
+      const activeSubj = ui.studioSubject || SUBJECT_LIST[0];
+      const nextSubjs = (stu.subjects || []).filter((s) => s !== activeSubj);
+      await performActionAndSync(
+        'UPSERT_ACCOUNT',
+        { ...stu, subjects: nextSubjs },
+        `Removed ${stu.name} from ${activeSubj}.`
+      );
+    });
+  });
+
+  document.querySelectorAll('[data-jump-edit-acc]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      ui.editingAccountId = btn.getAttribute('data-jump-edit-acc');
+      ui.showNewAccountForm = false;
+      ui.stagedAccAvatar = null;
+      ui.stagedAccAvatarAttachment = null;
+      ui.view = 'admissions';
+      renderApp({ preserveScroll: false });
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  });
+
+  // Subject Studio Note Creator / Editor + Media Attachments
+  document.getElementById('btn-toggle-studio-note')?.addEventListener('click', () => {
+    if (ui.showStudioNoteForm || ui.editingStudioNoteId) {
+      ui.showStudioNoteForm = false;
+      ui.editingStudioNoteId = null;
+      ui.stagedNoteAttachments = [];
+    } else {
+      ui.showStudioNoteForm = true;
+      ui.editingStudioNoteId = null;
+      ui.stagedNoteAttachments = [];
+    }
+    renderApp({ preserveScroll: true });
+  });
+
+  document.getElementById('btn-cancel-studio-note')?.addEventListener('click', () => {
+    ui.showStudioNoteForm = false;
+    ui.editingStudioNoteId = null;
+    ui.stagedNoteAttachments = [];
+    renderApp({ preserveScroll: true });
+  });
+
+  document.querySelectorAll('[data-edit-studio-note]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const noteId = btn.getAttribute('data-edit-studio-note');
+      const target = (vaultState.notes || []).find((n) => n.id === noteId);
+      ui.editingStudioNoteId = noteId;
+      ui.showStudioNoteForm = false;
+      ui.stagedNoteAttachments = [...(target?.attachments || [])];
+      renderApp({ preserveScroll: true });
+    });
+  });
+
+  document.getElementById('studio-note-media-input')?.addEventListener('change', (e) => {
+    handleFileSelection(
+      e.target.files,
+      'studio-note',
+      () => ui.stagedNoteAttachments,
+      (next) => {
+        ui.stagedNoteAttachments = next;
+      }
+    );
+  });
+
+  const upsertStudioNoteForm = document.getElementById('upsert-studio-note-form');
+  if (upsertStudioNoteForm) {
+    upsertStudioNoteForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const fd = new FormData(upsertStudioNoteForm);
+      const existingId = fd.get('id');
+      const prev = existingId ? (vaultState.notes || []).find((n) => n.id === existingId) : null;
+      const formulas = String(fd.get('formulasRaw') || '')
+        .split('\n')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const atts = [...ui.stagedNoteAttachments];
+      ui.showStudioNoteForm = false;
+      ui.editingStudioNoteId = null;
+      ui.stagedNoteAttachments = [];
+      performActionAndSync(
+        'UPSERT_STUDY_NOTE',
+        {
+          id: existingId || `note-${Date.now()}`,
+          subject: fd.get('subject') || ui.studioSubject || SUBJECT_LIST[0],
+          title: fd.get('title'),
+          grade_group: fd.get('grade_group') || 'All Levels',
+          summary: fd.get('summary'),
+          formulas,
+          author_name: prev?.author_name || user.name,
+          author_id: prev?.author_id || user.id,
+          attachments: atts
+        },
+        existingId ? 'Subject note updated!' : 'Subject note saved!'
       );
     });
   }

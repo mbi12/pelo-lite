@@ -129,6 +129,7 @@ test('i-tutor v5: accounts, admissions, homework & chat media uploads (PDF/Photo
     const testAssignId = 'asg-test-media-pack';
     const testMsgId = 'msg-test-media-chat';
     const testAccId = 'acc-test-joiner';
+    const testNoteId = 'note-test-subj-studio';
 
     const mediaActions = [
       {
@@ -137,15 +138,42 @@ test('i-tutor v5: accounts, admissions, homework & chat media uploads (PDF/Photo
           id: testAccId,
           name: 'Zanele Mthembu',
           role: 'student',
-          subtitle: 'Grade 12 · Accepted',
-          grade: 'Grade 12',
+          subtitle: 'Form 4 · Accepted',
+          grade: 'Form 4',
           pin: '5678',
           email: 'zanele@example.com',
-          phone: '+27 71 999 0000',
+          phone: '+267 71 999 000',
           status: 'active',
-          subjects: ['Mathematics'],
-          selected_plan: '3-Subject Core Package',
-          notes: 'Test learner'
+          subjects: ['Mathematics', 'Double Science'],
+          selected_plan: 'BGCSE / IGCSE — Form 4 (Best 6)',
+          notes: 'Test learner',
+          avatar: '🦉',
+          subject_notes: {
+            Mathematics: { group: 'Group A · Exam Sprint', note: 'Strong trigonometry progress' }
+          }
+        }
+      },
+      {
+        type: 'UPSERT_STUDY_NOTE',
+        payload: {
+          id: testNoteId,
+          subject: 'Mathematics',
+          title: 'Teacher Organized Trig Handout',
+          grade_group: 'BGCSE / Form 4',
+          summary: 'Organized by teacher under Mathematics with PDF handout.',
+          formulas: ['sin²x + cos²x = 1'],
+          author_name: 'Ms. Naledi Khumalo',
+          author_id: 'tch-naledi',
+          attachments: [
+            {
+              id: 'att-note-pdf',
+              name: 'trig-identities-worksheet.pdf',
+              kind: 'pdf',
+              mime: 'application/pdf',
+              size: 2948,
+              url: '/samples/trig-identities-worksheet.pdf'
+            }
+          ]
         }
       },
       {
@@ -221,6 +249,17 @@ test('i-tutor v5: accounts, admissions, homework & chat media uploads (PDF/Photo
     assert.equal(resMedia.status, 200);
     const snapMedia = await resMedia.json();
 
+    const savedAcc = snapMedia.profiles.find((p) => p.id === testAccId);
+    assert.ok(savedAcc, 'Saved student exists with editable profile icon and subject_notes');
+    assert.equal(savedAcc.avatar, '🦉');
+    assert.equal(savedAcc.subject_notes?.Mathematics?.group, 'Group A · Exam Sprint');
+
+    const savedNote = snapMedia.notes.find((n) => n.id === testNoteId);
+    assert.ok(savedNote, 'Teacher subject note with PDF attachment exists');
+    assert.equal(savedNote.subject, 'Mathematics');
+    assert.equal(savedNote.grade_group, 'BGCSE / Form 4');
+    assert.equal(savedNote.attachments.length, 1);
+
     const savedAsg = snapMedia.assignments.find((a) => a.id === testAssignId);
     assert.ok(savedAsg, 'Uploaded homework exists in snapshot');
     assert.equal(savedAsg.attachments.length, 2);
@@ -241,7 +280,8 @@ test('i-tutor v5: accounts, admissions, homework & chat media uploads (PDF/Photo
         actions: [
           { type: 'DELETE_ASSIGNMENT', payload: { id: testAssignId } },
           { type: 'DELETE_MESSAGE', payload: { id: testMsgId } },
-          { type: 'DELETE_ACCOUNT', payload: { id: testAccId } }
+          { type: 'DELETE_ACCOUNT', payload: { id: testAccId } },
+          { type: 'DELETE_STUDY_NOTE', payload: { id: testNoteId } }
         ]
       })
     });

@@ -1,8 +1,8 @@
 import { createDefaultSnapshot, SUBJECT_LIST } from './defaultSeed.js';
 
-const VAULT_KEY = 'itutor_offline_vault_v7';
+const VAULT_KEY = 'itutor_offline_vault_v8';
 const PERSONAL_KEY = 'itutor_personal_study_v4';
-const OUTBOX_KEY = 'itutor_offline_outbox_v7';
+const OUTBOX_KEY = 'itutor_offline_outbox_v8';
 const SESSION_KEY = 'itutor_session_v4';
 
 const IDB_NAME = 'itutor_media_idb_v1';
@@ -615,6 +615,23 @@ async function flushQueuedBlobsInOutbox(outbox) {
     if (Array.isArray(act?.payload?.flyers)) {
       for (const fl of act.payload.flyers) {
         if (fl?.attachment) attachmentTargets.push(fl.attachment);
+      }
+    }
+    if (act?.payload?.avatarAttachment?.pendingUpload) {
+      const avAtt = act.payload.avatarAttachment;
+      const cached = await getLocalMediaBlob(avAtt.id);
+      if (cached?.blob) {
+        try {
+          const cloudUrl = await uploadBlobToCloud(cached.blob, avAtt.name || cached.name, avAtt.mime || cached.mime);
+          if (cloudUrl) {
+            act.payload.avatar = cloudUrl;
+            avAtt.url = cloudUrl;
+            avAtt.pendingUpload = false;
+            changed = true;
+          }
+        } catch {
+          // Retry next sync
+        }
       }
     }
     for (const att of attachmentTargets) {

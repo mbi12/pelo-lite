@@ -24,7 +24,9 @@ export function createDefaultSnapshot() {
         subjects: ['All Subjects'],
         selected_plan: 'Executive Admin',
         linked_student_id: '',
-        notes: 'Primary i-tutor Owner & Super Admin account.'
+        notes: 'Primary i-tutor Owner & Super Admin account.',
+        avatar: '👑',
+        subject_notes: {}
       },
       {
         id: 'stu-thabo',
@@ -36,10 +38,16 @@ export function createDefaultSnapshot() {
         email: 'thabo@student.i-tutor.academy',
         phone: '+27 71 210 4401',
         status: 'active',
-        subjects: ['Mathematics', 'Physical Sciences', 'Accounting'],
-        selected_plan: '3-Subject Core Package',
+        subjects: ['Mathematics', 'Double Science', 'Physical Sciences', 'Accounting'],
+        selected_plan: 'BGCSE / IGCSE — Form 4 (Best 6)',
         linked_student_id: '',
-        notes: 'Prefers afternoon trigonometry & mechanics drills.'
+        notes: 'Prefers afternoon trigonometry & mechanics drills.',
+        avatar: '🎓',
+        subject_notes: {
+          Mathematics: { group: 'Group A · Exam Sprint', note: 'Strong in algebra; practicing double-angle trig proofs.' },
+          'Double Science': { group: 'Full-Time Pod', note: 'Consistent practical lab scores.' },
+          Accounting: { group: 'Core Group', note: 'Mastering year-end adjustments.' }
+        }
       },
       {
         id: 'stu-amahle',
@@ -52,9 +60,15 @@ export function createDefaultSnapshot() {
         phone: '+27 73 884 1920',
         status: 'active',
         subjects: ['Mathematics', 'Accounting', 'English'],
-        selected_plan: '3-Subject Core Package',
+        selected_plan: 'BGCSE / IGCSE — Form 4 (Best 6)',
         linked_student_id: '',
-        notes: 'Top performer in Accounting adjustments.'
+        notes: 'Top performer in Accounting adjustments.',
+        avatar: '🌟',
+        subject_notes: {
+          Mathematics: { group: 'Group A · Exam Sprint', note: '92% mock score — peer group leader.' },
+          Accounting: { group: 'Distinction Track', note: 'Top performer in balance sheet ratios.' },
+          English: { group: 'Essay Pod', note: 'Excellent PEEL essay structure.' }
+        }
       },
       {
         id: 'stu-liam',
@@ -66,10 +80,15 @@ export function createDefaultSnapshot() {
         email: 'liam@student.i-tutor.academy',
         phone: '+27 82 419 7731',
         status: 'active',
-        subjects: ['Mathematics', 'Physical Sciences', 'Life Sciences'],
-        selected_plan: 'Full Exam Mastery (All Subjects)',
+        subjects: ['Mathematics', 'Double Science', 'Physical Sciences', 'Life Sciences'],
+        selected_plan: 'BGCSE / IGCSE — Form 4 (Best 6)',
         linked_student_id: '',
-        notes: 'Working on pulley free-body diagrams.'
+        notes: 'Working on pulley free-body diagrams.',
+        avatar: '🚀',
+        subject_notes: {
+          Mathematics: { group: 'Group B · Foundation+', note: 'Focus on quadratic turning points.' },
+          'Double Science': { group: 'Part-Time Pod', note: 'Working on pulley & circuit diagrams.' }
+        }
       },
       {
         id: 'par-grace',
@@ -82,9 +101,11 @@ export function createDefaultSnapshot() {
         phone: '+27 82 901 3340',
         status: 'active',
         subjects: ['Mathematics', 'Physical Sciences', 'Accounting'],
-        selected_plan: '3-Subject Core Package',
+        selected_plan: 'BGCSE / IGCSE — Form 4 (Best 6)',
         linked_student_id: 'stu-thabo',
-        notes: 'Receives weekly attendance & assessment updates.'
+        notes: 'Receives weekly attendance & assessment updates.',
+        avatar: '💛',
+        subject_notes: {}
       },
       {
         id: 'tch-naledi',
@@ -99,37 +120,43 @@ export function createDefaultSnapshot() {
         subjects: ['Mathematics'],
         selected_plan: 'Educator Staff',
         linked_student_id: '',
-        notes: 'Senior FET Mathematics Tutor.'
+        notes: 'Senior FET Mathematics Tutor.',
+        avatar: '🧮',
+        subject_notes: {}
       },
       {
         id: 'tch-sipho',
         name: 'Mr. Sipho Ndlovu',
         role: 'teacher',
-        subtitle: 'Physical Sciences Educator',
+        subtitle: 'Sciences Educator',
         grade: 'Grades 10–12',
         pin: '1234',
         email: 'sipho@i-tutor.academy',
         phone: '+27 76 309 4418',
         status: 'active',
-        subjects: ['Physical Sciences', 'Life Sciences'],
+        subjects: ['Double Science', 'Physical Sciences', 'Life Sciences'],
         selected_plan: 'Educator Staff',
         linked_student_id: '',
-        notes: 'Leads Physics & Chemistry boot camps.'
+        notes: 'Leads Physics & Chemistry boot camps.',
+        avatar: '🔬',
+        subject_notes: {}
       },
       {
         id: 'tch-claire',
         name: 'Mrs. Claire Jacobs',
         role: 'teacher',
-        subtitle: 'Accounting & English Educator',
-        grade: 'Grades 10–12',
+        subtitle: 'Languages & Accounting Educator',
+        grade: 'All Levels',
         pin: '1234',
         email: 'claire@i-tutor.academy',
         phone: '+27 83 614 9021',
         status: 'active',
-        subjects: ['Accounting', 'English'],
+        subjects: ['English', 'Setswana', 'Accounting'],
         selected_plan: 'Educator Staff',
         linked_student_id: '',
-        notes: 'Commerce & English essay specialist.'
+        notes: 'Commerce & Languages specialist.',
+        avatar: '📚',
+        subject_notes: {}
       },
       {
         id: 'adm-lerato',
@@ -144,7 +171,9 @@ export function createDefaultSnapshot() {
         subjects: ['All Subjects'],
         selected_plan: 'Admissions Staff',
         linked_student_id: '',
-        notes: 'Accepts anyone joining & manages all academy records.'
+        notes: 'Accepts anyone joining & manages all academy records.',
+        avatar: '🗂️',
+        subject_notes: {}
       },
       {
         id: 'admin-1',
@@ -159,7 +188,9 @@ export function createDefaultSnapshot() {
         subjects: ['All Subjects'],
         selected_plan: 'Executive Admin',
         linked_student_id: '',
-        notes: 'Full control over flyers, prices, admissions, accounts & academy content.'
+        notes: 'Full control over flyers, prices, admissions, accounts & academy content.',
+        avatar: '👑',
+        subject_notes: {}
       },
       {
         id: 'app-siphesihle',
@@ -468,7 +499,34 @@ export function createDefaultSnapshot() {
         ],
         summary:
           'Avoid retelling the plot. Name the exact literary device (metaphor, irony, tone shift) and unpack its effect on the reader.',
-        author_name: 'Mrs. Claire Jacobs'
+        author_name: 'Mrs. Claire Jacobs',
+        author_id: 'tch-claire',
+        grade_group: 'JCE & BGCSE',
+        attachments: []
+      },
+      {
+        id: 'note-dblsci',
+        subject: 'Double Science',
+        title: 'BGCSE Double Science: Electricity & Ohm’s Law',
+        formulas: ['V = I × R', 'P = V × I = I²R', 'Series: R_total = R₁ + R₂'],
+        summary:
+          'Always convert milliamperes (mA) to Amperes (A) before substituting into V = IR during Paper 2 & Paper 3.',
+        author_name: 'Mr. Sipho Ndlovu',
+        author_id: 'tch-sipho',
+        grade_group: 'BGCSE / IGCSE',
+        attachments: []
+      },
+      {
+        id: 'note-setswana',
+        subject: 'Setswana',
+        title: 'Maele le Diane (Proverbs & Idioms — Breakthrough & JCE)',
+        formulas: ['Motho ke motho ka batho', 'Sedikwa ke ntša pedi ga se thata'],
+        summary:
+          'Key Setswana proverbs, comprehension structure, and composition transitions for Standard 4–6 Breakthrough and JCE.',
+        author_name: 'Mrs. Claire Jacobs',
+        author_id: 'tch-claire',
+        grade_group: 'Standard 4 – 6 & JCE',
+        attachments: []
       }
     ],
     quizzes: [

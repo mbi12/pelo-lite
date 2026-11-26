@@ -5,7 +5,7 @@ import { createDefaultSnapshot } from '../public/js/defaultSeed.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const LOCAL_DB_PATH = path.join(__dirname, '..', 'data', 'itutor-v4-local.json');
+const LOCAL_DB_PATH = path.join(__dirname, '..', 'data', 'itutor-v5-local.json');
 
 let resolvedMode = null; // 'supabase' | 'local'
 
@@ -215,7 +215,9 @@ export async function applyOutboxActions(actions = []) {
               subjects: Array.isArray(p.subjects) ? p.subjects : [],
               selected_plan: p.selected_plan || '',
               linked_student_id: p.linked_student_id || '',
-              notes: p.notes || ''
+              notes: p.notes || '',
+              avatar: p.avatar || '',
+              subject_notes: p.subject_notes && typeof p.subject_notes === 'object' ? p.subject_notes : {}
             }
           });
           break;
@@ -371,7 +373,10 @@ export async function applyOutboxActions(actions = []) {
               title: p.title,
               formulas: Array.isArray(p.formulas) ? p.formulas : [],
               summary: p.summary || '',
-              author_name: p.author_name || 'Educator'
+              author_name: p.author_name || 'Educator',
+              author_id: p.author_id || '',
+              grade_group: p.grade_group || 'All Levels',
+              attachments: Array.isArray(p.attachments) ? p.attachments : []
             }
           });
           break;
