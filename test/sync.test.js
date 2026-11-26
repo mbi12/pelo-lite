@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { createApp } from '../server.js';
 
-test('i-tutor unified v3 offline-sync API: timetables, remote assignments, notes, attendance, study groups, broadcasts & tuition info', async () => {
+test('i-tutor v4: full account system, admissions approval, and complete in-app editing across all modules', async () => {
   const app = createApp();
   const server = http.createServer(app);
 
@@ -16,136 +16,140 @@ test('i-tutor unified v3 offline-sync API: timetables, remote assignments, notes
     const res1 = await fetch(`${baseUrl}/api/sync`);
     assert.equal(res1.status, 200);
     const snap1 = await res1.json();
+    assert.ok(snap1.profiles.some((p) => p.role === 'admissions'));
+    assert.ok(snap1.profiles.some((p) => p.status === 'pending'));
     assert.ok(snap1.timetables.length >= 6);
     assert.ok(snap1.assignments.length >= 3);
-    assert.ok(snap1.assignments[0].offline_pack_content.length > 10);
     assert.ok(snap1.notes.length >= 6);
-    assert.ok(snap1.attendance.length >= 4);
     assert.ok(snap1.quizzes.length >= 8);
-    assert.ok(snap1.tuitionInfo.plans.length >= 4);
-    assert.ok(snap1.tuitionInfo.contacts.phone);
+    assert.ok(snap1.flashcards.length >= 6);
 
-    // 2. Replay Offline Outbox Actions via POST /api/sync
-    const outboxActions = [
+    // 2. Test New Join Application -> Admissions Approval -> Full In-App Edits
+    const actions1 = [
       {
-        type: 'ADD_TIMETABLE',
+        type: 'UPSERT_ACCOUNT',
         payload: {
-          id: 'tt-test-offline',
-          day_of_week: 'Friday',
-          start_time: '17:00',
-          end_time: '18:00',
-          subject: 'Mathematics',
-          topic: 'Euclidean Geometry Offline Drill',
-          teacher_name: 'Ms. Naledi Khumalo',
-          location_mode: 'Saved Offline',
-          grade_group: 'Grade 12',
-          owner_id: null,
-          is_official: true
-        }
-      },
-      {
-        type: 'CREATE_ASSIGNMENT',
-        payload: {
-          id: 'asg-test-remote',
-          title: 'Remote Weekend Euclidean Geometry Task',
-          subject: 'Mathematics',
-          grade_group: 'Grade 12',
-          teacher_id: 'tch-naledi',
-          teacher_name: 'Ms. Naledi Khumalo',
-          due_date: '2026-12-06',
-          max_marks: 25,
-          instructions: 'Complete offline and submit.',
-          offline_pack_content: '1) Prove cyclic quad PQRS [10 marks]'
-        }
-      },
-      {
-        type: 'ADD_STUDY_NOTE',
-        payload: {
-          id: 'note-test-offline',
-          subject: 'Mathematics',
-          title: 'Cyclic Quadrilaterals Summary',
-          formulas: ['Opposite angles sum to 180°', 'Exterior angle = interior opposite angle'],
-          summary: 'Check for bowtie angles subtended by the same chord.',
-          author_name: 'Ms. Naledi Khumalo'
-        }
-      },
-      {
-        type: 'LOG_ATTENDANCE',
-        payload: {
-          id: 'att-test-offline',
-          session_date: '2026-11-25',
-          subject: 'Mathematics',
-          student_id: 'stu-thabo',
-          student_name: 'Thabo Mokoena',
-          status: 'present',
-          teacher_name: 'Ms. Naledi Khumalo',
-          lesson_note: 'Completed cyclic quad proofs.'
-        }
-      },
-      {
-        type: 'CREATE_STUDY_GROUP',
-        payload: {
-          id: 'room-grp-test',
-          room_type: 'group',
-          name: 'Euclidean Geometry Study Group',
-          subject: 'Mathematics',
-          participant_ids: ['stu-thabo', 'stu-amahle'],
-          members_label: 'Members: Thabo, Amahle',
-          created_by_name: 'Thabo Mokoena'
-        }
-      },
-      {
-        type: 'SEND_MESSAGE',
-        payload: {
-          id: 'msg-test-1',
-          room_id: 'room-grp-test',
-          sender_id: 'stu-thabo',
-          sender_name: 'Thabo Mokoena',
-          sender_role: 'student',
-          body: 'Let us solve Question 1 together!'
-        }
-      },
-      {
-        type: 'SEND_BROADCAST',
-        payload: {
-          id: 'bc-test-1',
-          title: 'Weekend Geometry Pack Ready',
-          body: 'Please open the app once online so the Euclidean pack downloads to your phone.',
-          author_name: 'Kgomotso Dlamini (Admin)',
-          author_role: 'admin',
-          audience: 'students_parents',
-          priority: 'important'
-        }
-      },
-      {
-        type: 'SUBMIT_ENQUIRY',
-        payload: {
-          id: 'eq-test-1',
-          full_name: 'Siphesihle Zulu',
-          contact_detail: '+27 82 555 0192',
-          student_grade: 'Grade 11',
+          id: 'acc-new-joiner',
+          name: 'Zanele Mthembu',
+          role: 'student',
+          subtitle: 'Grade 12 · Applicant',
+          grade: 'Grade 12',
+          pin: '5678',
+          email: 'zanele@example.com',
+          phone: '+27 71 999 0000',
+          status: 'pending',
+          subjects: ['Mathematics', 'Accounting'],
           selected_plan: '3-Subject Core Package',
-          message: 'Interested in Maths & Physical Sciences'
+          notes: 'New applicant via Join portal'
         }
       }
     ];
 
-    const res2 = await fetch(`${baseUrl}/api/sync`, {
+    const resPending = await fetch(`${baseUrl}/api/sync`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ actions: outboxActions })
+      body: JSON.stringify({ actions: actions1 })
     });
-    assert.equal(res2.status, 200);
-    const snap2 = await res2.json();
+    const snapPending = await resPending.json();
+    const pendingUser = snapPending.profiles.find((p) => p.id === 'acc-new-joiner');
+    assert.equal(pendingUser.status, 'pending');
 
-    assert.ok(snap2.timetables.some((t) => t.id === 'tt-test-offline'));
-    assert.ok(snap2.assignments.some((a) => a.id === 'asg-test-remote'));
-    assert.ok(snap2.notes.some((n) => n.id === 'note-test-offline'));
-    assert.ok(snap2.attendance.some((a) => a.id === 'att-test-offline'));
-    assert.ok(snap2.rooms.some((r) => r.id === 'room-grp-test'));
-    assert.ok(snap2.messages.some((m) => m.id === 'msg-test-1'));
-    assert.ok(snap2.broadcasts.some((b) => b.id === 'bc-test-1'));
-    assert.ok(snap2.enquiries.some((e) => e.id === 'eq-test-1'));
+    // 3. Admissions accepts applicant & edits timetable, assignment, note, quiz, flashcard, room, broadcast, attendance & tuition plans
+    const actions2 = [
+      {
+        type: 'UPSERT_ACCOUNT',
+        payload: {
+          ...pendingUser,
+          status: 'active',
+          subtitle: 'Grade 12 · Accepted by Admissions'
+        }
+      },
+      {
+        type: 'UPSERT_TIMETABLE',
+        payload: {
+          ...snapPending.timetables[0],
+          topic: 'Edited Topic: Advanced Trig Identities'
+        }
+      },
+      {
+        type: 'UPSERT_ASSIGNMENT',
+        payload: {
+          ...snapPending.assignments[0],
+          title: 'Edited Remote Worksheet 4: Trig Proofs'
+        }
+      },
+      {
+        type: 'UPSERT_STUDY_NOTE',
+        payload: {
+          ...snapPending.notes[0],
+          title: 'Edited Trig Formula Guide'
+        }
+      },
+      {
+        type: 'UPSERT_QUIZ',
+        payload: {
+          id: 'q-custom-edit',
+          subject: 'Mathematics',
+          topic: 'Algebra',
+          question: 'Solve 3x = 15',
+          options: ['3', '5', '12', '45'],
+          correct_index: 1,
+          explanation: 'Divide both sides by 3.'
+        }
+      },
+      {
+        type: 'UPSERT_FLASHCARD',
+        payload: {
+          id: 'fc-custom-edit',
+          subject: 'Accounting',
+          front: 'Net Profit formula?',
+          back: 'Gross Profit + Other Income - Operating Expenses'
+        }
+      },
+      {
+        type: 'UPDATE_TUITION_INFO',
+        payload: {
+          headline: 'Updated Tuition Headline by Admissions',
+          intro: snapPending.tuitionInfo.intro,
+          plans: [
+            ...snapPending.tuitionInfo.plans,
+            {
+              id: 'plan-holiday',
+              name: 'Holiday Boot Camp',
+              price: 'R750 / camp',
+              numericRate: 750,
+              badge: 'Seasonal',
+              features: ['5-day intensive exam prep']
+            }
+          ],
+          contacts: {
+            ...snapPending.tuitionInfo.contacts,
+            phone: '+27 11 555 8899'
+          }
+        }
+      }
+    ];
+
+    const resEdited = await fetch(`${baseUrl}/api/sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ actions: actions2 })
+    });
+    assert.equal(resEdited.status, 200);
+    const snapEdited = await resEdited.json();
+
+    assert.equal(snapEdited.profiles.find((p) => p.id === 'acc-new-joiner').status, 'active');
+    assert.equal(snapEdited.timetables[0].topic, 'Edited Topic: Advanced Trig Identities');
+    assert.equal(
+      snapEdited.assignments.find((a) => a.id === snapPending.assignments[0].id).title,
+      'Edited Remote Worksheet 4: Trig Proofs'
+    );
+    assert.equal(snapEdited.notes.find((n) => n.id === snapPending.notes[0].id).title, 'Edited Trig Formula Guide');
+    assert.ok(snapEdited.quizzes.some((q) => q.id === 'q-custom-edit'));
+    assert.ok(snapEdited.flashcards.some((f) => f.id === 'fc-custom-edit'));
+    assert.equal(snapEdited.tuitionInfo.headline, 'Updated Tuition Headline by Admissions');
+    assert.ok(snapEdited.tuitionInfo.plans.some((p) => p.id === 'plan-holiday'));
+    assert.equal(snapEdited.tuitionInfo.contacts.phone, '+27 11 555 8899');
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

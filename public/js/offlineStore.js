@@ -1,14 +1,29 @@
 import { createDefaultSnapshot, SUBJECT_LIST } from './defaultSeed.js';
 
-const VAULT_KEY = 'itutor_offline_vault_v3';
-const PERSONAL_KEY = 'itutor_personal_study_v3';
-const OUTBOX_KEY = 'itutor_offline_outbox_v3';
-const SESSION_KEY = 'itutor_session_v3';
+const VAULT_KEY = 'itutor_offline_vault_v4';
+const PERSONAL_KEY = 'itutor_personal_study_v4';
+const OUTBOX_KEY = 'itutor_offline_outbox_v4';
+const SESSION_KEY = 'itutor_session_v4';
 
 export { SUBJECT_LIST };
 
+function normalizeQuiz(q) {
+  const ci = Number(q.correct_index ?? q.correctIndex ?? 0);
+  return { ...q, correct_index: ci, correctIndex: ci };
+}
+
+function upsertInArray(arr, item, prepend = false) {
+  const idx = arr.findIndex((x) => x.id === item.id);
+  if (idx >= 0) {
+    arr[idx] = { ...arr[idx], ...item };
+  } else if (prepend) {
+    arr.unshift(item);
+  } else {
+    arr.push(item);
+  }
+}
+
 function createDefaultPersonalState() {
-  const seed = createDefaultSnapshot();
   return {
     dailyGoalTarget: 4,
     dailyCompleted: 2,
@@ -21,10 +36,9 @@ function createDefaultPersonalState() {
       'Life Sciences': 80,
       English: 76
     },
-    flashcards: seed.flashcards,
-    customQuizzes: [],
+    masteredCardIds: ['fc-1', 'fc-4', 'fc-5', 'fc-6'],
     bookmarkedNoteIds: ['note-trig', 'note-newton'],
-    assignmentDrafts: {}, // { [assignmentId]: "saved offline work..." }
+    assignmentDrafts: {},
     scratchpad: 'sin(2x) = 2 sin x cos x\ncos(2x) = 1 - 2sin²x\nRemember to convert cm³ ÷ 1000 = dm³!',
     tasks: [
       { id: 'tk-1', title: 'Complete Trig Remote Worksheet 4', subject: 'Mathematics', done: false },
@@ -53,10 +67,15 @@ export function loadVault() {
     return {
       ...seed,
       ...parsed,
+      profiles: parsed.profiles?.length ? parsed.profiles : seed.profiles,
       notes: parsed.notes?.length ? parsed.notes : seed.notes,
-      quizzes: parsed.quizzes?.length ? parsed.quizzes : seed.quizzes,
+      quizzes: (parsed.quizzes?.length ? parsed.quizzes : seed.quizzes).map(normalizeQuiz),
+      flashcards: parsed.flashcards?.length ? parsed.flashcards : seed.flashcards,
       attendance: parsed.attendance?.length ? parsed.attendance : seed.attendance,
-      tuitionInfo: parsed.tuitionInfo || seed.tuitionInfo
+      tuitionInfo: {
+        ...seed.tuitionInfo,
+        ...(parsed.tuitionInfo || {})
+      }
     };
   } catch {
     return { ...seed, lastDownloadedAt: new Date().toISOString() };
@@ -84,6 +103,7 @@ export function loadPersonal() {
       ...def,
       ...parsed,
       subjectConfidence: { ...def.subjectConfidence, ...(parsed.subjectConfidence || {}) },
+      masteredCardIds: Array.isArray(parsed.masteredCardIds) ? parsed.masteredCardIds : def.masteredCardIds,
       assignmentDrafts: parsed.assignmentDrafts || {}
     };
   } catch {
@@ -139,7 +159,7 @@ export function loadSession() {
     const raw = localStorage.getItem(SESSION_KEY);
     if (!raw) {
       return {
-        currentUserId: 'stu-thabo',
+        currentUserId: null, // null = show Account Sign-In / Join / Visitor Portal
         theme: 'light',
         simulateOffline: false
       };
@@ -147,7 +167,7 @@ export function loadSession() {
     return JSON.parse(raw);
   } catch {
     return {
-      currentUserId: 'stu-thabo',
+      currentUserId: null,
       theme: 'light',
       simulateOffline: false
     };
@@ -162,22 +182,78 @@ export function saveSession(session) {
   }
 }
 
+export function authenticateAccount(vault, identifier, secret) {
+  const cleanId = String(identifier || '').trim().toLowerCase();
+  const cleanPin = String(secret || '').trim();
+  if (!cleanId) return { ok: false, error: 'Please enter your email, phone, name, or account ID.' };
+
+  const match = (vault.profiles || []).find((p) => {
+    return (
+      (p.id || '').toLowerCase() === cleanId ||
+      (p.email || '').toLowerCase() === cleanId ||
+      (p.phone || '').replace(/\s+/g, '') === cleanId.replace(/\s+/g, '') ||
+      (p.name || '').toLowerCase() === cleanId
+    );
+  });
+
+  if (!match) {
+    return { ok: false, error: 'Account not found. Check your email/name or Apply to Join first.' };
+  }
+
+  if (String(match.pin || '1234') !== cleanPin) {
+    return { ok: false, error: 'Incorrect password / PIN. (Demo accounts use PIN: 1234)' };
+  }
+
+  if (match.status === 'pending') {
+    return {
+      ok: false,
+      status: 'pending',
+      profile: match,
+      error: 'Your application is awaiting Admissions approval. Admissions can accept your account in 1 click!'
+    };
+  }
+
+  if (match.status === 'suspended' || match.status === 'declined') {
+    return {
+      ok: false,
+      status: match.status,
+      error: `This account is currently ${match.status}. Please contact Admissions.`
+    };
+  }
+
+  return { ok: true, profile: match };
+}
+
 export function dispatchOfflineAction(vault, action) {
   const p = action.payload || {};
 
   switch (action.type) {
+    case 'UPSERT_ACCOUNT':
+      vault.profiles = vault.profiles || [];
+      upsertInArray(vault.profiles, p, false);
+      break;
+    case 'DELETE_ACCOUNT':
+      vault.profiles = (vault.profiles || []).filter((u) => u.id !== p.id);
+      break;
     case 'ADD_TIMETABLE':
-      vault.timetables.push(p);
+    case 'UPSERT_TIMETABLE':
+      upsertInArray(vault.timetables, p, false);
       break;
     case 'DELETE_TIMETABLE':
       vault.timetables = vault.timetables.filter((t) => t.id !== p.id);
       break;
     case 'CREATE_ASSIGNMENT':
-      vault.assignments.unshift(p);
+    case 'UPSERT_ASSIGNMENT':
+      upsertInArray(vault.assignments, p, true);
       break;
-    case 'SUBMIT_ASSIGNMENT': {
+    case 'DELETE_ASSIGNMENT':
+      vault.assignments = vault.assignments.filter((a) => a.id !== p.id);
+      vault.submissions = vault.submissions.filter((s) => s.assignment_id !== p.id);
+      break;
+    case 'SUBMIT_ASSIGNMENT':
+    case 'UPSERT_SUBMISSION': {
       const idx = vault.submissions.findIndex(
-        (s) => s.assignment_id === p.assignment_id && s.student_id === p.student_id
+        (s) => s.id === p.id || (s.assignment_id === p.assignment_id && s.student_id === p.student_id)
       );
       if (idx >= 0) vault.submissions[idx] = { ...vault.submissions[idx], ...p };
       else vault.submissions.unshift(p);
@@ -192,31 +268,77 @@ export function dispatchOfflineAction(vault, action) {
       }
       break;
     }
+    case 'DELETE_SUBMISSION':
+      vault.submissions = vault.submissions.filter((s) => s.id !== p.id);
+      break;
     case 'LOG_ATTENDANCE':
+    case 'UPSERT_ATTENDANCE':
       vault.attendance = vault.attendance || [];
-      vault.attendance.unshift(p);
+      upsertInArray(vault.attendance, p, true);
+      break;
+    case 'DELETE_ATTENDANCE':
+      vault.attendance = (vault.attendance || []).filter((a) => a.id !== p.id);
       break;
     case 'ADD_STUDY_NOTE':
+    case 'UPSERT_STUDY_NOTE':
       vault.notes = vault.notes || [];
-      vault.notes.unshift(p);
+      upsertInArray(vault.notes, p, true);
+      break;
+    case 'DELETE_STUDY_NOTE':
+      vault.notes = (vault.notes || []).filter((n) => n.id !== p.id);
+      break;
+    case 'UPSERT_QUIZ':
+      vault.quizzes = vault.quizzes || [];
+      upsertInArray(vault.quizzes, normalizeQuiz(p), false);
+      break;
+    case 'DELETE_QUIZ':
+      vault.quizzes = (vault.quizzes || []).filter((q) => q.id !== p.id);
+      break;
+    case 'UPSERT_FLASHCARD':
+      vault.flashcards = vault.flashcards || [];
+      upsertInArray(vault.flashcards, p, false);
+      break;
+    case 'DELETE_FLASHCARD':
+      vault.flashcards = (vault.flashcards || []).filter((f) => f.id !== p.id);
       break;
     case 'CREATE_STUDY_GROUP':
-      vault.rooms.unshift(p);
+    case 'UPSERT_ROOM':
+      upsertInArray(vault.rooms, p, true);
+      break;
+    case 'DELETE_ROOM':
+      vault.rooms = vault.rooms.filter((r) => r.id !== p.id);
+      vault.messages = vault.messages.filter((m) => m.room_id !== p.id);
       break;
     case 'SEND_MESSAGE':
-      vault.messages.push(p);
+    case 'UPSERT_MESSAGE':
+      upsertInArray(vault.messages, p, false);
+      break;
+    case 'DELETE_MESSAGE':
+      vault.messages = vault.messages.filter((m) => m.id !== p.id);
       break;
     case 'SEND_BROADCAST':
-      vault.broadcasts.unshift(p);
+    case 'UPSERT_BROADCAST':
+      upsertInArray(vault.broadcasts, p, true);
+      break;
+    case 'DELETE_BROADCAST':
+      vault.broadcasts = vault.broadcasts.filter((b) => b.id !== p.id);
       break;
     case 'SUBMIT_ENQUIRY':
+    case 'UPSERT_ENQUIRY':
       vault.enquiries = vault.enquiries || [];
-      vault.enquiries.unshift(p);
+      upsertInArray(vault.enquiries, p, true);
+      break;
+    case 'DELETE_ENQUIRY':
+      vault.enquiries = (vault.enquiries || []).filter((e) => e.id !== p.id);
       break;
     case 'UPDATE_TUITION_INFO':
-      if (p.plans && p.contacts) {
-        vault.tuitionInfo = { plans: p.plans, contacts: p.contacts };
-      }
+      vault.tuitionInfo = {
+        ...vault.tuitionInfo,
+        ...(p.headline !== undefined ? { headline: p.headline } : {}),
+        ...(p.intro !== undefined ? { intro: p.intro } : {}),
+        ...(p.plans !== undefined ? { plans: p.plans } : {}),
+        ...(p.contacts !== undefined ? { contacts: p.contacts } : {})
+      };
       break;
     default:
       break;
@@ -256,14 +378,17 @@ export async function syncWithServer({ simulateOffline = false } = {}) {
       timetables: remoteSnap.timetables || [],
       assignments: remoteSnap.assignments || [],
       submissions: remoteSnap.submissions || [],
-      attendance: remoteSnap.attendance?.length ? remoteSnap.attendance : seed.attendance,
+      attendance: remoteSnap.attendance || [],
       notes: remoteSnap.notes?.length ? remoteSnap.notes : seed.notes,
-      quizzes: seed.quizzes,
-      flashcards: seed.flashcards,
+      quizzes: (remoteSnap.quizzes?.length ? remoteSnap.quizzes : seed.quizzes).map(normalizeQuiz),
+      flashcards: remoteSnap.flashcards?.length ? remoteSnap.flashcards : seed.flashcards,
       rooms: remoteSnap.rooms || [],
       messages: remoteSnap.messages || [],
       broadcasts: remoteSnap.broadcasts || [],
-      tuitionInfo: remoteSnap.tuitionInfo || seed.tuitionInfo,
+      tuitionInfo: {
+        ...seed.tuitionInfo,
+        ...(remoteSnap.tuitionInfo || {})
+      },
       enquiries: remoteSnap.enquiries || [],
       lastDownloadedAt: remoteSnap.syncedAt || new Date().toISOString()
     };

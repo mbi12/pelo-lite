@@ -286,5 +286,36 @@ export const ICONS = {
     <svg viewBox="0 0 24 24" class="nav-svg-sm" aria-hidden="true">
       <path d="M6 4h12v16l-6-4-6 4V4z" />
     </svg>
+  `,
+  users: `
+    <svg viewBox="0 0 24 24" class="nav-svg" aria-hidden="true">
+      <circle cx="9" cy="8" r="3.2" />
+      <path d="M3.5 19c0-3 2.5-5.2 5.5-5.2s5.5 2.2 5.5 5.2" />
+      <circle cx="17" cy="9" r="2.5" />
+      <path d="M16 14.2c2.4.3 4.3 2.1 4.5 4.8" />
+    </svg>
+  `,
+  user: `
+    <svg viewBox="0 0 24 24" class="nav-svg" aria-hidden="true">
+      <circle cx="12" cy="8" r="3.6" />
+      <path d="M5 20c0-3.6 3.1-6.2 7-6.2s7 2.6 7 6.2" />
+    </svg>
+  `,
+  edit: `
+    <svg viewBox="0 0 24 24" class="nav-svg-sm" aria-hidden="true">
+      <path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3z" />
+      <path d="M13.5 6.5l4 4" />
+    </svg>
+  `,
+  trash: `
+    <svg viewBox="0 0 24 24" class="nav-svg-sm" aria-hidden="true">
+      <path d="M4.5 7h15M9.5 7V4.5h5V7M7 7l1 13h8l1-13" />
+    </svg>
+  `,
+  logout: `
+    <svg viewBox="0 0 24 24" class="nav-svg-sm" aria-hidden="true">
+      <path d="M10 4H5.5A1.5 1.5 0 0 0 4 5.5v13A1.5 1.5 0 0 0 5.5 20H10" />
+      <path d="M15 16l4-4-4-4M9 12h10" />
+    </svg>
   `
 };

@@ -61,6 +61,15 @@ async function detectMode() {
   return resolvedMode;
 }
 
+function normalizeQuiz(q) {
+  const ci = Number(q.correct_index ?? q.correctIndex ?? 0);
+  return {
+    ...q,
+    correct_index: ci,
+    correctIndex: ci
+  };
+}
+
 function readLocalDb() {
   try {
     if (fs.existsSync(LOCAL_DB_PATH)) {
@@ -85,6 +94,17 @@ function writeLocalDb(snapshot) {
   }
 }
 
+function upsertInArray(arr, item, prepend = false) {
+  const idx = arr.findIndex((x) => x.id === item.id);
+  if (idx >= 0) {
+    arr[idx] = { ...arr[idx], ...item };
+  } else if (prepend) {
+    arr.unshift(item);
+  } else {
+    arr.push(item);
+  }
+}
+
 export async function getFullSnapshot() {
   const mode = await detectMode();
   const fallback = createDefaultSnapshot();
@@ -98,6 +118,8 @@ export async function getFullSnapshot() {
         submissions,
         attendance,
         notes,
+        quizzes,
+        flashcards,
         rooms,
         messages,
         broadcasts,
@@ -110,6 +132,8 @@ export async function getFullSnapshot() {
         sbFetch('itutor_v2_submissions?select=*&order=submitted_at.desc'),
         sbFetch('itutor_v2_attendance?select=*&order=created_at.desc'),
         sbFetch('itutor_v2_notes?select=*&order=created_at.desc'),
+        sbFetch('itutor_v2_quizzes?select=*&order=created_at.asc'),
+        sbFetch('itutor_v2_flashcards?select=*&order=created_at.asc'),
         sbFetch('itutor_v2_rooms?select=*&order=updated_at.desc'),
         sbFetch('itutor_v2_messages?select=*&order=created_at.asc'),
         sbFetch('itutor_v2_broadcasts?select=*&order=created_at.desc'),
@@ -126,15 +150,17 @@ export async function getFullSnapshot() {
         timetables: timetables || [],
         assignments: assignments || [],
         submissions: submissions || [],
-        attendance: attendance?.length ? attendance : fallback.attendance,
-        notes: notes?.length ? notes : fallback.notes,
-        quizzes: fallback.quizzes,
-        flashcards: fallback.flashcards,
+        attendance: attendance || [],
+        notes: notes || [],
+        quizzes: (quizzes?.length ? quizzes : fallback.quizzes).map(normalizeQuiz),
+        flashcards: flashcards?.length ? flashcards : fallback.flashcards,
         rooms: rooms || [],
         messages: messages || [],
         broadcasts: broadcasts || [],
         tuitionInfo: tuitionRow
           ? {
+              headline: tuitionRow.headline || fallback.tuitionInfo.headline,
+              intro: tuitionRow.intro || fallback.tuitionInfo.intro,
               plans: tuitionRow.plans || fallback.tuitionInfo.plans,
               contacts: tuitionRow.contacts || fallback.tuitionInfo.contacts
             }
@@ -150,7 +176,8 @@ export async function getFullSnapshot() {
   return {
     backend: 'local',
     syncedAt: new Date().toISOString(),
-    ...local
+    ...local,
+    quizzes: (local.quizzes || []).map(normalizeQuiz)
   };
 }
 
@@ -161,7 +188,39 @@ export async function applyOutboxActions(actions = []) {
     for (const act of actions) {
       const p = act?.payload || {};
       switch (act?.type) {
+        case 'UPSERT_ACCOUNT':
+          await sbFetch('itutor_v2_profiles', {
+            method: 'POST',
+            prefer: 'resolution=merge-duplicates,return=minimal',
+            body: {
+              id: p.id,
+              name: p.name,
+              role: ['student', 'parent', 'teacher', 'admissions', 'admin'].includes(p.role) ? p.role : 'student',
+              subtitle: p.subtitle || '',
+              grade: p.grade || '',
+              pin: p.pin || '1234',
+              email: p.email || '',
+              phone: p.phone || '',
+              status: ['active', 'pending', 'suspended', 'declined'].includes(p.status) ? p.status : 'active',
+              subjects: Array.isArray(p.subjects) ? p.subjects : [],
+              selected_plan: p.selected_plan || '',
+              linked_student_id: p.linked_student_id || '',
+              notes: p.notes || ''
+            }
+          });
+          break;
+
+        case 'DELETE_ACCOUNT':
+          if (p.id) {
+            await sbFetch(`itutor_v2_profiles?id=eq.${encodeURIComponent(p.id)}`, {
+              method: 'DELETE',
+              prefer: 'return=minimal'
+            });
+          }
+          break;
+
         case 'ADD_TIMETABLE':
+        case 'UPSERT_TIMETABLE':
           await sbFetch('itutor_v2_timetables', {
             method: 'POST',
             prefer: 'resolution=merge-duplicates,return=minimal',
@@ -191,6 +250,7 @@ export async function applyOutboxActions(actions = []) {
           break;
 
         case 'CREATE_ASSIGNMENT':
+        case 'UPSERT_ASSIGNMENT':
           await sbFetch('itutor_v2_assignments', {
             method: 'POST',
             prefer: 'resolution=merge-duplicates,return=minimal',
@@ -209,7 +269,17 @@ export async function applyOutboxActions(actions = []) {
           });
           break;
 
+        case 'DELETE_ASSIGNMENT':
+          if (p.id) {
+            await sbFetch(`itutor_v2_assignments?id=eq.${encodeURIComponent(p.id)}`, {
+              method: 'DELETE',
+              prefer: 'return=minimal'
+            });
+          }
+          break;
+
         case 'SUBMIT_ASSIGNMENT':
+        case 'UPSERT_SUBMISSION':
           await sbFetch('itutor_v2_submissions', {
             method: 'POST',
             prefer: 'resolution=merge-duplicates,return=minimal',
@@ -219,7 +289,9 @@ export async function applyOutboxActions(actions = []) {
               student_id: p.student_id,
               student_name: p.student_name,
               answer_text: p.answer_text,
-              status: 'submitted',
+              status: p.status === 'graded' ? 'graded' : 'submitted',
+              marks_awarded: p.marks_awarded ?? null,
+              teacher_feedback: p.teacher_feedback || '',
               submitted_at: p.submitted_at || new Date().toISOString()
             }
           });
@@ -240,7 +312,17 @@ export async function applyOutboxActions(actions = []) {
           }
           break;
 
+        case 'DELETE_SUBMISSION':
+          if (p.id) {
+            await sbFetch(`itutor_v2_submissions?id=eq.${encodeURIComponent(p.id)}`, {
+              method: 'DELETE',
+              prefer: 'return=minimal'
+            });
+          }
+          break;
+
         case 'LOG_ATTENDANCE':
+        case 'UPSERT_ATTENDANCE':
           await sbFetch('itutor_v2_attendance', {
             method: 'POST',
             prefer: 'resolution=merge-duplicates,return=minimal',
@@ -250,14 +332,24 @@ export async function applyOutboxActions(actions = []) {
               subject: p.subject,
               student_id: p.student_id,
               student_name: p.student_name,
-              status: p.status || 'present',
+              status: ['present', 'late', 'absent'].includes(p.status) ? p.status : 'present',
               teacher_name: p.teacher_name || 'Educator',
               lesson_note: p.lesson_note || ''
             }
           });
           break;
 
+        case 'DELETE_ATTENDANCE':
+          if (p.id) {
+            await sbFetch(`itutor_v2_attendance?id=eq.${encodeURIComponent(p.id)}`, {
+              method: 'DELETE',
+              prefer: 'return=minimal'
+            });
+          }
+          break;
+
         case 'ADD_STUDY_NOTE':
+        case 'UPSERT_STUDY_NOTE':
           await sbFetch('itutor_v2_notes', {
             method: 'POST',
             prefer: 'resolution=merge-duplicates,return=minimal',
@@ -267,29 +359,96 @@ export async function applyOutboxActions(actions = []) {
               title: p.title,
               formulas: Array.isArray(p.formulas) ? p.formulas : [],
               summary: p.summary || '',
-              author_name: p.author_name || 'Student'
+              author_name: p.author_name || 'Educator'
             }
           });
           break;
 
+        case 'DELETE_STUDY_NOTE':
+          if (p.id) {
+            await sbFetch(`itutor_v2_notes?id=eq.${encodeURIComponent(p.id)}`, {
+              method: 'DELETE',
+              prefer: 'return=minimal'
+            });
+          }
+          break;
+
+        case 'UPSERT_QUIZ':
+          await sbFetch('itutor_v2_quizzes', {
+            method: 'POST',
+            prefer: 'resolution=merge-duplicates,return=minimal',
+            body: {
+              id: p.id,
+              subject: p.subject || 'Mathematics',
+              topic: p.topic || 'Practice',
+              question: p.question,
+              options: Array.isArray(p.options) ? p.options : [],
+              correct_index: Number(p.correct_index ?? p.correctIndex ?? 0),
+              explanation: p.explanation || ''
+            }
+          });
+          break;
+
+        case 'DELETE_QUIZ':
+          if (p.id) {
+            await sbFetch(`itutor_v2_quizzes?id=eq.${encodeURIComponent(p.id)}`, {
+              method: 'DELETE',
+              prefer: 'return=minimal'
+            });
+          }
+          break;
+
+        case 'UPSERT_FLASHCARD':
+          await sbFetch('itutor_v2_flashcards', {
+            method: 'POST',
+            prefer: 'resolution=merge-duplicates,return=minimal',
+            body: {
+              id: p.id,
+              subject: p.subject || 'Mathematics',
+              front: p.front,
+              back: p.back
+            }
+          });
+          break;
+
+        case 'DELETE_FLASHCARD':
+          if (p.id) {
+            await sbFetch(`itutor_v2_flashcards?id=eq.${encodeURIComponent(p.id)}`, {
+              method: 'DELETE',
+              prefer: 'return=minimal'
+            });
+          }
+          break;
+
         case 'CREATE_STUDY_GROUP':
+        case 'UPSERT_ROOM':
           await sbFetch('itutor_v2_rooms', {
             method: 'POST',
             prefer: 'resolution=merge-duplicates,return=minimal',
             body: {
               id: p.id,
-              room_type: p.room_type || 'group',
+              room_type: p.room_type === 'direct' ? 'direct' : 'group',
               name: p.name,
               subject: p.subject || 'Study Group',
-              participant_ids: p.participant_ids || [],
-              members_label: p.members_label || 'Student Study Group',
-              created_by_name: p.created_by_name || 'Student',
+              participant_ids: Array.isArray(p.participant_ids) ? p.participant_ids : [],
+              members_label: p.members_label || 'Study Channel',
+              created_by_name: p.created_by_name || 'i-tutor',
               updated_at: new Date().toISOString()
             }
           });
           break;
 
+        case 'DELETE_ROOM':
+          if (p.id) {
+            await sbFetch(`itutor_v2_rooms?id=eq.${encodeURIComponent(p.id)}`, {
+              method: 'DELETE',
+              prefer: 'return=minimal'
+            });
+          }
+          break;
+
         case 'SEND_MESSAGE':
+        case 'UPSERT_MESSAGE':
           await sbFetch('itutor_v2_messages', {
             method: 'POST',
             prefer: 'resolution=merge-duplicates,return=minimal',
@@ -303,14 +462,26 @@ export async function applyOutboxActions(actions = []) {
               created_at: p.created_at || new Date().toISOString()
             }
           });
-          await sbFetch(`itutor_v2_rooms?id=eq.${encodeURIComponent(p.room_id)}`, {
-            method: 'PATCH',
-            prefer: 'return=minimal',
-            body: { updated_at: new Date().toISOString() }
-          });
+          if (p.room_id) {
+            await sbFetch(`itutor_v2_rooms?id=eq.${encodeURIComponent(p.room_id)}`, {
+              method: 'PATCH',
+              prefer: 'return=minimal',
+              body: { updated_at: new Date().toISOString() }
+            });
+          }
+          break;
+
+        case 'DELETE_MESSAGE':
+          if (p.id) {
+            await sbFetch(`itutor_v2_messages?id=eq.${encodeURIComponent(p.id)}`, {
+              method: 'DELETE',
+              prefer: 'return=minimal'
+            });
+          }
           break;
 
         case 'SEND_BROADCAST':
+        case 'UPSERT_BROADCAST':
           await sbFetch('itutor_v2_broadcasts', {
             method: 'POST',
             prefer: 'resolution=merge-duplicates,return=minimal',
@@ -319,7 +490,7 @@ export async function applyOutboxActions(actions = []) {
               title: p.title,
               body: p.body,
               author_name: p.author_name,
-              author_role: p.author_role === 'admin' ? 'admin' : 'teacher',
+              author_role: ['admin', 'admissions', 'teacher'].includes(p.author_role) ? p.author_role : 'admin',
               audience: p.audience || 'students_parents',
               priority: p.priority || 'important',
               created_at: p.created_at || new Date().toISOString()
@@ -327,7 +498,17 @@ export async function applyOutboxActions(actions = []) {
           });
           break;
 
+        case 'DELETE_BROADCAST':
+          if (p.id) {
+            await sbFetch(`itutor_v2_broadcasts?id=eq.${encodeURIComponent(p.id)}`, {
+              method: 'DELETE',
+              prefer: 'return=minimal'
+            });
+          }
+          break;
+
         case 'SUBMIT_ENQUIRY':
+        case 'UPSERT_ENQUIRY':
           await sbFetch('itutor_v2_enquiries', {
             method: 'POST',
             prefer: 'resolution=merge-duplicates,return=minimal',
@@ -338,22 +519,36 @@ export async function applyOutboxActions(actions = []) {
               student_grade: p.student_grade || '',
               selected_plan: p.selected_plan || '',
               message: p.message || '',
+              status: p.status || 'pending',
+              role_requested: p.role_requested || 'student',
+              subjects: p.subjects || '',
               created_at: p.created_at || new Date().toISOString()
             }
           });
           break;
 
-        case 'UPDATE_TUITION_INFO':
+        case 'DELETE_ENQUIRY':
+          if (p.id) {
+            await sbFetch(`itutor_v2_enquiries?id=eq.${encodeURIComponent(p.id)}`, {
+              method: 'DELETE',
+              prefer: 'return=minimal'
+            });
+          }
+          break;
+
+        case 'UPDATE_TUITION_INFO': {
+          const patchBody = { updated_at: new Date().toISOString() };
+          if (p.headline !== undefined) patchBody.headline = p.headline;
+          if (p.intro !== undefined) patchBody.intro = p.intro;
+          if (p.plans !== undefined) patchBody.plans = p.plans;
+          if (p.contacts !== undefined) patchBody.contacts = p.contacts;
           await sbFetch('itutor_v2_tuition_info?id=eq.default', {
             method: 'PATCH',
             prefer: 'return=minimal',
-            body: {
-              plans: p.plans,
-              contacts: p.contacts,
-              updated_at: new Date().toISOString()
-            }
+            body: patchBody
           });
           break;
+        }
 
         default:
           break;
@@ -363,26 +558,37 @@ export async function applyOutboxActions(actions = []) {
     return getFullSnapshot();
   }
 
-  // Local file fallback
+  // Local file fallback (mirrors every single action identically)
   const db = readLocalDb();
   for (const act of actions) {
     const p = act?.payload || {};
     switch (act?.type) {
+      case 'UPSERT_ACCOUNT':
+        db.profiles = db.profiles || [];
+        upsertInArray(db.profiles, p, false);
+        break;
+      case 'DELETE_ACCOUNT':
+        db.profiles = (db.profiles || []).filter((u) => u.id !== p.id);
+        break;
       case 'ADD_TIMETABLE':
-        if (!db.timetables.some((t) => t.id === p.id)) db.timetables.push(p);
+      case 'UPSERT_TIMETABLE':
+        upsertInArray(db.timetables, p, false);
         break;
       case 'DELETE_TIMETABLE':
         db.timetables = db.timetables.filter((t) => t.id !== p.id);
         break;
       case 'CREATE_ASSIGNMENT':
-        if (!db.assignments.some((a) => a.id === p.id)) db.assignments.unshift(p);
+      case 'UPSERT_ASSIGNMENT':
+        upsertInArray(db.assignments, p, true);
         break;
-      case 'SUBMIT_ASSIGNMENT': {
-        const idx = db.submissions.findIndex((s) => s.id === p.id);
-        if (idx >= 0) db.submissions[idx] = { ...db.submissions[idx], ...p };
-        else db.submissions.unshift(p);
+      case 'DELETE_ASSIGNMENT':
+        db.assignments = db.assignments.filter((a) => a.id !== p.id);
+        db.submissions = db.submissions.filter((s) => s.assignment_id !== p.id);
         break;
-      }
+      case 'SUBMIT_ASSIGNMENT':
+      case 'UPSERT_SUBMISSION':
+        upsertInArray(db.submissions, p, true);
+        break;
       case 'GRADE_SUBMISSION': {
         const sub = db.submissions.find((s) => s.id === p.id);
         if (sub) {
@@ -392,31 +598,77 @@ export async function applyOutboxActions(actions = []) {
         }
         break;
       }
+      case 'DELETE_SUBMISSION':
+        db.submissions = db.submissions.filter((s) => s.id !== p.id);
+        break;
       case 'LOG_ATTENDANCE':
+      case 'UPSERT_ATTENDANCE':
         db.attendance = db.attendance || [];
-        if (!db.attendance.some((a) => a.id === p.id)) db.attendance.unshift(p);
+        upsertInArray(db.attendance, p, true);
+        break;
+      case 'DELETE_ATTENDANCE':
+        db.attendance = (db.attendance || []).filter((a) => a.id !== p.id);
         break;
       case 'ADD_STUDY_NOTE':
+      case 'UPSERT_STUDY_NOTE':
         db.notes = db.notes || [];
-        if (!db.notes.some((n) => n.id === p.id)) db.notes.unshift(p);
+        upsertInArray(db.notes, p, true);
+        break;
+      case 'DELETE_STUDY_NOTE':
+        db.notes = (db.notes || []).filter((n) => n.id !== p.id);
+        break;
+      case 'UPSERT_QUIZ':
+        db.quizzes = db.quizzes || [];
+        upsertInArray(db.quizzes, normalizeQuiz(p), false);
+        break;
+      case 'DELETE_QUIZ':
+        db.quizzes = (db.quizzes || []).filter((q) => q.id !== p.id);
+        break;
+      case 'UPSERT_FLASHCARD':
+        db.flashcards = db.flashcards || [];
+        upsertInArray(db.flashcards, p, false);
+        break;
+      case 'DELETE_FLASHCARD':
+        db.flashcards = (db.flashcards || []).filter((f) => f.id !== p.id);
         break;
       case 'CREATE_STUDY_GROUP':
-        if (!db.rooms.some((r) => r.id === p.id)) db.rooms.unshift(p);
+      case 'UPSERT_ROOM':
+        upsertInArray(db.rooms, p, true);
+        break;
+      case 'DELETE_ROOM':
+        db.rooms = db.rooms.filter((r) => r.id !== p.id);
+        db.messages = db.messages.filter((m) => m.room_id !== p.id);
         break;
       case 'SEND_MESSAGE':
-        if (!db.messages.some((m) => m.id === p.id)) db.messages.push(p);
+      case 'UPSERT_MESSAGE':
+        upsertInArray(db.messages, p, false);
+        break;
+      case 'DELETE_MESSAGE':
+        db.messages = db.messages.filter((m) => m.id !== p.id);
         break;
       case 'SEND_BROADCAST':
-        if (!db.broadcasts.some((b) => b.id === p.id)) db.broadcasts.unshift(p);
+      case 'UPSERT_BROADCAST':
+        upsertInArray(db.broadcasts, p, true);
+        break;
+      case 'DELETE_BROADCAST':
+        db.broadcasts = db.broadcasts.filter((b) => b.id !== p.id);
         break;
       case 'SUBMIT_ENQUIRY':
+      case 'UPSERT_ENQUIRY':
         db.enquiries = db.enquiries || [];
-        if (!db.enquiries.some((e) => e.id === p.id)) db.enquiries.unshift(p);
+        upsertInArray(db.enquiries, p, true);
+        break;
+      case 'DELETE_ENQUIRY':
+        db.enquiries = (db.enquiries || []).filter((e) => e.id !== p.id);
         break;
       case 'UPDATE_TUITION_INFO':
-        if (p.plans && p.contacts) {
-          db.tuitionInfo = { plans: p.plans, contacts: p.contacts };
-        }
+        db.tuitionInfo = {
+          ...db.tuitionInfo,
+          ...(p.headline !== undefined ? { headline: p.headline } : {}),
+          ...(p.intro !== undefined ? { intro: p.intro } : {}),
+          ...(p.plans !== undefined ? { plans: p.plans } : {}),
+          ...(p.contacts !== undefined ? { contacts: p.contacts } : {})
+        };
         break;
       default:
         break;

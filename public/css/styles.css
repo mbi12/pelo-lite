@@ -1333,6 +1333,196 @@ select {
 }
 
 /* ==========================================================================
+   ACCOUNT PORTAL (SIGN IN / APPLY TO JOIN / PUBLIC VISITOR GATE)
+   ========================================================================== */
+
+.auth-portal-shell {
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background:
+    radial-gradient(circle at 80% 15%, var(--bg-cream-light) 0%, transparent 50%),
+    var(--bg-cream);
+}
+
+.auth-portal-grid {
+  width: 100%;
+  max-width: 1040px;
+  display: grid;
+  grid-template-columns: 1.05fr 1.15fr;
+  background: var(--surface-ivory);
+  border: 1px solid var(--border-warm);
+  border-radius: 26px;
+  overflow: hidden;
+  box-shadow: var(--shadow-card);
+}
+
+.auth-brand-pane {
+  background: var(--sidebar-bg);
+  color: var(--sidebar-text);
+  padding: 2.2rem 2rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 1.4rem;
+}
+
+.auth-form-pane {
+  padding: 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.demo-accounts-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.demo-acc-btn {
+  appearance: none;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-recessed);
+  color: var(--charcoal);
+  border-radius: 12px;
+  padding: 0.58rem 0.72rem;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.demo-acc-btn:hover {
+  border-color: var(--gold);
+  transform: translateY(-1px);
+}
+
+.demo-acc-role {
+  font-size: 0.66rem;
+  font-weight: 850;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--gold-deep);
+}
+
+[data-theme='night'] .demo-acc-role {
+  color: var(--gold);
+}
+
+.demo-acc-name {
+  font-size: 0.81rem;
+  font-weight: 750;
+}
+
+/* Action Clusters & Status Chips */
+.action-cluster {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.38rem;
+  flex-wrap: wrap;
+}
+
+.icon-action-btn {
+  appearance: none;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-ivory);
+  color: var(--charcoal);
+  padding: 0.36rem 0.62rem;
+  border-radius: 9px;
+  font-size: 0.74rem;
+  font-weight: 750;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  cursor: pointer;
+}
+
+.icon-action-btn:hover {
+  border-color: var(--gold);
+}
+
+.icon-action-btn.danger:hover {
+  border-color: #D6453A;
+  color: #D6453A;
+}
+
+.approve-btn {
+  appearance: none;
+  border: none;
+  background: #1E7E48;
+  color: #FFFFFF;
+  padding: 0.46rem 0.82rem;
+  border-radius: 10px;
+  font-size: 0.77rem;
+  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  cursor: pointer;
+}
+
+.status-chip {
+  font-size: 0.69rem;
+  font-weight: 800;
+  padding: 0.2rem 0.56rem;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.status-chip.active {
+  background: rgba(30, 126, 72, 0.14);
+  color: #1E7E48;
+}
+
+.status-chip.pending {
+  background: rgba(242, 183, 40, 0.26);
+  color: var(--gold-deep);
+}
+
+.status-chip.suspended,
+.status-chip.declined {
+  background: rgba(214, 69, 58, 0.14);
+  color: #C43B30;
+}
+
+.account-rail-card {
+  margin-top: 0.9rem;
+  background: var(--sidebar-card);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  padding: 0.78rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.account-rail-top {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.account-avatar-gold {
+  width: 36px;
+  height: 36px;
+  border-radius: 11px;
+  background: var(--gold);
+  color: #1E1F1D;
+  font-weight: 850;
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+/* ==========================================================================
    RESPONSIVE BREAKPOINTS
    ========================================================================== */
 
@@ -1376,7 +1566,8 @@ select {
   }
   .two-col-grid,
   .messenger-split,
-  .pricing-cards-grid {
+  .pricing-cards-grid,
+  .auth-portal-grid {
     grid-template-columns: 1fr;
   }
   .toast-banner {
@@ -1387,7 +1578,8 @@ select {
 }
 
 @media (max-width: 520px) {
-  .form-grid-2 {
+  .form-grid-2,
+  .demo-accounts-grid {
     grid-template-columns: 1fr;
   }
 }

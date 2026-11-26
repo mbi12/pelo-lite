@@ -15,7 +15,14 @@ export function createDefaultSnapshot() {
         role: 'student',
         subtitle: 'Grade 12 · STEM Stream',
         grade: 'Grade 12',
-        pin: '1234'
+        pin: '1234',
+        email: 'thabo@student.i-tutor.academy',
+        phone: '+27 71 210 4401',
+        status: 'active',
+        subjects: ['Mathematics', 'Physical Sciences', 'Accounting'],
+        selected_plan: '3-Subject Core Package',
+        linked_student_id: '',
+        notes: 'Prefers afternoon trigonometry & mechanics drills.'
       },
       {
         id: 'stu-amahle',
@@ -23,7 +30,14 @@ export function createDefaultSnapshot() {
         role: 'student',
         subtitle: 'Grade 12 · Commerce & Maths',
         grade: 'Grade 12',
-        pin: '1234'
+        pin: '1234',
+        email: 'amahle@student.i-tutor.academy',
+        phone: '+27 73 884 1920',
+        status: 'active',
+        subjects: ['Mathematics', 'Accounting', 'English'],
+        selected_plan: '3-Subject Core Package',
+        linked_student_id: '',
+        notes: 'Top performer in Accounting adjustments.'
       },
       {
         id: 'stu-liam',
@@ -31,7 +45,14 @@ export function createDefaultSnapshot() {
         role: 'student',
         subtitle: 'Grade 11 · Sciences',
         grade: 'Grade 11',
-        pin: '1234'
+        pin: '1234',
+        email: 'liam@student.i-tutor.academy',
+        phone: '+27 82 419 7731',
+        status: 'active',
+        subjects: ['Mathematics', 'Physical Sciences', 'Life Sciences'],
+        selected_plan: 'Full Exam Mastery (All Subjects)',
+        linked_student_id: '',
+        notes: 'Working on pulley free-body diagrams.'
       },
       {
         id: 'par-grace',
@@ -39,7 +60,14 @@ export function createDefaultSnapshot() {
         role: 'parent',
         subtitle: 'Parent of Thabo Mokoena (Grade 12)',
         grade: 'Grade 12',
-        pin: '1234'
+        pin: '1234',
+        email: 'grace.mokoena@parent.co.za',
+        phone: '+27 82 901 3340',
+        status: 'active',
+        subjects: ['Mathematics', 'Physical Sciences', 'Accounting'],
+        selected_plan: '3-Subject Core Package',
+        linked_student_id: 'stu-thabo',
+        notes: 'Receives weekly attendance & assessment updates.'
       },
       {
         id: 'tch-naledi',
@@ -47,7 +75,14 @@ export function createDefaultSnapshot() {
         role: 'teacher',
         subtitle: 'Mathematics Educator',
         grade: 'Grades 10–12',
-        pin: '1234'
+        pin: '1234',
+        email: 'naledi@i-tutor.academy',
+        phone: '+27 72 511 0822',
+        status: 'active',
+        subjects: ['Mathematics'],
+        selected_plan: 'Educator Staff',
+        linked_student_id: '',
+        notes: 'Senior FET Mathematics Tutor.'
       },
       {
         id: 'tch-sipho',
@@ -55,7 +90,14 @@ export function createDefaultSnapshot() {
         role: 'teacher',
         subtitle: 'Physical Sciences Educator',
         grade: 'Grades 10–12',
-        pin: '1234'
+        pin: '1234',
+        email: 'sipho@i-tutor.academy',
+        phone: '+27 76 309 4418',
+        status: 'active',
+        subjects: ['Physical Sciences', 'Life Sciences'],
+        selected_plan: 'Educator Staff',
+        linked_student_id: '',
+        notes: 'Leads Physics & Chemistry boot camps.'
       },
       {
         id: 'tch-claire',
@@ -63,15 +105,74 @@ export function createDefaultSnapshot() {
         role: 'teacher',
         subtitle: 'Accounting & English Educator',
         grade: 'Grades 10–12',
-        pin: '1234'
+        pin: '1234',
+        email: 'claire@i-tutor.academy',
+        phone: '+27 83 614 9021',
+        status: 'active',
+        subjects: ['Accounting', 'English'],
+        selected_plan: 'Educator Staff',
+        linked_student_id: '',
+        notes: 'Commerce & English essay specialist.'
+      },
+      {
+        id: 'adm-lerato',
+        name: 'Lerato Sithole',
+        role: 'admissions',
+        subtitle: 'Head of Admissions & Enrolment',
+        grade: 'Admissions Office',
+        pin: '1234',
+        email: 'admissions@i-tutor.academy',
+        phone: '+27 72 640 1189',
+        status: 'active',
+        subjects: ['All Subjects'],
+        selected_plan: 'Admissions Staff',
+        linked_student_id: '',
+        notes: 'Accepts anyone joining & manages all academy records.'
       },
       {
         id: 'admin-1',
         name: 'Kgomotso Dlamini',
         role: 'admin',
-        subtitle: 'i-tutor Academy Admin',
+        subtitle: 'i-tutor Principal & Super Admin',
         grade: 'All Grades',
-        pin: '1234'
+        pin: '1234',
+        email: 'admin@i-tutor.academy',
+        phone: '+27 11 482 9104',
+        status: 'active',
+        subjects: ['All Subjects'],
+        selected_plan: 'Executive Admin',
+        linked_student_id: '',
+        notes: 'Full control over admissions, accounts & academy content.'
+      },
+      {
+        id: 'app-siphesihle',
+        name: 'Siphesihle Zulu',
+        role: 'student',
+        subtitle: 'Grade 11 Applicant · STEM',
+        grade: 'Grade 11',
+        pin: '1234',
+        email: 'siphesihle@gmail.com',
+        phone: '+27 82 555 0192',
+        status: 'pending',
+        subjects: ['Mathematics', 'Physical Sciences'],
+        selected_plan: '3-Subject Core Package',
+        linked_student_id: '',
+        notes: 'Applying for afternoon Maths & Physical Sciences classes.'
+      },
+      {
+        id: 'app-bongani',
+        name: 'Mr. Bongani Dube',
+        role: 'parent',
+        subtitle: 'Parent Applicant (Grade 10 Learner)',
+        grade: 'Grade 10',
+        pin: '1234',
+        email: 'bongani.dube@gmail.com',
+        phone: '+27 83 712 4409',
+        status: 'pending',
+        subjects: ['Mathematics', 'Accounting'],
+        selected_plan: 'Single Subject Boost',
+        linked_student_id: '',
+        notes: 'Would like weekly Saturday & Wednesday support for my daughter.'
       }
     ],
     timetables: [
@@ -340,6 +441,7 @@ export function createDefaultSnapshot() {
         topic: 'Trigonometry',
         question: 'Which expression is always equal to sin²θ + cos²θ for any real angle θ?',
         options: ['0', '1', '2 sin θ cos θ', 'tan²θ'],
+        correct_index: 1,
         correctIndex: 1,
         explanation: 'By the Pythagorean identity, sin²θ + cos²θ = 1 for all angles θ.'
       },
@@ -349,6 +451,7 @@ export function createDefaultSnapshot() {
         topic: 'Trigonometry',
         question: 'What is the simplified double-angle expansion for sin(2θ)?',
         options: ['sin²θ − cos²θ', '2 sin θ cos θ', '2 cos²θ − 1', 'sin θ + cos θ'],
+        correct_index: 1,
         correctIndex: 1,
         explanation: 'sin(2θ) expands directly to 2 sin θ cos θ.'
       },
@@ -358,6 +461,7 @@ export function createDefaultSnapshot() {
         topic: 'Functions',
         question: 'For f(x) = 2x² − 8x + 5, what is the x-coordinate of the turning point?',
         options: ['x = −2', 'x = 2', 'x = 4', 'x = −4'],
+        correct_index: 1,
         correctIndex: 1,
         explanation: 'Using x = −b / (2a) = −(−8) / (2 × 2) = 8 / 4 = 2.'
       },
@@ -367,6 +471,7 @@ export function createDefaultSnapshot() {
         topic: 'Mechanics',
         question: 'A 4 kg block accelerates at 3 m·s⁻² on a frictionless surface. What is F_net?',
         options: ['0.75 N', '7 N', '12 N', '39.2 N'],
+        correct_index: 2,
         correctIndex: 2,
         explanation: 'F_net = m × a = 4 kg × 3 m·s⁻² = 12 N.'
       },
@@ -376,6 +481,7 @@ export function createDefaultSnapshot() {
         topic: 'Stoichiometry',
         question: 'How many dm³ are in 250 cm³ when calculating molar concentration c = n / V?',
         options: ['0.025 dm³', '0.25 dm³', '2.5 dm³', '25 dm³'],
+        correct_index: 1,
         correctIndex: 1,
         explanation: 'Divide cm³ by 1000: 250 / 1000 = 0.25 dm³.'
       },
@@ -385,6 +491,7 @@ export function createDefaultSnapshot() {
         topic: 'Financial Statements',
         question: 'If Assets = 150,000 and Liabilities = 45,000, what is Owner’s Equity?',
         options: ['195,000', '105,000', '45,000', '150,000'],
+        correct_index: 1,
         correctIndex: 1,
         explanation: 'Owner’s Equity = Assets − Liabilities = 150,000 − 45,000 = 105,000.'
       },
@@ -394,6 +501,7 @@ export function createDefaultSnapshot() {
         topic: 'Genetics',
         question: 'In mRNA, which base pairs with Adenine (A) on the DNA template strand?',
         options: ['Thymine (T)', 'Uracil (U)', 'Cytosine (C)', 'Guanine (G)'],
+        correct_index: 1,
         correctIndex: 1,
         explanation: 'RNA uses Uracil (U) instead of Thymine, so DNA Adenine pairs with mRNA Uracil.'
       },
@@ -408,6 +516,7 @@ export function createDefaultSnapshot() {
           'The bibliography',
           'A full plot summary'
         ],
+        correct_index: 1,
         correctIndex: 1,
         explanation: 'Explain unpacks how the quote’s language or literary device supports your argument.'
       }
@@ -573,6 +682,9 @@ export function createDefaultSnapshot() {
       }
     ],
     tuitionInfo: {
+      headline: 'Confidence in learning — Transparent Tuition & Expert Mentoring',
+      intro:
+        'Explore our flexible monthly and 1-on-1 tuition packages, calculate estimated sessions, or apply for an account directly in the app.',
       plans: [
         {
           id: 'plan-single',
