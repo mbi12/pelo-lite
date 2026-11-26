@@ -2459,16 +2459,18 @@ function renderApp(opts = {}) {
       <!-- ZONE 2: WIDE ADAPTIVE MAIN STAGE -->
       <div class="main-stage">
         <header class="stage-topbar">
-          <button class="mobile-menu-trigger" id="btn-open-mobile-drawer" aria-label="Open full workspace menu">
-            ${ICONS.menu}
-          </button>
+          <div class="topbar-left-group">
+            <button class="mobile-menu-trigger" id="btn-open-mobile-drawer" aria-label="Open full workspace menu">
+              ${ICONS.menu}
+            </button>
 
-          <div class="mobile-brand-cluster" data-nav="overview" style="cursor:pointer;">
-            <div class="mobile-emblem-mini">${renderEmblemSVG({ animated: false, uid: 'mob', className: 'brand-emblem-svg' })}</div>
-            <strong><span style="color:var(--gold-deep);">i</span>-tutor</strong>
+            <div class="mobile-brand-cluster" data-nav="overview" style="cursor:pointer;">
+              <div class="mobile-emblem-mini">${renderEmblemSVG({ animated: false, uid: 'mob', className: 'brand-emblem-svg' })}</div>
+              <strong class="mobile-brand-word"><span style="color:var(--gold-deep);">i</span>-tutor</strong>
+            </div>
           </div>
 
-          <div class="search-box-wrap">
+          <div class="search-box-wrap desktop-only-search">
             <span class="search-icon-pos">${ICONS.search}</span>
             <input
               type="search"
