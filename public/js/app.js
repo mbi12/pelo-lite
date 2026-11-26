@@ -733,6 +733,44 @@ function matchesUserSubject(user, itemSubject, { allowCompound = false } = {}) {
   return false;
 }
 
+function getDefaultLandingView(profile) {
+  if (!profile || profile.role === 'visitor') return 'tuition';
+  if (canEditEverything(profile)) return 'admissions';
+  if (profile.role === 'teacher') return 'subjects';
+  return 'overview';
+}
+
+function getParentLinkedChild(user) {
+  if (!user || user.role !== 'parent') return null;
+  const linkedId = String(user.linked_student_id || '').trim();
+  if (!linkedId) return null;
+  return (vaultState.profiles || []).find((p) => p.id === linkedId && p.role === 'student') || null;
+}
+
+function getVisibleAttendance(user) {
+  const all = vaultState.attendance || [];
+  if (!user || user.role === 'visitor') return [];
+  if (isStaff(user)) return all;
+  if (user.role === 'parent') {
+    const child = getParentLinkedChild(user);
+    if (!child) return [];
+    return all.filter((a) => a.student_id === child.id);
+  }
+  return all.filter((a) => a.student_id === user.id);
+}
+
+function getVisibleBroadcasts(user) {
+  const all = vaultState.broadcasts || [];
+  if (!user || isStaff(user)) return all;
+  if (user.role === 'parent') {
+    return all.filter((b) => b.audience !== 'students');
+  }
+  if (user.role === 'student') {
+    return all.filter((b) => b.audience !== 'parents');
+  }
+  return all;
+}
+
 function getVisibleAssignments(user) {
   return (vaultState.assignments || []).filter((a) => matchesUserSubject(user, a.subject));
 }
@@ -760,7 +798,11 @@ function getVisibleRooms(user) {
   if (canEditEverything(user)) return vaultState.rooms || [];
   return (vaultState.rooms || []).filter((r) => {
     if (!(r.participant_ids || []).includes(user.id)) return false;
-    if ((user.role === 'student' || user.role === 'parent') && r.room_type === 'group' && r.subject) {
+    if (user.role === 'parent') {
+      // Parents only see direct 1:1 teacher & academy channels, never student peer study groups
+      return r.room_type !== 'group';
+    }
+    if (user.role === 'student' && r.room_type === 'group' && r.subject) {
       return matchesUserSubject(user, r.subject);
     }
     return true;
@@ -789,22 +831,24 @@ async function enrollAcceptedUserInRooms(profile) {
   if (!profile || !profile.id) return;
   const knownSubjectLower = new Set(getAllKnownSubjects().map((s) => s.toLowerCase()));
 
-  // Only enroll into study group rooms whose subject matches the student's enrolled subjects
-  for (const room of vaultState.rooms || []) {
-    if (room.room_type !== 'group' || !room.subject) continue;
-    const roomSubjLower = String(room.subject).trim().toLowerCase();
-    if (!knownSubjectLower.has(roomSubjLower)) continue;
-    if (!matchesUserSubject(profile, room.subject)) continue;
-    if (!(room.participant_ids || []).includes(profile.id)) {
-      const updatedParticipants = [...(room.participant_ids || []), profile.id];
-      dispatchOfflineAction(vaultState, {
-        type: 'UPSERT_ROOM',
-        payload: {
-          ...room,
-          participant_ids: updatedParticipants,
-          members_label: `${updatedParticipants.length} members · Study Group`
-        }
-      });
+  // Only enroll students/teachers into study group rooms — parents stay in direct teacher channels
+  if (profile.role !== 'parent') {
+    for (const room of vaultState.rooms || []) {
+      if (room.room_type !== 'group' || !room.subject) continue;
+      const roomSubjLower = String(room.subject).trim().toLowerCase();
+      if (!knownSubjectLower.has(roomSubjLower)) continue;
+      if (!matchesUserSubject(profile, room.subject)) continue;
+      if (!(room.participant_ids || []).includes(profile.id)) {
+        const updatedParticipants = [...(room.participant_ids || []), profile.id];
+        dispatchOfflineAction(vaultState, {
+          type: 'UPSERT_ROOM',
+          payload: {
+            ...room,
+            participant_ids: updatedParticipants,
+            members_label: `${updatedParticipants.length} members · Study Group`
+          }
+        });
+      }
     }
   }
 
@@ -823,15 +867,21 @@ async function enrollAcceptedUserInRooms(profile) {
 
   const welcomeRoomId = `room-welcome-${profile.id}`;
   if (!(vaultState.rooms || []).some((r) => r.id === welcomeRoomId)) {
+    const isPar = profile.role === 'parent';
+    const child = isPar ? getParentLinkedChild(profile) : null;
     dispatchOfflineAction(vaultState, {
       type: 'UPSERT_ROOM',
       payload: {
         id: welcomeRoomId,
         room_type: 'direct',
-        name: `Admissions & Support · ${profile.name}`,
-        subject: profile.selected_plan || 'Welcome Channel',
+        name: isPar
+          ? `Teachers & Admissions · ${child ? child.name : profile.name}`
+          : `Admissions & Support · ${profile.name}`,
+        subject: child ? `${child.name} (${child.grade || 'Student'})` : profile.selected_plan || 'Welcome Channel',
         participant_ids: welcomeParticipants,
-        members_label: 'Direct Support · Admissions & Subject Educators',
+        members_label: isPar
+          ? "Direct Parent Line · Child's Teachers & Admissions"
+          : 'Direct Support · Admissions & Subject Educators',
         created_by_name: 'Admissions Office'
       }
     });
@@ -843,7 +893,11 @@ async function enrollAcceptedUserInRooms(profile) {
         sender_id: 'adm-lerato',
         sender_name: 'Lerato Sithole (Admissions)',
         sender_role: 'admissions',
-        body: `Welcome to i-tutor, ${profile.name}! Your account has been accepted and activated. Your timetables & offline homework packs for ${(profile.subjects || []).join(', ') || 'your subjects'} are ready.`,
+        body: isPar
+          ? `Welcome to i-tutor, ${profile.name}! Your parent portal is active${
+              child ? ` and linked to ${child.name}` : ''
+            }. Message us or your child's teachers here anytime.`
+          : `Welcome to i-tutor, ${profile.name}! Your account has been accepted and activated. Your timetables & offline homework packs for ${(profile.subjects || []).join(', ') || 'your subjects'} are ready.`,
         attachments: [],
         created_at: new Date().toISOString()
       }
@@ -1162,8 +1216,9 @@ function renderAuthPortal(rootEl, { animateCard = true } = {}) {
         ui.showAuthPortal = false;
         ui.authError = '';
         ui.authSuccess = '';
-        ui.view =
-          target.role === 'admissions' ? 'admissions' : target.role === 'teacher' ? 'subjects' : 'tuition';
+        ui.broadcastSubtab = target.role === 'parent' ? 'attendance' : 'announcements';
+        ui.view = getDefaultLandingView(target);
+        renderApp({ preserveScroll: false });
         showToast(`Signed in as ${target.name} (${target.role.toUpperCase()})`);
       }
     });
@@ -1171,24 +1226,51 @@ function renderAuthPortal(rootEl, { animateCard = true } = {}) {
 
   const signinForm = document.getElementById('account-signin-form');
   if (signinForm) {
-    signinForm.addEventListener('submit', (e) => {
+    signinForm.addEventListener('submit', async (e) => {
       e.preventDefault();
       const fd = new FormData(signinForm);
-      const res = authenticateAccount(vaultState, fd.get('identifier'), fd.get('pin'));
+      const identifier = fd.get('identifier');
+      const pin = fd.get('pin');
+      const submitBtn = signinForm.querySelector('button[type="submit"]');
+
+      let res = authenticateAccount(vaultState, identifier, pin);
+      if (!res.ok && !isOfflineActive()) {
+        if (submitBtn) {
+          submitBtn.disabled = true;
+          submitBtn.textContent = 'Checking account...';
+        }
+        const syncRes = await syncWithServer({ simulateOffline: false });
+        if (syncRes.vault) vaultState = syncRes.vault;
+        res = authenticateAccount(vaultState, identifier, pin);
+      }
+
       if (!res.ok) {
         ui.authError = res.error;
         ui.authSuccess = '';
-        renderApp();
+        renderApp({ preserveScroll: true });
         return;
       }
+
       sessionState.currentUserId = res.profile.id;
       saveSession(sessionState);
       ui.showAuthPortal = false;
       ui.authError = '';
       ui.authSuccess = '';
-      ui.view =
-        res.profile.role === 'admissions' ? 'admissions' : res.profile.role === 'teacher' ? 'subjects' : 'tuition';
+      ui.broadcastSubtab = res.profile.role === 'parent' ? 'attendance' : 'announcements';
+      ui.view = getDefaultLandingView(res.profile);
+      renderApp({ preserveScroll: false });
       showToast(`Welcome back, ${res.profile.name}!`);
+
+      if (!isOfflineActive()) {
+        syncWithServer({ simulateOffline: false })
+          .then((syncRes) => {
+            if (syncRes.vault) {
+              vaultState = syncRes.vault;
+              renderApp({ preserveScroll: true });
+            }
+          })
+          .catch(() => {});
+      }
     });
   }
 
@@ -1771,11 +1853,190 @@ function buildOverviewStage(user) {
     (s) => s.status !== 'graded' && visibleAssignIds.has(s.assignment_id)
   ).length;
   const visibleRooms = getVisibleRooms(user);
-  const attendanceRecords = vaultState.attendance || [];
+  const attendanceRecords = getVisibleAttendance(user);
   const presentRatio = attendanceRecords.length
     ? Math.round((attendanceRecords.filter((a) => a.status === 'present').length / attendanceRecords.length) * 100)
-    : 96;
-  const latestBroadcast = (vaultState.broadcasts || [])[0];
+    : 100;
+  const visibleBroadcasts = getVisibleBroadcasts(user);
+  const latestBroadcast = visibleBroadcasts[0];
+
+  if (user.role === 'parent') {
+    const child = getParentLinkedChild(user);
+    const childSubs = child
+      ? (vaultState.submissions || []).filter((s) => s.student_id === child.id && visibleAssignIds.has(s.assignment_id))
+      : [];
+    const gradedSubs = childSubs.filter((s) => s.status === 'graded');
+    const latestGraded = gradedSubs[0] || null;
+    const latestGradedAsg = latestGraded
+      ? visibleAssignments.find((a) => a.id === latestGraded.assignment_id)
+      : null;
+    const pendingChildHw = visibleAssignments.filter(
+      (a) => !childSubs.some((s) => s.assignment_id === a.id)
+    ).length;
+
+    const parentKpis = [
+      {
+        label: 'Attendance',
+        value: attendanceRecords.length ? `${presentRatio}%` : 'On Track',
+        foot: `${attendanceRecords.length} class ${attendanceRecords.length === 1 ? 'log' : 'logs'}`,
+        go: 'broadcasts'
+      },
+      {
+        label: 'Marks & Feedback',
+        value: latestGraded
+          ? `${latestGraded.marks_awarded}/${latestGradedAsg ? latestGradedAsg.max_marks : 20}`
+          : `${gradedSubs.length} Graded`,
+        foot: 'Teacher feedback',
+        go: 'assignments'
+      },
+      {
+        label: "Child's Homework",
+        value: pendingChildHw ? `${pendingChildHw} Due` : 'All Done ✓',
+        foot: `${childSubs.length} submitted`,
+        go: 'assignments'
+      },
+      {
+        label: 'Teacher Chats',
+        value: `${visibleRooms.length} Direct`,
+        foot: 'Message teachers',
+        go: 'messages'
+      }
+    ];
+
+    return `
+      ${
+        latestBroadcast
+          ? `
+        <button class="broadcast-ribbon" data-nav="broadcasts">
+          <div class="ribbon-left">
+            <div class="ribbon-icon">${ICONS.broadcast}</div>
+            <div style="min-width:0;">
+              <div class="ribbon-tag">Academy Notice · ${esc(latestBroadcast.author_name)}</div>
+              <div class="ribbon-headline">${esc(latestBroadcast.title)} — ${esc(latestBroadcast.body)}</div>
+            </div>
+          </div>
+        </button>
+      `
+          : ''
+      }
+
+      <div class="page-header-row">
+        <div>
+          <h1>Welcome, ${esc(getGreetingName(user))}</h1>
+          <p>${esc(child ? `Parent of ${child.name} (${child.grade || 'Student'})` : user.subtitle || 'Parent Portal')}</p>
+        </div>
+        <div class="action-cluster">
+          <button type="button" class="dark-cta-btn" data-nav="messages">${ICONS.messages} Message Teachers</button>
+        </div>
+      </div>
+
+      ${
+        child
+          ? `
+        <section class="panel-card" style="background:linear-gradient(135deg, rgba(242,183,40,0.16), var(--surface-ivory));">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:0.75rem;flex-wrap:wrap;">
+            <div style="display:flex;align-items:center;gap:0.75rem;min-width:0;">
+              ${renderAvatarHTML(child, { size: 46 })}
+              <div style="min-width:0;">
+                <div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">
+                  <strong style="font-size:1rem;font-weight:850;">${esc(child.name)}</strong>
+                  <span class="pill-badge">${esc(child.grade || 'Student')}</span>
+                </div>
+                <p class="row-sub" style="margin-top:0.15rem;">Subjects: ${esc(
+                  (child.subjects || []).join(', ') || 'Assigned by tutor'
+                )}${child.selected_plan ? ` · ${esc(child.selected_plan)}` : ''}</p>
+              </div>
+            </div>
+            <button type="button" class="outline-btn" data-nav="tuition">${ICONS.tuition} Fees & Flyers</button>
+          </div>
+        </section>
+      `
+          : `
+        <section class="panel-card" style="border-color:rgba(242,183,40,0.6);">
+          <div class="panel-head">
+            <div>
+              <h2 class="panel-title">Link Your Child's Student Account</h2>
+              <p class="row-sub">Choose your child in My Account so their attendance, homework marks, and timetable appear automatically.</p>
+            </div>
+            <button type="button" class="gold-cta-btn" data-nav="account">Choose Child →</button>
+          </div>
+        </section>
+      `
+      }
+
+      <section class="kpi-strip">
+        ${parentKpis
+          .map(
+            (k) => `
+          <button class="kpi-card" data-nav="${k.go}">
+            <span class="kpi-label">${esc(k.label)}</span>
+            <span class="kpi-value">${esc(k.value)}</span>
+            <span class="kpi-foot">${esc(k.foot)} →</span>
+          </button>
+        `
+          )
+          .join('')}
+      </section>
+
+      <div class="two-col-grid">
+        <section class="panel-card">
+          <div class="panel-head">
+            <h2 class="panel-title">Child's Homework & Marks</h2>
+            <button class="text-link-btn" data-nav="assignments">See all →</button>
+          </div>
+          ${
+            visibleAssignments.length === 0
+              ? `<p class="row-sub">No homework posted yet for ${esc(child ? child.name : 'your child')}.</p>`
+              : visibleAssignments
+                  .slice(0, 4)
+                  .map((asg) => {
+                    const sub = childSubs.find((s) => s.assignment_id === asg.id);
+                    const badgeHTML = sub
+                      ? sub.status === 'graded'
+                        ? `<span class="status-chip active">${sub.marks_awarded}/${asg.max_marks}</span>`
+                        : `<span class="status-chip active">Submitted ✓</span>`
+                      : `<span class="status-chip pending">Due ${esc(asg.due_date)}</span>`;
+                    return `
+                <button type="button" class="list-row clickable-list-row" data-jump-assign="${esc(asg.id)}">
+                  <div class="list-row-col">
+                    <span class="row-title">${esc(asg.title)}</span>
+                    <span class="row-sub">${esc(asg.subject)} · ${esc(asg.teacher_name)}</span>
+                  </div>
+                  ${badgeHTML}
+                </button>
+              `;
+                  })
+                  .join('')
+          }
+        </section>
+
+        <section class="panel-card">
+          <div class="panel-head">
+            <h2 class="panel-title">Child's Class Timetable</h2>
+            <button class="text-link-btn" data-nav="timetable">Full schedule →</button>
+          </div>
+          ${
+            visibleTimetables.length === 0
+              ? `<p class="row-sub">No classes scheduled yet.</p>`
+              : visibleTimetables
+                  .slice(0, 4)
+                  .map(
+                    (slot) => `
+                <button type="button" class="list-row clickable-list-row" data-nav="timetable">
+                  <div class="list-row-col">
+                    <span class="row-title">${esc(slot.subject)} · ${esc(slot.day_of_week)}</span>
+                    <span class="row-sub">${esc(slot.start_time)}–${esc(slot.end_time)} · ${esc(slot.teacher_name)}</span>
+                  </div>
+                  <span class="muted-pill">${esc(slot.grade_group)}</span>
+                </button>
+              `
+                  )
+                  .join('')
+          }
+        </section>
+      </div>
+    `;
+  }
 
   let kpis = [];
   if (canEditEverything(user)) {
@@ -1796,18 +2057,6 @@ function buildOverviewStage(user) {
       { label: 'Homework & Media', value: `${ungradedCount} To Mark`, foot: 'Post PDFs, Photos & Videos', go: 'assignments' },
       { label: 'Class Schedule', value: `${visibleTimetables.length} Slots`, foot: 'Weekly timetable', go: 'timetable' },
       { label: 'Chats & Groups', value: `${visibleRooms.length} Open`, foot: 'Send media & notes', go: 'messages' }
-    ];
-  } else if (user.role === 'parent') {
-    const childId = user.linked_student_id || 'stu-thabo';
-    const childSubs = (vaultState.submissions || []).filter(
-      (s) => s.student_id === childId && visibleAssignIds.has(s.assignment_id)
-    );
-    const graded = childSubs.find((s) => s.status === 'graded');
-    kpis = [
-      { label: 'Attendance', value: `${presentRatio}%`, foot: 'Tutor recaps', go: 'broadcasts' },
-      { label: 'Homework', value: graded ? `${graded.marks_awarded} Marks` : `${visibleAssignments.length} Active`, foot: 'Child’s enrolled subjects', go: 'assignments' },
-      { label: 'Timetable', value: `${visibleTimetables.length} Classes`, foot: 'Saved offline', go: 'timetable' },
-      { label: 'Teacher Chats', value: `${visibleRooms.length} Open`, foot: 'Direct channels', go: 'messages' }
     ];
   } else {
     kpis = [
@@ -1927,6 +2176,8 @@ function buildTimetableStage(user) {
   const days = ['All', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   const q = ui.searchQuery.trim().toLowerCase();
   const superEdit = isStaff(user);
+  const isParent = user.role === 'parent';
+  const parentChild = isParent ? getParentLinkedChild(user) : null;
 
   const slots = getVisibleTimetables(user).filter((slot) => {
     const dayOk = ui.timetableDay === 'All' || slot.day_of_week === ui.timetableDay;
@@ -1948,11 +2199,15 @@ function buildTimetableStage(user) {
   return `
     <div class="page-header-row">
       <div>
-        <h1>Schedule & Exam Dates</h1>
-        <p>Saved automatically on this device for offline viewing.</p>
+        <h1>${isParent ? "Child's Class Timetable" : 'Schedule & Exam Dates'}</h1>
+        <p>${
+          isParent
+            ? `Weekly classes for ${parentChild ? `${parentChild.name} (${parentChild.grade || 'Student'})` : 'your child'}.`
+            : 'Saved automatically on this device for offline viewing.'
+        }</p>
       </div>
       ${
-        user.role !== 'visitor'
+        user.role !== 'visitor' && !isParent
           ? `<button class="dark-cta-btn" id="btn-toggle-slot-creator">${ICONS.plus} ${
               ui.showSlotCreator || editingSlot ? 'Close' : 'Add Slot'
             }</button>`
@@ -1972,7 +2227,7 @@ function buildTimetableStage(user) {
     </div>
 
     ${
-      ui.showSlotCreator || editingSlot
+      !isParent && (ui.showSlotCreator || editingSlot)
         ? `
       <form class="panel-card form-stack" id="upsert-tt-form">
         <div class="panel-head">
@@ -2010,22 +2265,25 @@ function buildTimetableStage(user) {
         : ''
     }
 
-    <div class="two-col-grid">
+    <div class="${isParent ? 'form-stack' : 'two-col-grid'}">
       <section class="panel-card">
         <div class="panel-head">
           <h2 class="panel-title">Weekly Classes (${slots.length})</h2>
         </div>
 
-        ${slots
-          .map((s) => {
-            const canModify = superEdit || s.owner_id === user.id;
-            return `
+        ${
+          slots.length === 0
+            ? `<p class="row-sub">No classes scheduled for this day.</p>`
+            : slots
+                .map((s) => {
+                  const canModify = !isParent && (superEdit || s.owner_id === user.id);
+                  return `
               <div class="list-row">
                 <div class="list-row-col">
                   <span class="row-title">${esc(s.subject)} · <span class="muted-pill">${esc(s.grade_group)}</span></span>
                   <span class="row-sub">${esc(s.day_of_week)} · ${esc(s.start_time)}–${esc(s.end_time)} · ${esc(
-              s.location_mode
-            )}</span>
+                    s.location_mode
+                  )}</span>
                   <span class="row-sub">${esc(s.topic)} (${esc(s.teacher_name)})</span>
                 </div>
                 ${
@@ -2038,10 +2296,15 @@ function buildTimetableStage(user) {
                 }
               </div>
             `;
-          })
-          .join('')}
+                })
+                .join('')
+        }
       </section>
 
+      ${
+        isParent
+          ? ''
+          : `
       <section class="panel-card">
         <div class="panel-head">
           <h2 class="panel-title">Exam Countdowns</h2>
@@ -2085,6 +2348,8 @@ function buildTimetableStage(user) {
           )
           .join('')}
       </section>
+      `
+      }
     </div>
   `;
 }
@@ -2096,6 +2361,8 @@ function buildTimetableStage(user) {
 
 function buildAssignmentsStage(user) {
   const canManage = isStaff(user);
+  const isParent = user.role === 'parent';
+  const parentChild = isParent ? getParentLinkedChild(user) : null;
   const q = ui.searchQuery.trim().toLowerCase();
   const visiblePool = getVisibleAssignments(user);
   const list = visiblePool.filter(
@@ -2106,14 +2373,21 @@ function buildAssignmentsStage(user) {
     : null;
   const editableSubjects = getEditableSubjectsForUser(user);
   const scopedSubjectSet = getUserScopedSubjectSet(user);
+  const subjectListLabel = isParent
+    ? (parentChild?.subjects || user.subjects || []).join(', ') || 'None assigned yet'
+    : (user.subjects || []).join(', ') || 'None assigned yet';
 
   return `
     <div class="page-header-row">
       <div>
-        <h1>Homework & Media Packs</h1>
+        <h1>${isParent ? "Child's Homework & Marks" : 'Homework & Media Packs'}</h1>
         <p>${
-          scopedSubjectSet !== null
-            ? `Showing homework only for ${user.role === 'teacher' ? 'your teaching' : 'your enrolled'} subjects: ${(user.subjects || []).join(', ') || 'None assigned yet'}.`
+          isParent
+            ? `Tracking homework, submitted work, and teacher feedback for ${
+                parentChild ? `${parentChild.name} (${subjectListLabel})` : 'your child'
+              }.`
+            : scopedSubjectSet !== null
+            ? `Showing homework only for ${user.role === 'teacher' ? 'your teaching' : 'your enrolled'} subjects: ${subjectListLabel}.`
             : 'Tap any PDF, Photo, or Video to open it right inside i-tutor — cached automatically for offline study.'
         }</p>
       </div>
@@ -2211,23 +2485,43 @@ function buildAssignmentsStage(user) {
               .map((asg) => {
           const isOpen = ui.expandedAssignmentId === asg.id;
           const allSubs = (vaultState.submissions || []).filter((s) => s.assignment_id === asg.id);
-          const targetStuId = user.role === 'parent' ? user.linked_student_id || 'stu-thabo' : user.id;
-          const mySub = allSubs.find((s) => s.student_id === targetStuId);
+          const targetStuId = isParent ? parentChild?.id || '' : user.id;
+          const mySub = targetStuId ? allSubs.find((s) => s.student_id === targetStuId) : null;
           const draft = personalState.assignmentDrafts?.[asg.id] ?? (mySub ? mySub.answer_text : '');
           const atts = Array.isArray(asg.attachments) ? asg.attachments : [];
           const stagedSubAtts = ui.stagedSubmissionAttachments[asg.id] ?? (mySub?.attachments || []);
+          const parentStatusChip = isParent
+            ? mySub
+              ? mySub.status === 'graded'
+                ? `<span class="status-chip active">Graded: ${mySub.marks_awarded}/${asg.max_marks}</span>`
+                : `<span class="status-chip active">Submitted ✓</span>`
+              : `<span class="status-chip pending">Not Submitted Yet</span>`
+            : '';
 
           return `
             <article class="panel-card">
               <div class="panel-head">
                 <div>
-                  <span class="pill-badge">${esc(asg.subject)} · ${esc(asg.grade_group)} · ${asg.max_marks} Marks</span>
+                  <div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">
+                    <span class="pill-badge">${esc(asg.subject)} · ${esc(asg.grade_group)} · ${asg.max_marks} Marks</span>
+                    ${parentStatusChip}
+                  </div>
                   <h2 class="panel-title" style="margin-top:0.35rem;font-size:1.06rem;">${esc(asg.title)}</h2>
                   <p class="row-sub">${esc(asg.teacher_name)} · Due ${esc(asg.due_date)}</p>
                 </div>
                 <div class="action-cluster">
                   <button class="outline-btn" data-toggle-assign="${esc(asg.id)}">
-                    ${isOpen ? 'Close' : canManage ? `Submissions (${allSubs.length})` : mySub ? 'View Work' : 'Answer / Submit'}
+                    ${
+                      isOpen
+                        ? 'Close'
+                        : canManage
+                        ? `Submissions (${allSubs.length})`
+                        : isParent
+                        ? 'View Progress'
+                        : mySub
+                        ? 'View Work'
+                        : 'Answer / Submit'
+                    }
                   </button>
                   ${
                     canManage
@@ -2265,6 +2559,33 @@ function buildAssignmentsStage(user) {
                 ${
                   asg.offline_pack_content
                     ? `<div class="worksheet-box">${esc(asg.offline_pack_content)}</div>`
+                    : ''
+                }
+
+                ${
+                  isParent
+                    ? `
+                  <div class="worksheet-box" style="border-top:1px solid var(--border-warm);">
+                    <strong style="display:block;margin-bottom:0.25rem;">${esc(
+                      parentChild ? `${parentChild.name}'s Submission` : "Child's Submission"
+                    )}</strong>
+                    ${
+                      mySub
+                        ? `
+                      <p style="font-size:0.85rem;margin-bottom:0.35rem;">${esc(
+                        mySub.answer_text || 'Attached working files submitted.'
+                      )}</p>
+                      ${renderAttachmentGalleryHTML(mySub.attachments || [])}
+                      <span class="row-sub">Status: ${esc(mySub.status.toUpperCase())}${
+                            mySub.status === 'graded'
+                              ? ` · Marks: ${mySub.marks_awarded}/${asg.max_marks}`
+                              : ' · Awaiting teacher marking'
+                          }</span>
+                    `
+                        : `<p class="row-sub">No work submitted yet for this homework (Due ${esc(asg.due_date)}).</p>`
+                    }
+                  </div>
+                `
                     : ''
                 }
 
@@ -3303,25 +3624,61 @@ function buildMessagesStage(user) {
   }
 
   const superEdit = canEditEverything(user);
+  const isParent = user.role === 'parent';
+  const parentChild = isParent ? getParentLinkedChild(user) : null;
   const rooms = getVisibleRooms(user);
   const activeRoom = getActiveRoom(user);
   const roomMessages = activeRoom ? (vaultState.messages || []).filter((m) => m.room_id === activeRoom.id) : [];
   const editingRoom = ui.editingRoomId ? rooms.find((r) => r.id === ui.editingRoomId) : null;
+  const staffContacts = isParent
+    ? (vaultState.profiles || []).filter(
+        (p) => (p.role === 'teacher' || p.role === 'admissions' || p.role === 'admin') && p.status === 'active'
+      )
+    : [];
 
   return `
     <div class="page-header-row">
       <div>
-        <h1>Messages & Study Groups</h1>
-        <p>Share messages, PDFs, photos & videos — tap any file to open it right inside i-tutor.</p>
+        <h1>${isParent ? 'Teacher & Academy Chats' : 'Messages & Study Groups'}</h1>
+        <p>${
+          isParent
+            ? `Direct private communication with ${
+                parentChild ? `${parentChild.name}'s teachers` : "your child's teachers"
+              } and Admissions.`
+            : 'Share messages, PDFs, photos & videos — tap any file to open it right inside i-tutor.'
+        }</p>
       </div>
       <button class="dark-cta-btn" id="toggle-group-creator">${ICONS.plus} ${
-    ui.showGroupCreator || editingRoom ? 'Close' : 'New Group'
+    ui.showGroupCreator || editingRoom ? 'Close' : isParent ? 'Message Teacher' : 'New Group'
   }</button>
     </div>
 
     ${
       ui.showGroupCreator || editingRoom
-        ? `
+        ? isParent && !editingRoom
+          ? `
+      <form class="panel-card form-stack" id="upsert-room-form">
+        <div class="panel-head">
+          <h3 class="panel-title">Start Direct Chat with Teacher or Admissions</h3>
+          <button type="button" class="outline-btn" id="cancel-room-edit">Cancel</button>
+        </div>
+        <select class="field-input" name="target_staff_id" required>
+          ${staffContacts
+            .map(
+              (st) =>
+                `<option value="${esc(st.id)}">${esc(st.name)} — ${esc(
+                  st.role === 'teacher' ? (st.subjects || []).join(', ') || 'Teacher' : 'Admissions / Admin'
+                )}</option>`
+            )
+            .join('')}
+        </select>
+        <input class="field-input" name="initial_note" placeholder="Optional topic (e.g. Homework check-in for ${esc(
+          parentChild ? parentChild.name : 'my child'
+        )})" />
+        <button class="dark-cta-btn" type="submit">${ICONS.messages} Open Direct Chat</button>
+      </form>
+    `
+          : `
       <form class="panel-card form-stack" id="upsert-room-form">
         <div class="panel-head">
           <h3 class="panel-title">${editingRoom ? `Edit Channel · ${esc(editingRoom.name)}` : 'Create Study Group'}</h3>
@@ -3343,7 +3700,9 @@ function buildMessagesStage(user) {
 
     <div class="messenger-split">
       <aside class="room-list-pane">
-        <span class="row-sub" style="font-weight:800;padding:0.2rem 0.35rem;">CHANNELS (${rooms.length})</span>
+        <span class="row-sub" style="font-weight:800;padding:0.2rem 0.35rem;">${
+          isParent ? `DIRECT CHATS (${rooms.length})` : `CHANNELS (${rooms.length})`
+        }</span>
         ${rooms
           .map(
             (r) => `
@@ -3465,7 +3824,11 @@ function buildMessagesStage(user) {
 
 function buildBroadcastsAttendanceStage(user) {
   const canPost = isStaff(user);
+  const isParent = user.role === 'parent';
+  const parentChild = isParent ? getParentLinkedChild(user) : null;
   const students = (vaultState.profiles || []).filter((p) => p.role === 'student');
+  const visibleBroadcasts = getVisibleBroadcasts(user);
+  const visibleAttendance = getVisibleAttendance(user);
   const editingBc = ui.editingBroadcastId
     ? (vaultState.broadcasts || []).find((b) => b.id === ui.editingBroadcastId)
     : null;
@@ -3478,8 +3841,12 @@ function buildBroadcastsAttendanceStage(user) {
   return `
     <div class="page-header-row">
       <div>
-        <h1>Broadcasts & Attendance</h1>
-        <p>Official academy notices and class attendance logs.</p>
+        <h1>${isParent ? 'Attendance & Notices' : 'Broadcasts & Attendance'}</h1>
+        <p>${
+          isParent
+            ? `Attendance records for ${parentChild ? parentChild.name : 'your child'} and official academy updates.`
+            : 'Official academy notices and class attendance logs.'
+        }</p>
       </div>
       ${
         canPost
@@ -3496,10 +3863,10 @@ function buildBroadcastsAttendanceStage(user) {
 
     <div class="subtab-bar">
       <button class="subtab-btn ${isAnnouncements ? 'is-active' : ''}" data-bc-tab="announcements">
-        Notices (${(vaultState.broadcasts || []).length})
+        Notices (${visibleBroadcasts.length})
       </button>
       <button class="subtab-btn ${!isAnnouncements ? 'is-active' : ''}" data-bc-tab="attendance">
-        Attendance (${(vaultState.attendance || []).length})
+        Attendance (${visibleAttendance.length})
       </button>
     </div>
 
@@ -3533,9 +3900,12 @@ function buildBroadcastsAttendanceStage(user) {
       }
 
       <div class="form-stack" style="gap:0.85rem;">
-        ${(vaultState.broadcasts || [])
-          .map(
-            (b) => `
+        ${
+          visibleBroadcasts.length === 0
+            ? `<section class="panel-card"><p class="row-sub">No notices posted yet.</p></section>`
+            : visibleBroadcasts
+                .map(
+                  (b) => `
           <article class="panel-card">
             <div class="panel-head">
               <span class="pill-badge">${esc(b.author_name)}</span>
@@ -3552,8 +3922,9 @@ function buildBroadcastsAttendanceStage(user) {
             <p style="font-size:0.87rem;line-height:1.5;">${esc(b.body)}</p>
           </article>
         `
-          )
-          .join('')}
+                )
+                .join('')
+        }
       </div>
     `
         : `
@@ -3605,10 +3976,19 @@ function buildBroadcastsAttendanceStage(user) {
       }
 
       <section class="panel-card">
-        <h2 class="panel-title">Class Attendance Log</h2>
-        ${(vaultState.attendance || [])
-          .map(
-            (a) => `
+        <h2 class="panel-title">${
+          isParent
+            ? `Attendance Log · ${esc(parentChild ? parentChild.name : 'My Child')}`
+            : 'Class Attendance Log'
+        }</h2>
+        ${
+          visibleAttendance.length === 0
+            ? `<p class="row-sub">No attendance records logged yet${
+                parentChild ? ` for ${esc(parentChild.name)}` : ''
+              }.</p>`
+            : visibleAttendance
+                .map(
+                  (a) => `
           <div class="list-row">
             <div class="list-row-col">
               <span class="row-title">${esc(a.student_name)} · ${esc(a.subject)}</span>
@@ -3627,8 +4007,9 @@ function buildBroadcastsAttendanceStage(user) {
             </div>
           </div>
         `
-          )
-          .join('')}
+                )
+                .join('')
+        }
       </section>
     `
     }
@@ -4034,41 +4415,91 @@ function renderApp(opts = {}) {
   const visibleRooms = getVisibleRooms(user);
   const pendingAdmissions = getPendingAdmissionsCount();
   const superEdit = canEditEverything(user);
+  const isParent = user.role === 'parent';
+  const parentChild = isParent ? getParentLinkedChild(user) : null;
+  const parentAtt = isParent ? getVisibleAttendance(user) : [];
+  const parentPresentPct = parentAtt.length
+    ? Math.round((parentAtt.filter((a) => a.status === 'present').length / parentAtt.length) * 100)
+    : 100;
+
+  if (isParent && (ui.view === 'toolkit' || ui.view === 'subjects' || ui.view === 'admissions')) {
+    ui.view = 'overview';
+  }
 
   const routeKey = `${user.id}:${ui.view}:${ui.toolkitTab}:${ui.broadcastSubtab}`;
   const shouldAnimateStage = routeKey !== lastAnimatedKey;
   lastAnimatedKey = routeKey;
 
-  const navItems = [
-    { id: 'tuition', label: 'Flyers & Prices', icon: ICONS.tuition, badge: '' },
-    { id: 'overview', label: 'Overview Hub', icon: ICONS.home, badge: '' },
-    ...(isStaff(user)
-      ? [
-          {
-            id: 'subjects',
-            label: superEdit ? 'Subjects & Students' : 'My Subjects & Notes',
-            icon: ICONS.toolkit,
-            badge: String(getEditableSubjectsForUser(user).length)
-          }
-        ]
-      : []),
-    ...(superEdit
-      ? [
-          {
-            id: 'admissions',
-            label: 'Admissions & Accounts',
-            icon: ICONS.users,
-            badge: pendingAdmissions ? `${pendingAdmissions}` : ''
-          }
-        ]
-      : []),
-    { id: 'assignments', label: 'Homework & Media', icon: ICONS.assignment, badge: String(getVisibleAssignments(user).length) },
-    { id: 'messages', label: 'Messages & Groups', icon: ICONS.messages, badge: visibleRooms.length ? String(visibleRooms.length) : '' },
-    { id: 'timetable', label: 'Schedule & Exams', icon: ICONS.timetable, badge: '' },
-    { id: 'toolkit', label: 'Study Toolkit', icon: ICONS.toolkit, badge: '' },
-    { id: 'broadcasts', label: 'Notices & Attendance', icon: ICONS.broadcast, badge: '' },
-    { id: 'account', label: user.role === 'visitor' ? 'Join / Sign In' : 'My Account & Icon', icon: ICONS.user, badge: '' }
-  ];
+  const navItems = isParent
+    ? [
+        { id: 'overview', label: 'Parent Hub', icon: ICONS.home, badge: '' },
+        {
+          id: 'broadcasts',
+          label: 'Attendance & Notices',
+          icon: ICONS.broadcast,
+          badge: parentAtt.length ? String(parentAtt.length) : ''
+        },
+        {
+          id: 'assignments',
+          label: "Child's Homework",
+          icon: ICONS.assignment,
+          badge: String(getVisibleAssignments(user).length)
+        },
+        {
+          id: 'messages',
+          label: 'Teacher Chats',
+          icon: ICONS.messages,
+          badge: visibleRooms.length ? String(visibleRooms.length) : ''
+        },
+        { id: 'timetable', label: 'Class Timetable', icon: ICONS.timetable, badge: '' },
+        { id: 'tuition', label: 'Fees & Flyers', icon: ICONS.tuition, badge: '' },
+        { id: 'account', label: 'My Account', icon: ICONS.user, badge: '' }
+      ]
+    : [
+        { id: 'tuition', label: 'Flyers & Prices', icon: ICONS.tuition, badge: '' },
+        { id: 'overview', label: 'Overview Hub', icon: ICONS.home, badge: '' },
+        ...(isStaff(user)
+          ? [
+              {
+                id: 'subjects',
+                label: superEdit ? 'Subjects & Students' : 'My Subjects & Notes',
+                icon: ICONS.toolkit,
+                badge: String(getEditableSubjectsForUser(user).length)
+              }
+            ]
+          : []),
+        ...(superEdit
+          ? [
+              {
+                id: 'admissions',
+                label: 'Admissions & Accounts',
+                icon: ICONS.users,
+                badge: pendingAdmissions ? `${pendingAdmissions}` : ''
+              }
+            ]
+          : []),
+        {
+          id: 'assignments',
+          label: 'Homework & Media',
+          icon: ICONS.assignment,
+          badge: String(getVisibleAssignments(user).length)
+        },
+        {
+          id: 'messages',
+          label: 'Messages & Groups',
+          icon: ICONS.messages,
+          badge: visibleRooms.length ? String(visibleRooms.length) : ''
+        },
+        { id: 'timetable', label: 'Schedule & Exams', icon: ICONS.timetable, badge: '' },
+        { id: 'toolkit', label: 'Study Toolkit', icon: ICONS.toolkit, badge: '' },
+        { id: 'broadcasts', label: 'Notices & Attendance', icon: ICONS.broadcast, badge: '' },
+        {
+          id: 'account',
+          label: user.role === 'visitor' ? 'Join / Sign In' : 'My Account & Icon',
+          icon: ICONS.user,
+          badge: ''
+        }
+      ];
 
   let centerHTML = '';
   if (ui.view === 'overview') centerHTML = buildOverviewStage(user);
@@ -4157,7 +4588,11 @@ function renderApp(opts = {}) {
               type="search"
               class="global-search-input"
               id="global-search-input"
-              placeholder="Search homework, notes, schedule, accounts..."
+              placeholder="${
+                isParent
+                  ? "Search child's homework, schedule, notices..."
+                  : 'Search homework, notes, schedule, accounts...'
+              }"
               value="${esc(ui.searchQuery)}"
             />
           </div>
@@ -4197,7 +4632,9 @@ function renderApp(opts = {}) {
               type="search"
               class="global-search-input"
               id="mobile-search-input"
-              placeholder="Search homework, notes, schedule..."
+              placeholder="${
+                isParent ? "Search child's homework, schedule..." : 'Search homework, notes, schedule...'
+              }"
               value="${esc(ui.searchQuery)}"
             />
           </div>
@@ -4210,40 +4647,89 @@ function renderApp(opts = {}) {
 
       <!-- ZONE 3: CALM DESKTOP WIDGET RAIL -->
       <aside class="context-rail">
-        <section class="widget-card">
-          <div class="panel-head">
-            <span class="panel-title" style="font-size:0.88rem;">Sunrise Confidence</span>
-            <span class="pill-badge">${avgConf}%</span>
-          </div>
-          ${renderSunriseGaugeSVG(avgConf)}
-        </section>
-
-        <section class="widget-card">
-          <div class="panel-head">
-            <span class="panel-title" style="font-size:0.88rem;">Focus Timer</span>
-            <button class="text-link-btn" data-timer-action="toggle">${ui.timerRunning ? 'Pause' : 'Start'}</button>
-          </div>
-          <div class="timer-readout-big js-timer-readout ${ui.timerRunning ? 'is-ticking' : ''}" style="font-size:1.75rem;">${formatClock(
-            ui.timerSeconds
-          )}</div>
-        </section>
-
-        <section class="widget-card">
-          <div class="panel-head">
-            <span class="panel-title" style="font-size:0.88rem;">Study Checklist</span>
-          </div>
-          ${(personalState.tasks || [])
-            .slice(0, 4)
-            .map(
-              (c) => `
-            <div class="checklist-row ${c.done ? 'done' : ''}" data-check-id="${esc(c.id)}">
-              <span class="check-box-sq">${c.done ? '✓' : ''}</span>
-              <span>${esc(c.title)}</span>
+        ${
+          isParent
+            ? `
+          <section class="widget-card">
+            <div class="panel-head">
+              <span class="panel-title" style="font-size:0.88rem;">My Child</span>
+              <span class="pill-badge">${esc(parentChild ? parentChild.grade || 'Student' : 'Unlinked')}</span>
             </div>
-          `
-            )
-            .join('')}
-        </section>
+            ${
+              parentChild
+                ? `
+              <div style="display:flex;align-items:center;gap:0.6rem;margin-top:0.2rem;">
+                ${renderAvatarHTML(parentChild, { size: 38 })}
+                <div style="min-width:0;">
+                  <div style="font-size:0.86rem;font-weight:800;">${esc(parentChild.name)}</div>
+                  <div class="row-sub">${esc((parentChild.subjects || []).join(', ') || 'Subjects pending')}</div>
+                </div>
+              </div>
+            `
+                : `<button type="button" class="outline-btn" data-nav="account" style="width:100%;">Choose Child →</button>`
+            }
+          </section>
+
+          <section class="widget-card">
+            <div class="panel-head">
+              <span class="panel-title" style="font-size:0.88rem;">Attendance</span>
+              <span class="pill-badge">${parentAtt.length ? `${parentPresentPct}%` : 'On Track'}</span>
+            </div>
+            <p class="row-sub">${
+              parentAtt[0]
+                ? `Latest: ${esc(parentAtt[0].subject)} (${esc((parentAtt[0].status || 'present').toUpperCase())})`
+                : 'No absences recorded.'
+            }</p>
+            <button type="button" class="text-link-btn" data-nav="broadcasts" style="align-self:flex-start;">View attendance log →</button>
+          </section>
+
+          <section class="widget-card">
+            <div class="panel-head">
+              <span class="panel-title" style="font-size:0.88rem;">Direct Support</span>
+            </div>
+            <div class="form-stack" style="gap:0.45rem;">
+              <button type="button" class="dark-cta-btn" data-nav="messages" style="width:100%;">${ICONS.messages} Message Teachers</button>
+              <button type="button" class="outline-btn" data-nav="tuition" style="width:100%;">${ICONS.tuition} Fees & Flyers</button>
+            </div>
+          </section>
+        `
+            : `
+          <section class="widget-card">
+            <div class="panel-head">
+              <span class="panel-title" style="font-size:0.88rem;">Sunrise Confidence</span>
+              <span class="pill-badge">${avgConf}%</span>
+            </div>
+            ${renderSunriseGaugeSVG(avgConf)}
+          </section>
+
+          <section class="widget-card">
+            <div class="panel-head">
+              <span class="panel-title" style="font-size:0.88rem;">Focus Timer</span>
+              <button class="text-link-btn" data-timer-action="toggle">${ui.timerRunning ? 'Pause' : 'Start'}</button>
+            </div>
+            <div class="timer-readout-big js-timer-readout ${ui.timerRunning ? 'is-ticking' : ''}" style="font-size:1.75rem;">${formatClock(
+              ui.timerSeconds
+            )}</div>
+          </section>
+
+          <section class="widget-card">
+            <div class="panel-head">
+              <span class="panel-title" style="font-size:0.88rem;">Study Checklist</span>
+            </div>
+            ${(personalState.tasks || [])
+              .slice(0, 4)
+              .map(
+                (c) => `
+              <div class="checklist-row ${c.done ? 'done' : ''}" data-check-id="${esc(c.id)}">
+                <span class="check-box-sq">${c.done ? '✓' : ''}</span>
+                <span>${esc(c.title)}</span>
+              </div>
+            `
+              )
+              .join('')}
+          </section>
+        `
+        }
       </aside>
     </div>
 
@@ -4293,28 +4779,47 @@ function renderApp(opts = {}) {
 
     <!-- CLEAN 4-TAB MOBILE BOTTOM BAR (NO BOTTOM-CORNER MENU BUTTON) -->
     <nav class="mobile-tabbar" aria-label="Mobile bottom navigation">
-      <button class="mob-tab-btn ${ui.view === 'tuition' ? 'is-active' : ''}" data-nav="tuition">
-        ${ICONS.tuition}<span>Prices</span>
-      </button>
       ${
-        user.role === 'teacher'
+        isParent
           ? `
-        <button class="mob-tab-btn ${ui.view === 'subjects' ? 'is-active' : ''}" data-nav="subjects">
-          ${ICONS.toolkit}<span>Subjects</span>
-        </button>
-      `
-          : `
         <button class="mob-tab-btn ${ui.view === 'overview' ? 'is-active' : ''}" data-nav="overview">
           ${ICONS.home}<span>Hub</span>
         </button>
+        <button class="mob-tab-btn ${ui.view === 'broadcasts' ? 'is-active' : ''}" data-nav="broadcasts">
+          ${ICONS.broadcast}<span>Attendance</span>
+        </button>
+        <button class="mob-tab-btn ${ui.view === 'assignments' ? 'is-active' : ''}" data-nav="assignments">
+          ${ICONS.assignment}<span>Homework</span>
+        </button>
+        <button class="mob-tab-btn ${ui.view === 'messages' ? 'is-active' : ''}" data-nav="messages">
+          ${ICONS.messages}<span>Teachers</span>
+        </button>
+      `
+          : `
+        <button class="mob-tab-btn ${ui.view === 'tuition' ? 'is-active' : ''}" data-nav="tuition">
+          ${ICONS.tuition}<span>Prices</span>
+        </button>
+        ${
+          user.role === 'teacher'
+            ? `
+          <button class="mob-tab-btn ${ui.view === 'subjects' ? 'is-active' : ''}" data-nav="subjects">
+            ${ICONS.toolkit}<span>Subjects</span>
+          </button>
+        `
+            : `
+          <button class="mob-tab-btn ${ui.view === 'overview' ? 'is-active' : ''}" data-nav="overview">
+            ${ICONS.home}<span>Hub</span>
+          </button>
+        `
+        }
+        <button class="mob-tab-btn ${ui.view === 'assignments' ? 'is-active' : ''}" data-nav="assignments">
+          ${ICONS.assignment}<span>Homework</span>
+        </button>
+        <button class="mob-tab-btn ${ui.view === 'messages' ? 'is-active' : ''}" data-nav="messages">
+          ${ICONS.messages}<span>Chats</span>
+        </button>
       `
       }
-      <button class="mob-tab-btn ${ui.view === 'assignments' ? 'is-active' : ''}" data-nav="assignments">
-        ${ICONS.assignment}<span>Homework</span>
-      </button>
-      <button class="mob-tab-btn ${ui.view === 'messages' ? 'is-active' : ''}" data-nav="messages">
-        ${ICONS.messages}<span>Chats</span>
-      </button>
     </nav>
 
     ${renderAddSubjectModalHTML(user)}
@@ -6046,6 +6551,44 @@ function bindWorkspaceEvents(user) {
     upsertRoomForm.addEventListener('submit', (e) => {
       e.preventDefault();
       const fd = new FormData(upsertRoomForm);
+      if (user.role === 'parent' && fd.get('target_staff_id')) {
+        const staffId = String(fd.get('target_staff_id'));
+        const staffProfile = (vaultState.profiles || []).find((p) => p.id === staffId);
+        const existingDirect = (vaultState.rooms || []).find(
+          (r) =>
+            r.room_type !== 'group' &&
+            (r.participant_ids || []).includes(user.id) &&
+            (r.participant_ids || []).includes(staffId)
+        );
+        if (existingDirect) {
+          ui.selectedRoomId = existingDirect.id;
+          ui.showGroupCreator = false;
+          renderApp();
+          showToast(`Opened direct chat with ${staffProfile?.name || 'Teacher'}`);
+          return;
+        }
+        const child = getParentLinkedChild(user);
+        const newDirectId = `room-dir-${Date.now()}`;
+        const noteTopic = String(fd.get('initial_note') || '').trim();
+        ui.selectedRoomId = newDirectId;
+        ui.editingRoomId = null;
+        ui.showGroupCreator = false;
+        performActionAndSync(
+          'UPSERT_ROOM',
+          {
+            id: newDirectId,
+            room_type: 'direct',
+            name: `${staffProfile?.name || 'Educator'} · ${child ? child.name : user.name}`,
+            subject: noteTopic || (child ? `${child.name} (${child.grade || 'Student'})` : 'Parent–Teacher Direct'),
+            participant_ids: Array.from(new Set([user.id, staffId, 'admin-itutor'])),
+            members_label: `Direct 1:1 · ${user.name} & ${staffProfile?.name || 'Educator'}`,
+            created_by_name: user.name
+          },
+          'Direct teacher chat ready!'
+        );
+        return;
+      }
+
       const existingId = fd.get('id');
       const prev = existingId ? (vaultState.rooms || []).find((r) => r.id === existingId) : null;
       const newId = existingId || `room-grp-${Date.now()}`;
@@ -6905,7 +7448,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
     navigator.serviceWorker
-      .register('/sw.js?v=21', { updateViaCache: 'none' })
+      .register('/sw.js?v=22', { updateViaCache: 'none' })
       .then((reg) => reg.update().catch(() => {}))
       .catch(() => {});
   }
