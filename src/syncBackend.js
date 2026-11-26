@@ -5,7 +5,7 @@ import { createDefaultSnapshot } from '../public/js/defaultSeed.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const LOCAL_DB_PATH = path.join(__dirname, '..', 'data', 'itutor-v5-local.json');
+const LOCAL_DB_PATH = path.join(__dirname, '..', 'data', 'itutor-v6-local.json');
 
 let resolvedMode = null; // 'supabase' | 'local'
 
@@ -172,6 +172,9 @@ export async function getFullSnapshot() {
               promo_banner: tuitionRow.promo_banner || fallback.tuitionInfo.promo_banner || '',
               plans: tuitionRow.plans || fallback.tuitionInfo.plans,
               flyers: Array.isArray(tuitionRow.flyers) ? tuitionRow.flyers : fallback.tuitionInfo.flyers,
+              custom_subjects: Array.isArray(tuitionRow.custom_subjects)
+                ? tuitionRow.custom_subjects
+                : fallback.tuitionInfo.custom_subjects || [],
               contacts: tuitionRow.contacts || fallback.tuitionInfo.contacts
             }
           : fallback.tuitionInfo,
@@ -562,6 +565,7 @@ export async function applyOutboxActions(actions = []) {
           if (p.promo_banner !== undefined) patchBody.promo_banner = p.promo_banner;
           if (p.plans !== undefined) patchBody.plans = p.plans;
           if (p.flyers !== undefined) patchBody.flyers = p.flyers;
+          if (p.custom_subjects !== undefined) patchBody.custom_subjects = p.custom_subjects;
           if (p.contacts !== undefined) patchBody.contacts = p.contacts;
           await sbFetch('itutor_v2_tuition_info?id=eq.default', {
             method: 'PATCH',
@@ -691,6 +695,7 @@ export async function applyOutboxActions(actions = []) {
           ...(p.promo_banner !== undefined ? { promo_banner: p.promo_banner } : {}),
           ...(p.plans !== undefined ? { plans: p.plans } : {}),
           ...(p.flyers !== undefined ? { flyers: p.flyers } : {}),
+          ...(p.custom_subjects !== undefined ? { custom_subjects: p.custom_subjects } : {}),
           ...(p.contacts !== undefined ? { contacts: p.contacts } : {})
         };
         break;

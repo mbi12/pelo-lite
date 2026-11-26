@@ -1,8 +1,8 @@
 import { createDefaultSnapshot, SUBJECT_LIST } from './defaultSeed.js';
 
-const VAULT_KEY = 'itutor_offline_vault_v8';
+const VAULT_KEY = 'itutor_offline_vault_v9';
 const PERSONAL_KEY = 'itutor_personal_study_v4';
-const OUTBOX_KEY = 'itutor_offline_outbox_v8';
+const OUTBOX_KEY = 'itutor_offline_outbox_v9';
 const SESSION_KEY = 'itutor_session_v4';
 
 const IDB_NAME = 'itutor_media_idb_v1';
@@ -591,6 +591,7 @@ export function dispatchOfflineAction(vault, action) {
         ...(p.promo_banner !== undefined ? { promo_banner: p.promo_banner } : {}),
         ...(p.plans !== undefined ? { plans: p.plans } : {}),
         ...(p.flyers !== undefined ? { flyers: p.flyers } : {}),
+        ...(p.custom_subjects !== undefined ? { custom_subjects: p.custom_subjects } : {}),
         ...(p.contacts !== undefined ? { contacts: p.contacts } : {})
       };
       break;

@@ -1,8 +1,10 @@
-const CACHE_NAME = 'itutor-standalone-v16';
+const CACHE_NAME = 'itutor-standalone-v17';
 const OFFLINE_ASSETS = [
   '/',
   '/index.html',
+  '/css/styles.css?v=17',
   '/css/styles.css',
+  '/js/app.js?v=17',
   '/js/app.js',
   '/js/emblem.js',
   '/js/mediaViewer.js',
@@ -22,7 +24,16 @@ self.addEventListener('install', (event) => {
   event.waitUntil(
     caches
       .open(CACHE_NAME)
-      .then((cache) => cache.addAll(OFFLINE_ASSETS))
+      .then((cache) =>
+        Promise.allSettled(
+          OFFLINE_ASSETS.map((assetUrl) =>
+            fetch(assetUrl, { cache: 'reload' }).then((res) => {
+              if (res && res.ok) return cache.put(assetUrl, res);
+              return null;
+            })
+          )
+        )
+      )
       .then(() => self.skipWaiting())
   );
 });
@@ -43,8 +54,15 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url);
   if (request.method !== 'GET' || url.pathname.startsWith('/api/')) return;
 
+  const isCodeOrDoc =
+    request.mode === 'navigate' ||
+    url.pathname === '/' ||
+    url.pathname.endsWith('.html') ||
+    url.pathname.endsWith('.css') ||
+    url.pathname.endsWith('.js');
+
   event.respondWith(
-    fetch(request)
+    fetch(request, isCodeOrDoc ? { cache: 'no-cache' } : undefined)
       .then((response) => {
         if (response && response.status === 200) {
           const copy = response.clone();
@@ -53,7 +71,9 @@ self.addEventListener('fetch', (event) => {
         return response;
       })
       .catch(() =>
-        caches.match(request).then((cached) => cached || caches.match('/index.html'))
+        caches
+          .match(request, { ignoreSearch: true })
+          .then((cached) => cached || caches.match('/index.html'))
       )
   );
 });

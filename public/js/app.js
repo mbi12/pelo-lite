@@ -49,6 +49,8 @@ const ui = {
   editingAccountId: null,
   showNewAccountForm: false,
   editingEnquiryId: null,
+  directorySearch: '',
+  showAddSubjectModal: false,
 
   // Timetable & Exam editors
   timetableDay: 'All',
@@ -131,6 +133,10 @@ const ui = {
 let vaultState = loadVault();
 let personalState = loadPersonal();
 let sessionState = loadSession();
+if (typeof navigator !== 'undefined' && navigator.onLine !== false && sessionState.simulateOffline) {
+  sessionState.simulateOffline = false;
+  saveSession(sessionState);
+}
 let timerHandle = null;
 let toastHandle = null;
 let lastAnimatedKey = '';
@@ -227,8 +233,51 @@ function renderAvatarPickerHTML({ profile, stagedAvatar, scope = 'self' }) {
   `;
 }
 
+const BOTSWANA_SUBJECT_SUGGESTIONS = [
+  'Setswana',
+  'Biology',
+  'Chemistry',
+  'Physics',
+  'Double Science',
+  'Accounting',
+  'Commerce',
+  'Computer Studies',
+  'Agriculture',
+  'Social Studies',
+  'Geography',
+  'History'
+];
+
+function getGreetingName(user) {
+  const raw = String(user?.name || '').trim();
+  if (!raw) return 'Learner';
+  if (/^i-tutor\s+/i.test(raw)) {
+    return raw.replace(/^i-tutor\s+/i, '').trim() || 'Admin';
+  }
+  const parts = raw.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2 && /^(mr|mrs|ms|miss|dr|prof)\.?$/i.test(parts[0])) {
+    return `${parts[0]} ${parts[1]}`;
+  }
+  return parts[0];
+}
+
+function formatRoleLabel(role = '') {
+  const map = {
+    all: 'All Roles',
+    student: 'Student',
+    parent: 'Parent',
+    teacher: 'Teacher',
+    admissions: 'Admissions',
+    admin: 'Admin'
+  };
+  return map[role] || String(role).toUpperCase();
+}
+
 function getAllKnownSubjects() {
   const set = new Set(SUBJECT_LIST);
+  for (const s of vaultState.tuitionInfo?.custom_subjects || []) {
+    if (s && s !== 'All Subjects') set.add(s);
+  }
   for (const p of vaultState.profiles || []) {
     for (const s of p.subjects || []) {
       if (s && s !== 'All Subjects') set.add(s);
@@ -238,6 +287,147 @@ function getAllKnownSubjects() {
     if (n.subject) set.add(n.subject);
   }
   return Array.from(set);
+}
+
+function renderSubjectPickerBoxHTML({ currentSubjects = [], inputName = 'subjectsRaw', showAddBtn = true } = {}) {
+  const allKnown = getAllKnownSubjects();
+  const activeSet = new Set((currentSubjects || []).map((s) => String(s).trim()).filter(Boolean));
+  return `
+    <div class="subject-picker-box" data-subj-picker-box>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;flex-wrap:wrap;">
+        <span class="row-sub" style="font-weight:750;">Subjects (tap chips to toggle or type below)</span>
+        ${
+          showAddBtn
+            ? `<button type="button" class="outline-btn add-subject-btn" style="padding:0.28rem 0.62rem;font-size:0.73rem;" data-open-add-subject="1">${ICONS.plus} Add Subject</button>`
+            : ''
+        }
+      </div>
+      <div class="subject-picker-chips">
+        ${allKnown
+          .map(
+            (subj) => `
+          <button
+            type="button"
+            class="subj-toggle-chip ${activeSet.has(subj) ? 'is-selected' : ''}"
+            data-toggle-subj-chip="${esc(subj)}"
+          >${esc(subj)}</button>
+        `
+          )
+          .join('')}
+      </div>
+      <input
+        class="field-input"
+        name="${esc(inputName)}"
+        value="${esc(Array.from(activeSet).join(', '))}"
+        placeholder="Subjects (comma-separated, e.g. Mathematics, Biology)"
+      />
+    </div>
+  `;
+}
+
+function renderAddSubjectModalHTML(user) {
+  if (!ui.showAddSubjectModal || !isStaff(user)) return '';
+  const superEdit = canEditEverything(user);
+  const allKnown = getAllKnownSubjects();
+  const customList = Array.isArray(vaultState.tuitionInfo?.custom_subjects)
+    ? vaultState.tuitionInfo.custom_subjects
+    : [];
+  const suggestions = BOTSWANA_SUBJECT_SUGGESTIONS.filter((s) => !allKnown.includes(s));
+  const activeTeachers = (vaultState.profiles || []).filter(
+    (p) => p.role === 'teacher' && p.status === 'active'
+  );
+
+  return `
+    <div class="subject-modal-backdrop" id="add-subject-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="add-subj-modal-title">
+      <div class="subject-modal-card">
+        <div class="panel-head">
+          <div>
+            <span class="pill-badge">Academy Curriculum</span>
+            <h2 class="panel-title" id="add-subj-modal-title" style="margin-top:0.2rem;">Add New Subject</h2>
+          </div>
+          <button type="button" class="outline-btn" id="btn-close-add-subject" style="padding:0.34rem 0.68rem;">Close</button>
+        </div>
+
+        <form class="form-stack" id="create-subject-modal-form">
+          <div>
+            <label class="row-sub" style="display:block;margin-bottom:0.22rem;font-weight:750;">Subject Name</label>
+            <input
+              class="field-input"
+              id="new-subject-name-input"
+              name="subject_name"
+              placeholder="e.g. Biology, Setswana, Accounting, Computer Studies"
+              required
+              autocomplete="off"
+            />
+          </div>
+
+          ${
+            suggestions.length > 0
+              ? `
+            <div>
+              <span class="row-sub" style="display:block;margin-bottom:0.28rem;">Quick-pick common subjects:</span>
+              <div class="subject-picker-chips">
+                ${suggestions
+                  .slice(0, 10)
+                  .map(
+                    (s) =>
+                      `<button type="button" class="subj-toggle-chip" data-suggest-subj="${esc(s)}">+ ${esc(s)}</button>`
+                  )
+                  .join('')}
+              </div>
+            </div>
+          `
+              : ''
+          }
+
+          ${
+            superEdit
+              ? `
+            <div>
+              <label class="row-sub" style="display:block;margin-bottom:0.22rem;font-weight:750;">Assign Teacher (Optional)</label>
+              <select class="field-input" name="teacher_id">
+                <option value="">No teacher assigned yet</option>
+                ${activeTeachers
+                  .map((t) => `<option value="${esc(t.id)}">${esc(t.name)} (${esc(t.grade || 'Educator')})</option>`)
+                  .join('')}
+              </select>
+            </div>
+          `
+              : ''
+          }
+
+          <div class="action-cluster" style="justify-content:flex-end;margin-top:0.2rem;">
+            <button type="button" class="outline-btn" id="btn-cancel-add-subject">Cancel</button>
+            <button type="submit" class="gold-cta-btn">${ICONS.plus} <span>Save Subject</span></button>
+          </div>
+        </form>
+
+        ${
+          superEdit && customList.length > 0
+            ? `
+          <div style="border-top:1px solid var(--border-warm);padding-top:0.62rem;">
+            <span class="row-sub" style="display:block;margin-bottom:0.35rem;font-weight:750;">Added Custom Subjects:</span>
+            <div class="teacher-chips-wrap">
+              ${customList
+                .map(
+                  (cs) => `
+                <span class="teacher-chip-badge" style="padding-left:0.6rem;">
+                  <span>${esc(cs)}</span>
+                  <button type="button" class="chip-x-btn" data-delete-custom-subj="${esc(cs)}" title="Remove ${esc(
+                    cs
+                  )}">×</button>
+                </span>
+              `
+                )
+                .join('')}
+            </div>
+          </div>
+        `
+            : ''
+        }
+      </div>
+    </div>
+  `;
 }
 
 function getEditableSubjectsForUser(user) {
@@ -740,14 +930,15 @@ function buildAdmissionsStage(user) {
   const allProfiles = vaultState.profiles || [];
   const pendingApplicants = allProfiles.filter((p) => p.status === 'pending');
   const enquiries = vaultState.enquiries || [];
+  const combinedQuery = (ui.directorySearch || ui.searchQuery || '').trim().toLowerCase();
   const filteredAccounts = allProfiles.filter((p) => {
     const roleOk = ui.roleFilter === 'all' || p.role === ui.roleFilter;
-    const q = ui.searchQuery.trim().toLowerCase();
     const searchOk =
-      !q ||
-      (p.name || '').toLowerCase().includes(q) ||
-      (p.email || '').toLowerCase().includes(q) ||
-      (p.role || '').toLowerCase().includes(q);
+      !combinedQuery ||
+      (p.name || '').toLowerCase().includes(combinedQuery) ||
+      (p.email || '').toLowerCase().includes(combinedQuery) ||
+      (p.role || '').toLowerCase().includes(combinedQuery) ||
+      (p.subjects || []).some((s) => s.toLowerCase().includes(combinedQuery));
     return roleOk && searchOk;
   });
 
@@ -760,9 +951,14 @@ function buildAdmissionsStage(user) {
         <h1>Admissions & Accounts</h1>
         <p>Approve applicants in 1 click or manage any Student, Parent, Teacher, or Staff account.</p>
       </div>
-      <button class="dark-cta-btn" id="btn-toggle-new-account">
-        ${ICONS.plus} ${ui.showNewAccountForm || editingAcc ? 'Close' : 'New Account'}
-      </button>
+      <div class="action-cluster">
+        <button type="button" class="outline-btn add-subject-btn" data-open-add-subject="1">
+          ${ICONS.plus} Add Subject
+        </button>
+        <button class="dark-cta-btn" id="btn-toggle-new-account">
+          ${ICONS.plus} ${ui.showNewAccountForm || editingAcc ? 'Close' : 'New Account'}
+        </button>
+      </div>
     </div>
 
     ${
@@ -809,16 +1005,18 @@ function buildAdmissionsStage(user) {
           <input class="field-input" name="grade" value="${esc(editingAcc?.grade || 'Grade 12')}" placeholder="Grade / Department" />
           <input class="field-input" name="subtitle" value="${esc(editingAcc?.subtitle || '')}" placeholder="Profile Subtitle" />
         </div>
-        <div class="form-grid-2">
-          <input class="field-input" name="subjectsRaw" value="${esc((editingAcc?.subjects || []).join(', '))}" placeholder="Subjects (comma-separated)" />
-          <select class="field-input" name="selected_plan">
-            <option value="${esc(editingAcc?.selected_plan || '')}">${esc(
-            editingAcc?.selected_plan || 'Select Tuition Plan / Staff'
-          )}</option>
-            ${plans.map((p) => `<option value="${esc(p.name)}">${esc(p.name)} (${esc(p.price)})</option>`).join('')}
-            <option value="Staff">Staff / Educator</option>
-          </select>
-        </div>
+        ${renderSubjectPickerBoxHTML({
+          currentSubjects: editingAcc?.subjects || [],
+          inputName: 'subjectsRaw',
+          showAddBtn: true
+        })}
+        <select class="field-input" name="selected_plan">
+          <option value="${esc(editingAcc?.selected_plan || '')}">${esc(
+          editingAcc?.selected_plan || 'Select Tuition Plan / Staff'
+        )}</option>
+          ${plans.map((p) => `<option value="${esc(p.name)}">${esc(p.name)} (${esc(p.price)})</option>`).join('')}
+          <option value="Staff">Staff / Educator</option>
+        </select>
         <input class="field-input" name="notes" value="${esc(editingAcc?.notes || '')}" placeholder="Admissions / Learner Notes" />
         <button class="dark-cta-btn" type="submit">${ICONS.check} Save Account</button>
       </form>
@@ -919,11 +1117,22 @@ function buildAdmissionsStage(user) {
     <section class="panel-card">
       <div class="panel-head">
         <h2 class="panel-title">Directory (${filteredAccounts.length})</h2>
-        <select class="field-input compact-select" id="role-filter-select" aria-label="Filter accounts by role">
+        <button type="button" class="text-link-btn" data-nav="subjects">Manage by Subject →</button>
+      </div>
+
+      <div class="directory-filter-row">
+        <input
+          type="search"
+          class="field-input"
+          id="directory-search-input"
+          placeholder="Search name, email, subject..."
+          value="${esc(ui.directorySearch)}"
+        />
+        <select class="field-input" id="role-filter-select" aria-label="Filter accounts by role">
           ${['all', 'student', 'parent', 'teacher', 'admissions', 'admin']
             .map(
               (r) => `<option value="${r}" ${ui.roleFilter === r ? 'selected' : ''}>${
-                r === 'all' ? 'All Roles' : r.toUpperCase()
+                r === 'all' ? 'All Roles' : `${formatRoleLabel(r)}s`
               }</option>`
             )
             .join('')}
@@ -935,12 +1144,12 @@ function buildAdmissionsStage(user) {
           .map(
             (acc) => `
           <div class="list-row">
-            <div style="display:flex;align-items:center;gap:0.72rem;min-width:0;flex:1;">
+            <div class="list-row-lead">
               ${renderAvatarHTML(acc, { size: 38 })}
               <div class="list-row-col">
                 <span class="row-title">
-                  ${esc(acc.name)}
-                  <span class="muted-pill">${esc(acc.role.toUpperCase())}</span>
+                  <span>${esc(acc.name)}</span>
+                  <span class="muted-pill">${esc(formatRoleLabel(acc.role))}</span>
                   <span class="status-chip ${esc(acc.status || 'active')}">${esc(acc.status || 'active')}</span>
                 </span>
                 <span class="row-sub">${esc(acc.subtitle || acc.grade)} · ${esc(acc.email || '—')} · Subjects: ${esc(
@@ -952,10 +1161,10 @@ function buildAdmissionsStage(user) {
               ${
                 acc.status !== 'active'
                   ? `<button class="approve-btn" data-approve-acc="${esc(acc.id)}">✓ Activate</button>`
-                  : ''
+                  : `<button type="button" class="row-edit-mini-btn" data-edit-acc="${esc(acc.id)}">Edit</button>`
               }
               ${renderMoreMenu(`
-                <button type="button" class="more-menu-item" data-edit-acc="${esc(acc.id)}">${ICONS.edit} Edit Account</button>
+                <button type="button" class="more-menu-item" data-edit-acc="${esc(acc.id)}">${ICONS.edit} Edit Account & Icon</button>
                 ${
                   acc.id !== user.id
                     ? `<button type="button" class="more-menu-item is-danger" data-del-acc="${esc(acc.id)}">${ICONS.trash} Delete Account</button>`
@@ -1045,10 +1254,11 @@ function buildMyAccountStage(user) {
         </div>
       </div>
 
-      <div>
-        <label class="row-sub">Subjects (comma-separated)</label>
-        <input class="field-input" name="subjectsRaw" value="${esc((user.subjects || []).join(', '))}" />
-      </div>
+      ${renderSubjectPickerBoxHTML({
+        currentSubjects: user.subjects || [],
+        inputName: 'subjectsRaw',
+        showAddBtn: isStaff(user)
+      })}
 
       <button class="dark-cta-btn" type="submit" style="align-self:flex-start;">${ICONS.check} Save Changes</button>
     </form>
@@ -1090,10 +1300,11 @@ function buildOverviewStage(user) {
 
   let kpis = [];
   if (canEditEverything(user)) {
+    const flyerCount = (vaultState.tuitionInfo.flyers || []).length;
     kpis = [
       { label: 'Admissions & Icons', value: `${pendingAdmissions} Pending`, foot: 'Accounts & profile icons', go: 'admissions' },
-      { label: 'Subjects & Students', value: `${getAllKnownSubjects().length} Subjects`, foot: 'Control all teachers, students & notes', go: 'subjects' },
-      { label: 'Flyers & Prices', value: `${(vaultState.tuitionInfo.flyers || []).length} Flyer · ${(vaultState.tuitionInfo.plans || []).length} Plans`, foot: 'Add flyers & prices at will', go: 'tuition' },
+      { label: 'Subjects & Students', value: `${getAllKnownSubjects().length} Subjects`, foot: 'Add subjects, students & notes', go: 'subjects' },
+      { label: 'Flyers & Prices', value: `${(vaultState.tuitionInfo.plans || []).length} Plans`, foot: `${flyerCount} ${flyerCount === 1 ? 'Flyer' : 'Flyers'} · Edit prices`, go: 'tuition' },
       { label: 'Homework Packs', value: `${vaultState.assignments.length} Active`, foot: 'Upload PDFs, Photos & Videos', go: 'assignments' }
     ];
   } else if (user.role === 'teacher') {
@@ -1145,12 +1356,15 @@ function buildOverviewStage(user) {
 
     <div class="page-header-row">
       <div>
-        <h1>Welcome, ${esc(user.name.split(' ')[0])}</h1>
-        <p>${esc(user.subtitle || user.grade)} · ${esc(user.role.toUpperCase())}</p>
+        <h1>Welcome, ${esc(getGreetingName(user))}</h1>
+        <p>${esc(user.subtitle || user.grade)} · ${esc(formatRoleLabel(user.role))}</p>
       </div>
       ${
         isStaff(user)
-          ? `<button class="dark-cta-btn" id="quick-new-assign-btn">${ICONS.plus} Post Homework</button>`
+          ? `<div class="action-cluster">
+              <button type="button" class="outline-btn add-subject-btn" data-open-add-subject="1">${ICONS.plus} Add Subject</button>
+              <button class="dark-cta-btn" id="quick-new-assign-btn">${ICONS.plus} Post Homework</button>
+            </div>`
           : `<button class="dark-cta-btn" data-open-toolkit="quiz">${ICONS.quiz} Quick Practice</button>`
       }
     </div>
@@ -1411,9 +1625,12 @@ function buildAssignmentsStage(user) {
       </div>
       ${
         canManage
-          ? `<button class="dark-cta-btn" id="toggle-assign-creator">${ICONS.plus} ${
+          ? `<div class="action-cluster">
+              <button type="button" class="outline-btn add-subject-btn" data-open-add-subject="1">${ICONS.plus} Add Subject</button>
+              <button class="dark-cta-btn" id="toggle-assign-creator">${ICONS.plus} ${
               ui.showAssignCreator || editingAsg ? 'Close' : 'Post Homework'
-            }</button>`
+            }</button>
+            </div>`
           : ''
       }
     </div>
@@ -1430,9 +1647,11 @@ function buildAssignmentsStage(user) {
         <div class="form-grid-2">
           <input class="field-input" name="title" value="${esc(editingAsg?.title || '')}" placeholder="Homework Title (e.g. Trig Paper 2 Worksheet)" required />
           <select class="field-input" name="subject">
-            ${SUBJECT_LIST.map(
-              (s) => `<option value="${esc(s)}" ${editingAsg?.subject === s ? 'selected' : ''}>${esc(s)}</option>`
-            ).join('')}
+            ${getAllKnownSubjects()
+              .map(
+                (s) => `<option value="${esc(s)}" ${editingAsg?.subject === s ? 'selected' : ''}>${esc(s)}</option>`
+              )
+              .join('')}
           </select>
         </div>
         <div class="form-grid-2">
@@ -1732,11 +1951,14 @@ function buildSubjectStudioStage(user) {
         }</p>
       </div>
       <div class="action-cluster">
+        <button type="button" class="gold-cta-btn" data-open-add-subject="1">
+          ${ICONS.plus} <span>Add Subject</span>
+        </button>
         ${
           extraTeacherSubjects.length > 0
             ? `
-          <select class="field-input compact-select" id="teacher-claim-subj-select" aria-label="Add subject to my teaching">
-            <option value="">+ Add Subject to My Teaching...</option>
+          <select class="field-input compact-select" id="teacher-claim-subj-select" aria-label="Add existing subject to my teaching">
+            <option value="">+ Join Existing Subject...</option>
             ${extraTeacherSubjects.map((s) => `<option value="${esc(s)}">${esc(s)}</option>`).join('')}
           </select>
         `
@@ -1745,7 +1967,7 @@ function buildSubjectStudioStage(user) {
       </div>
     </div>
 
-    <!-- SUBJECT TABS BAR -->
+    <!-- SUBJECT TABS BAR + ADD SUBJECT PILL -->
     <div class="subject-pills-bar" role="tablist" aria-label="Subjects">
       ${availableSubjects
         .map((subj) => {
@@ -1763,6 +1985,9 @@ function buildSubjectStudioStage(user) {
           `;
         })
         .join('')}
+      <button type="button" class="subject-tab-add-btn" data-open-add-subject="1">
+        ${ICONS.plus} <span>Add Subject</span>
+      </button>
     </div>
 
     <!-- SUBJECT HEADER & TEACHER ASSIGNMENT STRIP (FULL ADMIN CONTROL) -->
@@ -1931,7 +2156,7 @@ function buildSubjectStudioStage(user) {
 
                     return `
                       <div class="list-row" style="align-items:flex-start;">
-                        <div style="display:flex;align-items:flex-start;gap:0.72rem;min-width:0;flex:1;">
+                        <div class="list-row-lead is-top">
                           ${renderAvatarHTML(stu, { size: 40 })}
                           <div class="list-row-col">
                             <span class="row-title">
@@ -2136,7 +2361,8 @@ function buildToolkitStage(user) {
 }
 
 function buildNotesSubstage(user) {
-  const subjects = ['All', ...SUBJECT_LIST];
+  const knownSubjects = getAllKnownSubjects();
+  const subjects = ['All', ...knownSubjects];
   const q = ui.searchQuery.trim().toLowerCase();
   const canManage = isStaff(user);
   const editingNote = ui.editingNoteId ? (vaultState.notes || []).find((n) => n.id === ui.editingNoteId) : null;
@@ -2183,9 +2409,11 @@ function buildNotesSubstage(user) {
         <div class="form-grid-2">
           <input class="field-input" name="title" value="${esc(editingNote?.title || '')}" placeholder="Note Title" required />
           <select class="field-input" name="subject">
-            ${SUBJECT_LIST.map(
-              (s) => `<option value="${esc(s)}" ${editingNote?.subject === s ? 'selected' : ''}>${esc(s)}</option>`
-            ).join('')}
+            ${knownSubjects
+              .map(
+                (s) => `<option value="${esc(s)}" ${editingNote?.subject === s ? 'selected' : ''}>${esc(s)}</option>`
+              )
+              .join('')}
           </select>
         </div>
         <textarea class="field-input" name="summary" rows="3" placeholder="Key explanation..." required>${esc(
@@ -2282,9 +2510,11 @@ function buildQuizSubstage(user) {
         <input type="hidden" name="id" value="${esc(editingQuiz?.id || '')}" />
         <div class="form-grid-2">
           <select class="field-input" name="subject">
-            ${SUBJECT_LIST.map(
-              (s) => `<option value="${esc(s)}" ${editingQuiz?.subject === s ? 'selected' : ''}>${esc(s)}</option>`
-            ).join('')}
+            ${getAllKnownSubjects()
+              .map(
+                (s) => `<option value="${esc(s)}" ${editingQuiz?.subject === s ? 'selected' : ''}>${esc(s)}</option>`
+              )
+              .join('')}
           </select>
           <input class="field-input" name="topic" value="${esc(editingQuiz?.topic || 'Revision')}" placeholder="Topic" required />
         </div>
@@ -2430,9 +2660,11 @@ function buildFlashcardsSubstage(user) {
         </div>
         <input type="hidden" name="id" value="${esc(editingCard?.id || '')}" />
         <select class="field-input" name="subject">
-          ${SUBJECT_LIST.map(
-            (s) => `<option value="${esc(s)}" ${editingCard?.subject === s ? 'selected' : ''}>${esc(s)}</option>`
-          ).join('')}
+          ${getAllKnownSubjects()
+            .map(
+              (s) => `<option value="${esc(s)}" ${editingCard?.subject === s ? 'selected' : ''}>${esc(s)}</option>`
+            )
+            .join('')}
         </select>
         <input class="field-input" name="front" value="${esc(editingCard?.front || '')}" placeholder="Front Question / Prompt" required />
         <textarea class="field-input" name="back" rows="2" placeholder="Back Answer / Formula" required>${esc(
@@ -2838,9 +3070,11 @@ function buildBroadcastsAttendanceStage(user) {
           </div>
           <div class="form-grid-2">
             <select class="field-input" name="subject">
-              ${SUBJECT_LIST.map(
-                (s) => `<option value="${esc(s)}" ${editingAtt?.subject === s ? 'selected' : ''}>${esc(s)}</option>`
-              ).join('')}
+              ${getAllKnownSubjects()
+                .map(
+                  (s) => `<option value="${esc(s)}" ${editingAtt?.subject === s ? 'selected' : ''}>${esc(s)}</option>`
+                )
+                .join('')}
             </select>
             <input class="field-input" type="date" name="session_date" value="${esc(
               editingAtt?.session_date || '2026-11-25'
@@ -3406,7 +3640,7 @@ function renderApp(opts = {}) {
               ${ICONS.search}
             </button>
 
-            <button class="status-pill-btn" data-action-toggle-offline="1" title="Toggle offline mode">
+            <button class="status-pill-btn" data-action-sync="1" title="Tap to sync live with cloud">
               <span class="dot-indicator ${offline ? 'offline' : ''}"></span>
               <span>${offline ? (outboxCount ? `Offline (${outboxCount})` : 'Offline') : 'Synced'}</span>
             </button>
@@ -3550,6 +3784,8 @@ function renderApp(opts = {}) {
         ${ICONS.messages}<span>Chats</span>
       </button>
     </nav>
+
+    ${renderAddSubjectModalHTML(user)}
 
     <div id="live-toast-host">
       ${ui.toast ? `<div class="toast-banner" role="status">${esc(ui.toast)}</div>` : ''}
@@ -3743,10 +3979,139 @@ function bindWorkspaceEvents(user) {
   document.querySelectorAll('[data-action-sync]').forEach((syncBtn) => {
     syncBtn.addEventListener('click', async () => {
       ui.mobileDrawerOpen = false;
+      if (sessionState.simulateOffline && navigator.onLine !== false) {
+        sessionState.simulateOffline = false;
+        saveSession(sessionState);
+      }
       const res = await syncWithServer({ simulateOffline: sessionState.simulateOffline });
       if (res.vault) vaultState = res.vault;
       renderApp({ preserveScroll: true });
       showToast(res.status === 'synced' ? 'Synced with cloud database!' : 'Offline mode active — stored locally.');
+    });
+  });
+
+  // Directory inline search
+  const dirSearchInput = document.getElementById('directory-search-input');
+  if (dirSearchInput) {
+    dirSearchInput.addEventListener('input', (e) => {
+      ui.directorySearch = e.target.value;
+      const pos = e.target.selectionStart;
+      renderApp({ preserveScroll: true });
+      const next = document.getElementById('directory-search-input');
+      if (next) {
+        next.focus();
+        next.setSelectionRange(pos, pos);
+      }
+    });
+  }
+
+  // Subject Picker Chips (inside Create/Edit Account & My Account)
+  document.querySelectorAll('[data-toggle-subj-chip]').forEach((chipBtn) => {
+    chipBtn.addEventListener('click', () => {
+      const subj = chipBtn.getAttribute('data-toggle-subj-chip') || '';
+      const box = chipBtn.closest('[data-subj-picker-box]');
+      const inputEl = box?.querySelector('input[name="subjectsRaw"]');
+      if (!subj || !inputEl) return;
+      const list = String(inputEl.value || '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const idx = list.findIndex((s) => s.toLowerCase() === subj.toLowerCase());
+      if (idx >= 0) {
+        list.splice(idx, 1);
+        chipBtn.classList.remove('is-selected');
+      } else {
+        list.push(subj);
+        chipBtn.classList.add('is-selected');
+      }
+      inputEl.value = list.join(', ');
+    });
+  });
+
+  // Add Subject Modal controls
+  document.querySelectorAll('[data-open-add-subject]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      ui.showAddSubjectModal = true;
+      renderApp({ preserveScroll: true });
+      document.getElementById('new-subject-name-input')?.focus();
+    });
+  });
+
+  const closeAddSubjModal = () => {
+    ui.showAddSubjectModal = false;
+    renderApp({ preserveScroll: true });
+  };
+  document.getElementById('btn-close-add-subject')?.addEventListener('click', closeAddSubjModal);
+  document.getElementById('btn-cancel-add-subject')?.addEventListener('click', closeAddSubjModal);
+  document.getElementById('add-subject-modal-backdrop')?.addEventListener('click', (e) => {
+    if (e.target.id === 'add-subject-modal-backdrop') closeAddSubjModal();
+  });
+
+  document.querySelectorAll('[data-suggest-subj]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const s = btn.getAttribute('data-suggest-subj') || '';
+      const inp = document.getElementById('new-subject-name-input');
+      if (inp) {
+        inp.value = s;
+        inp.focus();
+      }
+    });
+  });
+
+  const createSubjModalForm = document.getElementById('create-subject-modal-form');
+  if (createSubjModalForm) {
+    createSubjModalForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = new FormData(createSubjModalForm);
+      const rawName = String(fd.get('subject_name') || '').trim();
+      if (!rawName) return;
+      const cleanName = rawName.replace(/\s+/g, ' ');
+      const existingMatch = getAllKnownSubjects().find((s) => s.toLowerCase() === cleanName.toLowerCase());
+      const finalSubj = existingMatch || cleanName;
+
+      const prevCustom = Array.isArray(vaultState.tuitionInfo?.custom_subjects)
+        ? vaultState.tuitionInfo.custom_subjects
+        : [];
+      const nextCustom = Array.from(new Set([...prevCustom, finalSubj]));
+
+      ui.showAddSubjectModal = false;
+      ui.studioSubject = finalSubj;
+
+      await performActionAndSync('UPDATE_TUITION_INFO', { custom_subjects: nextCustom });
+
+      // If teacher created it, add to their own subjects automatically
+      if (user.role === 'teacher') {
+        const nextMySubjs = Array.from(new Set([...(user.subjects || []), finalSubj]));
+        await performActionAndSync('UPSERT_ACCOUNT', { ...user, subjects: nextMySubjs });
+      } else {
+        const pickedTeacherId = String(fd.get('teacher_id') || '').trim();
+        if (pickedTeacherId) {
+          const tch = (vaultState.profiles || []).find((p) => p.id === pickedTeacherId);
+          if (tch) {
+            const nextTchSubjs = Array.from(new Set([...(tch.subjects || []), finalSubj]));
+            await performActionAndSync('UPSERT_ACCOUNT', { ...tch, subjects: nextTchSubjs });
+          }
+        }
+      }
+
+      showToast(`Subject "${finalSubj}" added!`);
+    });
+  }
+
+  document.querySelectorAll('[data-delete-custom-subj]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const targetSubj = btn.getAttribute('data-delete-custom-subj') || '';
+      if (!targetSubj) return;
+      const prevCustom = Array.isArray(vaultState.tuitionInfo?.custom_subjects)
+        ? vaultState.tuitionInfo.custom_subjects
+        : [];
+      const nextCustom = prevCustom.filter((s) => s !== targetSubj);
+      if (ui.studioSubject === targetSubj) ui.studioSubject = '';
+      await performActionAndSync(
+        'UPDATE_TUITION_INFO',
+        { custom_subjects: nextCustom },
+        `Removed "${targetSubj}" from custom subjects.`
+      );
     });
   });
 
@@ -5535,7 +5900,18 @@ document.addEventListener('DOMContentLoaded', () => {
   if (!rootEl) return;
 
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/sw.js').catch(() => {});
+    let swRefreshed = false;
+    const hadController = Boolean(navigator.serviceWorker.controller);
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (hadController && !swRefreshed) {
+        swRefreshed = true;
+        window.location.reload();
+      }
+    });
+    navigator.serviceWorker
+      .register('/sw.js?v=17', { updateViaCache: 'none' })
+      .then((reg) => reg.update().catch(() => {}))
+      .catch(() => {});
   }
 
   window.addEventListener('online', async () => {

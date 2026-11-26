@@ -91,6 +91,9 @@ test('i-tutor v5: accounts, admissions, homework & chat media uploads (PDF/Photo
       badge: 'Holiday Special',
       features: ['Past paper drills', 'Free extra lessons included']
     };
+    const origCustomSubjects = Array.isArray(snap1.tuitionInfo.custom_subjects)
+      ? snap1.tuitionInfo.custom_subjects
+      : [];
     const resFlyerUpdate = await fetch(`${baseUrl}/api/sync`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -100,7 +103,8 @@ test('i-tutor v5: accounts, admissions, homework & chat media uploads (PDF/Photo
             type: 'UPDATE_TUITION_INFO',
             payload: {
               flyers: [testFlyer, ...origFlyers],
-              plans: [...origPlans, testPlan]
+              plans: [...origPlans, testPlan],
+              custom_subjects: [...origCustomSubjects, 'Setswana', 'Biology']
             }
           }
         ]
@@ -110,8 +114,10 @@ test('i-tutor v5: accounts, admissions, homework & chat media uploads (PDF/Photo
     const snapAfterFlyer = await resFlyerUpdate.json();
     assert.ok(snapAfterFlyer.tuitionInfo.flyers.some((f) => f.id === 'flyer-test-admin'));
     assert.ok(snapAfterFlyer.tuitionInfo.plans.some((p) => p.id === 'plan-test-admin'));
+    assert.ok(snapAfterFlyer.tuitionInfo.custom_subjects.includes('Setswana'));
+    assert.ok(snapAfterFlyer.tuitionInfo.custom_subjects.includes('Biology'));
 
-    // Restore original flyers & plans cleanly
+    // Restore original flyers, plans & custom_subjects cleanly
     await fetch(`${baseUrl}/api/sync`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -119,7 +125,7 @@ test('i-tutor v5: accounts, admissions, homework & chat media uploads (PDF/Photo
         actions: [
           {
             type: 'UPDATE_TUITION_INFO',
-            payload: { flyers: origFlyers, plans: origPlans }
+            payload: { flyers: origFlyers, plans: origPlans, custom_subjects: origCustomSubjects }
           }
         ]
       })

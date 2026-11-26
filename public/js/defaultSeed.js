@@ -803,6 +803,7 @@ export function createDefaultSnapshot() {
       registration_fee: 'P100',
       promo_banner:
         'WE OFFER FREE EXTRA LESSONS! — Homework assistance included · Experienced & caring tutors · Personalized attention',
+      custom_subjects: [],
       plans: [
         {
           id: 'plan-breakthrough',
