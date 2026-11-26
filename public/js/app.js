@@ -356,7 +356,7 @@ function runAnimatedSplash(rootEl, onDone) {
    2. ACCOUNT PORTAL (SIGN IN / APPLY TO JOIN / NOT-JOINED VISITOR ACCESS)
    ========================================================================== */
 
-function renderAuthPortal(rootEl) {
+function renderAuthPortal(rootEl, { animateCard = true } = {}) {
   const plans = vaultState.tuitionInfo?.plans || [];
   const pendingTotal = getPendingAdmissionsCount();
   const quickAccounts = [
@@ -369,41 +369,42 @@ function renderAuthPortal(rootEl) {
 
   rootEl.innerHTML = `
     <div class="auth-portal-shell">
-      <div class="auth-portal-grid">
+      <div class="auth-portal-grid ${animateCard ? 'is-entering' : ''}">
         <section class="auth-brand-pane">
-          <div>
-            <div style="width:130px;margin-bottom:0.8rem;">
+          <div class="auth-brand-top">
+            <div class="auth-emblem-box">
               ${renderEmblemSVG({ animated: false, uid: 'auth', className: 'brand-emblem-svg' })}
             </div>
-            <h1 style="font-size:2rem;font-weight:850;letter-spacing:-0.03em;color:#F8F3EC;">
-              <span style="color:var(--gold);">i</span>-tutor Accounts
-            </h1>
-            <p style="color:var(--gold);font-weight:750;font-size:0.95rem;margin-top:0.2rem;">Confidence in learning</p>
-            <p style="color:var(--sidebar-muted);font-size:0.86rem;line-height:1.6;margin-top:0.9rem;">
-              Personal accounts for Students, Parents, Educators, and Admissions — with saved offline timetables, auto-downloaded remote assignments, study toolkits, and full in-app Admissions management.
-            </p>
+            <div>
+              <h1 class="auth-hero-title">
+                <span style="color:var(--gold);">i</span>-tutor Accounts
+              </h1>
+              <p class="auth-hero-sub">Confidence in learning</p>
+            </div>
           </div>
 
-          <div style="background:var(--sidebar-card);padding:1rem;border-radius:16px;display:flex;flex-direction:column;gap:0.65rem;">
-            <span style="font-size:0.72rem;font-weight:800;text-transform:uppercase;letter-spacing:0.06em;color:var(--gold);">
-              Haven't Joined Yet?
-            </span>
-            <p style="font-size:0.82rem;color:#EAE3D5;line-height:1.45;">
-              Browse transparent tuition packages, use the monthly fee calculator, view academy contact details, or try a free sample quiz before creating an account.
+          <p class="auth-hero-copy">
+            Personal accounts for Students, Parents, Educators, and Admissions — with saved offline timetables, remote assignments, study toolkits, and full in-app Admissions management.
+          </p>
+
+          <div class="auth-visitor-box">
+            <span class="auth-visitor-kicker">Haven't Joined Yet?</span>
+            <p class="auth-visitor-copy">
+              Browse transparent tuition packages, use the monthly fee calculator, view academy contacts, or try a sample quiz before creating an account.
             </p>
-            <button class="gold-cta-btn" id="btn-enter-visitor" style="justify-content:center;">
-              ${ICONS.tuition} View Tuition Prices & Contacts (No Login)
+            <button class="gold-cta-btn auth-visitor-btn" id="btn-enter-visitor">
+              ${ICONS.tuition} <span>View Tuition Prices & Contacts</span>
             </button>
           </div>
         </section>
 
         <section class="auth-form-pane">
-          <div class="subtab-bar">
+          <div class="auth-tabs-grid">
             <button class="subtab-btn ${ui.authTab === 'signin' ? 'is-active' : ''}" data-auth-tab="signin">
-              Sign In to Account
+              Sign In
             </button>
             <button class="subtab-btn ${ui.authTab === 'join' ? 'is-active' : ''}" data-auth-tab="join">
-              Apply to Join (New Account)
+              Apply to Join
             </button>
           </div>
 
@@ -423,16 +424,16 @@ function renderAuthPortal(rootEl) {
           ${
             ui.authTab === 'signin'
               ? `
-            <form class="form-stack" id="account-signin-form">
+            <form class="form-stack animated-drop" id="account-signin-form">
               <label style="font-size:0.79rem;font-weight:750;">Email, Phone Number, or Full Name</label>
-              <input class="field-input" name="identifier" placeholder="e.g. admissions@i-tutor.academy or thabo@student.i-tutor.academy" required />
+              <input class="field-input" name="identifier" placeholder="e.g. admissions@i-tutor.academy" required />
               <label style="font-size:0.79rem;font-weight:750;">Password / Account PIN</label>
-              <input class="field-input" type="password" name="pin" placeholder="Enter Password / PIN (Demo PIN: 1234)" required />
-              <button class="dark-cta-btn" type="submit" style="padding:0.75rem;">Sign In to Workspace →</button>
+              <input class="field-input" type="password" name="pin" placeholder="Enter PIN (Demo PIN: 1234)" required />
+              <button class="dark-cta-btn" type="submit" style="padding:0.72rem;width:100%;">Sign In to Workspace →</button>
             </form>
 
             <div style="border-top:1px solid var(--border-warm);padding-top:0.85rem;display:flex;flex-direction:column;gap:0.55rem;">
-              <span class="row-sub" style="font-weight:800;">INSTANT 1-TAP DEMO ACCOUNTS (FOR TESTING ROLES):</span>
+              <span class="row-sub" style="font-weight:800;">INSTANT 1-TAP DEMO ACCOUNTS:</span>
               <div class="demo-accounts-grid">
                 ${quickAccounts
                   .map(
@@ -448,7 +449,7 @@ function renderAuthPortal(rootEl) {
             </div>
           `
               : `
-            <form class="form-stack" id="account-join-form">
+            <form class="form-stack animated-drop" id="account-join-form">
               <p class="row-sub">Create your account application below. Admissions will review & accept your account in 1 click (works offline too!).</p>
               <div class="form-grid-2">
                 <input class="field-input" name="name" placeholder="Full Name" required />
@@ -474,13 +475,15 @@ function renderAuthPortal(rootEl) {
                 </select>
               </div>
               <input class="field-input" name="notes" placeholder="Goals or message for Admissions..." />
-              <button class="dark-cta-btn" type="submit" style="padding:0.75rem;">Submit Join Application →</button>
+              <button class="dark-cta-btn" type="submit" style="padding:0.72rem;width:100%;">Submit Join Application →</button>
             </form>
           `
           }
         </section>
       </div>
-      ${ui.toast ? `<div class="toast-banner" role="status">${esc(ui.toast)}</div>` : ''}
+      <div id="live-toast-host">
+        ${ui.toast ? `<div class="toast-banner" role="status">${esc(ui.toast)}</div>` : ''}
+      </div>
     </div>
   `;
 
@@ -488,7 +491,7 @@ function renderAuthPortal(rootEl) {
     btn.addEventListener('click', () => {
       ui.authTab = btn.getAttribute('data-auth-tab');
       ui.authError = '';
-      renderApp();
+      renderApp({ preserveScroll: true });
     });
   });
 
@@ -2332,8 +2335,9 @@ function renderApp(opts = {}) {
 
   const user = getActiveUser();
   if (!user) {
+    const animateCard = lastAnimatedKey !== 'auth';
     lastAnimatedKey = 'auth';
-    renderAuthPortal(rootEl);
+    renderAuthPortal(rootEl, { animateCard });
     return;
   }
 

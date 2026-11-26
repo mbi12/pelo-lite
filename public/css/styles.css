@@ -176,55 +176,58 @@ a {
   background: radial-gradient(circle, rgba(242, 183, 40, 0.36) 0%, rgba(242, 183, 40, 0) 72%);
   filter: blur(18px);
   opacity: 0;
-  transform: scale(0.72);
-  animation: auraReveal 2.4s ease 1.3s forwards, auraPulse 3.6s ease-in-out 3.7s infinite alternate;
+  animation: auraReveal 2.2s ease 1.2s forwards, auraPulse 3.6s ease-in-out 3.5s infinite alternate;
 }
 
 .itutor-emblem-svg {
   width: 100%;
   height: 100%;
   overflow: visible;
-  filter: drop-shadow(-8px 12px 14px rgba(30, 31, 29, 0.18));
+  display: block;
 }
 
 .brand-emblem-svg {
   width: 100%;
   height: auto;
   display: block;
-  animation: emblemGentleFloat 5.2s ease-in-out infinite;
-  will-change: transform;
+  transform: translateZ(0);
+  transition: transform 0.25s var(--ease-spring);
+}
+
+.brand-header-btn:hover .brand-emblem-svg {
+  transform: scale(1.04);
 }
 
 .svg-book-group {
   transform-origin: 200px 195px;
   opacity: 0;
-  transform: translateY(14px) scale(0.9);
-  animation: bookUnfold 1.25s var(--ease-spring) 0.15s forwards;
+  transform: translate3d(0, 14px, 0) scale(0.92);
+  animation: bookUnfold 1.2s var(--ease-spring) 0.15s forwards;
 }
 
 .svg-page-line {
   stroke-dasharray: 160;
   stroke-dashoffset: 160;
-  animation: drawPageLine 1.2s ease 0.65s forwards;
+  animation: drawPageLine 1.15s ease 0.65s forwards;
 }
 
 .svg-sun-rise {
   transform-origin: 200px 186px;
   opacity: 0;
-  transform: translateY(58px) scale(0.84);
-  animation: sunRiseUp 1.95s cubic-bezier(0.16, 1, 0.3, 1) 1.05s forwards;
+  transform: translate3d(0, 54px, 0) scale(0.86);
+  animation: sunRiseUp 1.85s cubic-bezier(0.16, 1, 0.3, 1) 1.05s forwards;
 }
 
 .svg-sun-ray {
   transform-origin: 200px 178px;
   opacity: 0;
   transform: scaleY(0.2);
-  animation: rayFanIn 0.85s ease var(--ray-delay, 2.2s) forwards;
+  animation: rayFanIn 0.8s ease var(--ray-delay, 2.2s) forwards;
 }
 
 .svg-sun-sheen {
   opacity: 0;
-  animation: sunSheenSweep 3.4s ease-in-out 3.2s infinite;
+  animation: sunSheenSweep 3.2s ease-in-out 3.1s 2 forwards;
 }
 
 .wordmark-row {
@@ -605,7 +608,7 @@ a {
 
 .mini-btn-row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.38rem;
 }
 
@@ -988,16 +991,19 @@ a {
   border: none;
   background: linear-gradient(135deg, var(--gold) 0%, var(--gold-bright) 100%);
   color: #1E1F1D;
-  padding: 0.52rem 0.92rem;
+  padding: 0.54rem 0.92rem;
   border-radius: 999px;
   font-size: 0.8rem;
   font-weight: 800;
   display: inline-flex;
   align-items: center;
-  gap: 0.34rem;
+  justify-content: center;
+  gap: 0.36rem;
   cursor: pointer;
   box-shadow: 0 4px 12px rgba(242, 183, 40, 0.28);
-  white-space: nowrap;
+  max-width: 100%;
+  text-align: center;
+  line-height: 1.28;
 }
 
 .dark-cta-btn {
@@ -1015,6 +1021,9 @@ a {
   gap: 0.38rem;
   cursor: pointer;
   box-shadow: 0 4px 12px rgba(30, 31, 29, 0.14);
+  max-width: 100%;
+  text-align: center;
+  line-height: 1.28;
 }
 
 [data-theme='night'] .dark-cta-btn {
@@ -1036,7 +1045,15 @@ a {
   justify-content: center;
   gap: 0.34rem;
   cursor: pointer;
+  max-width: 100%;
+  text-align: center;
+  line-height: 1.28;
+}
+
+.topbar-actions .gold-cta-btn,
+.topbar-actions .outline-btn {
   white-space: nowrap;
+}
 }
 
 .stage-body {
@@ -1106,7 +1123,11 @@ a {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  animation: megaphoneBob 2.8s ease-in-out infinite;
+  transition: transform 0.22s var(--ease-spring);
+}
+
+.broadcast-ribbon:hover .ribbon-icon {
+  transform: scale(1.08) rotate(-5deg);
 }
 
 .ribbon-tag {
@@ -1394,7 +1415,7 @@ a {
 
 .form-grid-2 {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.62rem;
 }
 
@@ -1814,7 +1835,7 @@ a {
   -webkit-backdrop-filter: blur(12px);
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   padding: 0.38rem 0.25rem calc(0.38rem + env(safe-area-inset-bottom));
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .mob-tab-btn {
@@ -1876,13 +1897,15 @@ a {
 }
 
 /* ==========================================================================
-   ACCOUNT PORTAL (SIGN IN / APPLY TO JOIN / VISITOR GATE)
+   ACCOUNT PORTAL (SIGN IN / APPLY TO JOIN / VISITOR GATE — ZERO MOBILE CLIP!)
    ========================================================================== */
 
 .auth-portal-shell {
   position: relative;
   z-index: 2;
   min-height: 100dvh;
+  width: 100%;
+  max-width: 100vw;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1893,13 +1916,16 @@ a {
   width: 100%;
   max-width: 1020px;
   display: grid;
-  grid-template-columns: 1.02fr 1.18fr;
+  grid-template-columns: minmax(0, 1.02fr) minmax(0, 1.18fr);
   background: var(--surface-ivory);
   border: 1px solid var(--border-warm);
   border-radius: 24px;
   overflow: hidden;
   box-shadow: var(--shadow-card);
-  animation: staggerRiseIn 0.5s var(--ease-spring);
+}
+
+.auth-portal-grid.is-entering {
+  animation: staggerRiseIn 0.48s var(--ease-spring);
 }
 
 .auth-brand-pane {
@@ -1909,7 +1935,76 @@ a {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  gap: 1.25rem;
+  gap: 1.15rem;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.auth-brand-top {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  min-width: 0;
+}
+
+.auth-emblem-box {
+  width: 126px;
+  flex-shrink: 0;
+}
+
+.auth-hero-title {
+  font-size: clamp(1.45rem, 4.8vw, 2rem);
+  font-weight: 850;
+  letter-spacing: -0.03em;
+  line-height: 1.12;
+  color: #F8F3EC;
+  overflow-wrap: anywhere;
+}
+
+.auth-hero-sub {
+  color: var(--gold);
+  font-weight: 750;
+  font-size: 0.92rem;
+  margin-top: 0.18rem;
+}
+
+.auth-hero-copy {
+  color: var(--sidebar-muted);
+  font-size: 0.85rem;
+  line-height: 1.58;
+  overflow-wrap: anywhere;
+}
+
+.auth-visitor-box {
+  background: var(--sidebar-card);
+  padding: 1rem;
+  border-radius: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.62rem;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.auth-visitor-kicker {
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--gold);
+}
+
+.auth-visitor-copy {
+  font-size: 0.81rem;
+  color: #EAE3D5;
+  line-height: 1.46;
+  overflow-wrap: anywhere;
+}
+
+.auth-visitor-btn {
+  width: 100%;
+  justify-content: center;
+  padding: 0.62rem 0.85rem;
 }
 
 .auth-form-pane {
@@ -1918,6 +2013,22 @@ a {
   flex-direction: column;
   gap: 0.9rem;
   min-width: 0;
+  max-width: 100%;
+}
+
+.auth-tabs-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem;
+  width: 100%;
+}
+
+.auth-tabs-grid .subtab-btn {
+  width: 100%;
+  justify-content: center;
+  text-align: center;
+  padding: 0.52rem 0.6rem;
+  white-space: normal;
 }
 
 .demo-accounts-grid {
@@ -2063,7 +2174,7 @@ a {
 
 @media (max-width: 920px) {
   .workspace-shell {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
   .sidebar-rail {
     display: none;
@@ -2126,11 +2237,37 @@ a {
   .messenger-split,
   .pricing-cards-grid,
   .auth-portal-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
-  .auth-brand-pane,
+  .auth-portal-shell {
+    padding: 0.65rem;
+    align-items: flex-start;
+  }
+  .auth-portal-grid {
+    border-radius: 20px;
+  }
+  .auth-brand-pane {
+    padding: 1.15rem 1.05rem;
+    gap: 0.85rem;
+  }
+  .auth-brand-top {
+    flex-direction: row;
+    align-items: center;
+    gap: 0.75rem;
+  }
+  .auth-emblem-box {
+    width: 72px;
+  }
+  .auth-hero-copy {
+    font-size: 0.8rem;
+    line-height: 1.48;
+  }
+  .auth-visitor-box {
+    padding: 0.85rem;
+    gap: 0.5rem;
+  }
   .auth-form-pane {
-    padding: 1.25rem;
+    padding: 1.1rem 1.05rem 1.25rem;
   }
   .toast-banner {
     left: 0.85rem;
@@ -2143,7 +2280,7 @@ a {
 @media (max-width: 520px) {
   .form-grid-2,
   .demo-accounts-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
   .list-row {
     padding: 0.75rem;
@@ -2168,53 +2305,48 @@ a {
 }
 
 /* ==========================================================================
-   KEYFRAMES SUITE
+   KEYFRAMES SUITE (ZERO SUBPIXEL LOGO SHAKE)
    ========================================================================== */
 
 @keyframes ambientFloatA {
-  0% { transform: translate3d(0, 0, 0) scale(1); }
-  100% { transform: translate3d(-45px, 40px, 0) scale(1.12); }
+  0% { transform: translate3d(0, 0, 0); opacity: 0.85; }
+  100% { transform: translate3d(-32px, 28px, 0); opacity: 1; }
 }
 
 @keyframes ambientFloatB {
-  0% { transform: translate3d(0, 0, 0) scale(1); }
-  100% { transform: translate3d(50px, -35px, 0) scale(1.1); }
-}
-
-@keyframes emblemGentleFloat {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-3px); }
+  0% { transform: translate3d(0, 0, 0); opacity: 0.85; }
+  100% { transform: translate3d(34px, -24px, 0); opacity: 1; }
 }
 
 @keyframes staggerRiseIn {
-  0% { opacity: 0; transform: translate3d(0, 14px, 0); }
+  0% { opacity: 0; transform: translate3d(0, 12px, 0); }
   100% { opacity: 1; transform: translate3d(0, 0, 0); }
 }
 
 @keyframes cardPopIn {
-  0% { opacity: 0; transform: translate3d(0, 12px, 0) scale(0.96); }
+  0% { opacity: 0; transform: translate3d(0, 10px, 0) scale(0.97); }
   100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
 }
 
 @keyframes panelDropIn {
-  0% { opacity: 0; transform: translateY(-8px) scale(0.985); }
-  100% { opacity: 1; transform: translateY(0) scale(1); }
+  0% { opacity: 0; transform: translate3d(0, -6px, 0); }
+  100% { opacity: 1; transform: translate3d(0, 0, 0); }
 }
 
 @keyframes bubblePopIn {
-  0% { opacity: 0; transform: translateY(8px) scale(0.96); }
-  100% { opacity: 1; transform: translateY(0) scale(1); }
+  0% { opacity: 0; transform: translate3d(0, 8px, 0) scale(0.97); }
+  100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
 }
 
 @keyframes navIconBounce {
   0% { transform: scale(1); }
-  45% { transform: scale(1.24) translateY(-2px); }
+  45% { transform: scale(1.2) translateY(-1px); }
   100% { transform: scale(1); }
 }
 
 @keyframes checkBounce {
-  0% { transform: scale(0.8); }
-  55% { transform: scale(1.12); }
+  0% { transform: scale(0.84); }
+  55% { transform: scale(1.1); }
   100% { transform: scale(1); }
 }
 
@@ -2225,7 +2357,7 @@ a {
 }
 
 @keyframes ctaSheenSweep {
-  0%, 72% { transform: translateX(-190%) skewX(-20deg); }
+  0%, 76% { transform: translateX(-190%) skewX(-20deg); }
   100% { transform: translateX(320%) skewX(-20deg); }
 }
 
@@ -2246,13 +2378,6 @@ a {
   to { box-shadow: 0 0 0 4px rgba(242, 183, 40, 0.24); }
 }
 
-@keyframes megaphoneBob {
-  0%, 100% { transform: rotate(0deg) scale(1); }
-  25% { transform: rotate(-7deg) scale(1.05); }
-  50% { transform: rotate(5deg) scale(1.03); }
-  75% { transform: rotate(-3deg) scale(1); }
-}
-
 @keyframes barGrowIn {
   from { transform: scaleX(0); }
   to { transform: scaleX(1); }
@@ -2264,18 +2389,18 @@ a {
 }
 
 @keyframes sunCorePulse {
-  from { transform: scale(0.95); opacity: 0.72; }
-  to { transform: scale(1.07); opacity: 1; }
+  from { opacity: 0.72; }
+  to { opacity: 1; }
 }
 
 @keyframes timerTickGlow {
-  from { opacity: 0.86; transform: scale(0.995); }
-  to { opacity: 1; transform: scale(1.015); }
+  from { opacity: 0.82; }
+  to { opacity: 1; }
 }
 
 @keyframes toastSpringIn {
-  0% { opacity: 0; transform: translateY(18px) scale(0.94); }
-  100% { opacity: 1; transform: translateY(0) scale(1); }
+  0% { opacity: 0; transform: translate3d(0, 16px, 0) scale(0.95); }
+  100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
 }
 
 @keyframes toastProgressShrink {
@@ -2284,47 +2409,47 @@ a {
 }
 
 @keyframes bookUnfold {
-  0% { opacity: 0; transform: translateY(16px) scale(0.88); }
-  100% { opacity: 1; transform: translateY(0) scale(1); }
+  0% { opacity: 0; transform: translate3d(0, 14px, 0) scale(0.92); }
+  100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
 }
 @keyframes drawPageLine { to { stroke-dashoffset: 0; } }
 @keyframes sunRiseUp {
-  0% { opacity: 0; transform: translateY(58px) scale(0.84); }
+  0% { opacity: 0; transform: translate3d(0, 54px, 0) scale(0.86); }
   35% { opacity: 1; }
-  100% { opacity: 1; transform: translateY(0) scale(1); }
+  100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
 }
 @keyframes rayFanIn {
-  0% { opacity: 0; transform: scaleY(0.18); }
+  0% { opacity: 0; transform: scaleY(0.2); }
   100% { opacity: 1; transform: scaleY(1); }
 }
 @keyframes sunSheenSweep {
   0% { opacity: 0; transform: translateX(-80px); }
-  35% { opacity: 0.35; }
+  35% { opacity: 0.34; }
   70%, 100% { opacity: 0; transform: translateX(85px); }
 }
-@keyframes auraReveal { to { opacity: 1; transform: scale(1); } }
+@keyframes auraReveal { to { opacity: 1; } }
 @keyframes auraPulse {
-  from { transform: scale(0.96); opacity: 0.75; }
-  to { transform: scale(1.06); opacity: 1; }
+  from { opacity: 0.68; }
+  to { opacity: 1; }
 }
 @keyframes charSculptIn {
-  0% { opacity: 0; transform: translateY(18px) scale(0.94); }
-  100% { opacity: 1; transform: translateY(0) scale(1); }
+  0% { opacity: 0; transform: translate3d(0, 16px, 0) scale(0.95); }
+  100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
 }
 @keyframes goldDotDrop {
-  0% { opacity: 0; transform: translate(-50%, -34px) scale(0.4); }
-  65% { opacity: 1; transform: translate(-50%, 2px) scale(1.06); }
+  0% { opacity: 0; transform: translate(-50%, -32px) scale(0.45); }
+  65% { opacity: 1; transform: translate(-50%, 2px) scale(1.05); }
   100% { opacity: 1; transform: translate(-50%, 0) scale(1); }
 }
 @keyframes sloganReveal {
-  0% { opacity: 0; transform: translateY(12px); }
-  100% { opacity: 1; transform: translateY(0); }
+  0% { opacity: 0; transform: translate3d(0, 10px, 0); }
+  100% { opacity: 1; transform: translate3d(0, 0, 0); }
 }
 @keyframes sloganShimmerPass {
   0% { transform: translateX(-120%); }
   100% { transform: translateX(120%); }
 }
-@keyframes loaderAppear { to { opacity: 1; transform: translateY(0); } }
+@keyframes loaderAppear { to { opacity: 1; transform: translate3d(0, 0, 0); } }
 @keyframes barShimmer {
   0% { transform: translateX(-100%); }
   100% { transform: translateX(180%); }
